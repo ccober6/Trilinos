@@ -30,7 +30,6 @@ namespace Tpetra {
   LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   LinearProblem ()
     : dist_object_type (Teuchos::rcp (new map_type ())),
-      Operator_(Teuchos::null),
       A_(Teuchos::null),
       X_(Teuchos::null),
       B_(Teuchos::null)
@@ -43,35 +42,16 @@ namespace Tpetra {
                  const Teuchos::RCP<multivector_type>& X,
                  const Teuchos::RCP<multivector_type>& B)
     : dist_object_type (A->getDomainMap()),
-      Operator_(Teuchos::null),
       A_(A),
       X_(X),
       B_(B)
   {
-    // Try to make matrix an operator
-    Operator_ = Teuchos::rcp_dynamic_cast<operator_type>(A_);
-  }
-
-  template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-  LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-  LinearProblem (const Teuchos::RCP<operator_type>   & A,
-                 const Teuchos::RCP<multivector_type>& X,
-                 const Teuchos::RCP<multivector_type>& B)
-    : dist_object_type (*X),
-      Operator_(A),
-      A_(Teuchos::null),
-      X_(X),
-      B_(B)
-  {
-    // Try to make operator a matrix
-    A_ = Teuchos::rcp_dynamic_cast<row_matrix_type>(Operator_);
   }
 
   template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
   LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   LinearProblem (const LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>& Problem)
     : dist_object_type (Problem),
-      Operator_(Problem.Operator_),
       A_(Problem.A_),
       X_(Problem.X_),
       B_(Problem.B_)
@@ -118,43 +98,27 @@ namespace Tpetra {
   }
 
   template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-  int LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-  checkInput(bool fail_on_error) const {
+  void LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
+  checkInput() const {
 
-    int error = 0;
-    if (fail_on_error) {
+    const char tfecfFuncName[] = "checkInput: ";
 
-      const char tfecfFuncName[] = "checkInput: ";
-
-      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(Operator_==Teuchos::null, 
-        std::logic_error, "Operator_ is unset.");
-
-      TPETRA_ABUSE_WARNING(A_==Teuchos::null, std::runtime_error, 
-        "Linear problem does not have a matrix (A_), just an operator.");
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(A_==Teuchos::null, std::runtime_error, 
+      "Linear problem does not have a matrix (A_).");
   
-      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(X_==Teuchos::null, 
-        std::logic_error, "Solution vector (X_) is unset.");
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(X_==Teuchos::null, 
+      std::logic_error, "Solution vector (X_) is unset.");
 
-      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(B_==Teuchos::null, 
-        std::logic_error, "RHS vector (B_) is unset.");
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(B_==Teuchos::null, 
+      std::logic_error, "RHS vector (B_) is unset.");
   
-      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(!A_->getRowMap()->isSameAs(*(X_->getMap())),
-        std::logic_error, "Domain map of matrix is not the 'same as' the solution map.");
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(!A_->getRowMap()->isSameAs(*(X_->getMap())),
+      std::logic_error, "Domain map of matrix is not the 'same as' the solution map.");
 
-      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(!A_->getRowMap()->isSameAs(*(B_->getMap())),
-        std::logic_error, "Range map of matrix is not the 'same as' the RHS map.");
-    }
-    else {
-      if (Operator_==Teuchos::null) error = -1;
-      if (A_==Teuchos::null) error = 1; // Return warning error because this problem has no matrix (just an operator)
-      if (X_==Teuchos::null) error = -2;
-      if (B_==Teuchos::null) error = -3;
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(!A_->getRowMap()->isSameAs(*(B_->getMap())),
+      std::logic_error, "Range map of matrix is not the 'same as' the RHS map.");
 
-      if (!A_->getRowMap()->isSameAs(*(X_->getMap()))) error = -4;
-      if (!A_->getRowMap()->isSameAs(*(B_->getMap()))) error = -5;
-    }
-
-    return error;
+    return;
   }
 
   template<class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
@@ -169,8 +133,8 @@ namespace Tpetra {
       return false;
     }
     else {
-      this->checkInput(false);
-      src->checkInput(false);
+      this->checkInput();
+      src->checkInput();
 
       return ((this->A_->getDomainMap() == src->getMatrix()->getDomainMap()) and
               (this->A_->getRangeMap() == src->getMatrix()->getRangeMap()));
