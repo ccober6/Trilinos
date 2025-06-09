@@ -84,21 +84,21 @@ namespace Impl {
       auto &cuspHandle = KokkosKernels::Impl::CusparseSingleton::singleton().cusparseHandle;                           \
       cusparsePointerMode_t oldPtrMode;                                                                                \
                                                                                                                        \
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseSetStream(cuspHandle, exec.cuda_stream()));                                    \
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseGetPointerMode(cuspHandle, &oldPtrMode));                                      \
-      KOKKOS_CUSPARSE_SAFE_CALL(                                                                                       \
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSetStream(cuspHandle, exec.cuda_stream()));                         \
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseGetPointerMode(cuspHandle, &oldPtrMode));                           \
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(                                                                            \
           cusparseSetPointerMode(cuspHandle, CUSPARSE_POINTER_MODE_HOST)); /* alpha, beta on host*/                    \
       OFFSET_TYPE nnzA = colidxA.extent(0);                                                                            \
       OFFSET_TYPE nnzB = colidxB.extent(0);                                                                            \
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparse##TOKEN##csrgeam2(                                                             \
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparse##TOKEN##csrgeam2(                                                  \
           cuspHandle, m, n, reinterpret_cast<const TPL_SCALAR_TYPE *>(&alpha), cuspData.descrA, nnzA,                  \
           reinterpret_cast<const TPL_SCALAR_TYPE *>(valuesA.data()), rowmapA.data(), colidxA.data(),                   \
           reinterpret_cast<const TPL_SCALAR_TYPE *>(&beta), cuspData.descrB, nnzB,                                     \
           reinterpret_cast<const TPL_SCALAR_TYPE *>(valuesB.data()), rowmapB.data(), colidxB.data(), cuspData.descrC,  \
           reinterpret_cast<TPL_SCALAR_TYPE *>(valuesC.data()), const_cast<OFFSET_TYPE *>(rowmapC.data()),              \
           colidxC.data(), cuspData.workspace));                                                                        \
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseSetPointerMode(cuspHandle, oldPtrMode));                                       \
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseSetStream(cuspHandle, NULL));                                                  \
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSetPointerMode(cuspHandle, oldPtrMode));                            \
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSetStream(cuspHandle, NULL));                                       \
                                                                                                                        \
       Kokkos::Profiling::popRegion();                                                                                  \
     }                                                                                                                  \
@@ -184,21 +184,21 @@ KOKKOSSPARSE_SPADD_NUMERIC_TPL_SPEC_DECL_CUSPARSE_EXT(false)
       auto &rocspHandle = KokkosKernels::Impl::RocsparseSingleton::singleton().rocsparseHandle;                        \
       rocsparse_pointer_mode oldPtrMode;                                                                               \
                                                                                                                        \
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_set_stream(rocspHandle, exec.hip_stream()));                           \
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_get_pointer_mode(rocspHandle, &oldPtrMode));                           \
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(                                                                                 \
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_set_stream(rocspHandle, exec.hip_stream()));                     \
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_get_pointer_mode(rocspHandle, &oldPtrMode));                     \
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(                                                                           \
           rocsparse_set_pointer_mode(rocspHandle, rocsparse_pointer_mode_host)); /* alpha, beta on host*/              \
       OFFSET_TYPE nnzA = colidxA.extent(0);                                                                            \
       OFFSET_TYPE nnzB = colidxB.extent(0);                                                                            \
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_##TOKEN##csrgeam(                                                      \
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_##TOKEN##csrgeam(                                                \
           rocspHandle, m, n, reinterpret_cast<const TPL_SCALAR_TYPE *>(&alpha), rocData.descrA, nnzA,                  \
           reinterpret_cast<const TPL_SCALAR_TYPE *>(valuesA.data()), rowmapA.data(), colidxA.data(),                   \
           reinterpret_cast<const TPL_SCALAR_TYPE *>(&beta), rocData.descrB, nnzB,                                      \
           reinterpret_cast<const TPL_SCALAR_TYPE *>(valuesB.data()), rowmapB.data(), colidxB.data(), rocData.descrC,   \
           reinterpret_cast<TPL_SCALAR_TYPE *>(valuesC.data()), const_cast<OFFSET_TYPE *>(rowmapC.data()),              \
           colidxC.data()));                                                                                            \
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_set_pointer_mode(rocspHandle, oldPtrMode));                            \
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_set_stream(rocspHandle, NULL));                                        \
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_set_pointer_mode(rocspHandle, oldPtrMode));                      \
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_set_stream(rocspHandle, NULL));                                  \
                                                                                                                        \
       Kokkos::Profiling::popRegion();                                                                                  \
     }                                                                                                                  \

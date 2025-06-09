@@ -75,6 +75,7 @@ class AggregateGenerator {
     aggFact->SetParameter("aggregation: max selected neighbors", Teuchos::ParameterEntry(0));
     aggFact->SetParameter("aggregation: ordering", Teuchos::ParameterEntry(std::string("natural")));
     aggFact->SetParameter("aggregation: allow user-specified singletons", Teuchos::ParameterEntry(true));
+    aggFact->SetParameter("aggregation: deterministic", Teuchos::ParameterEntry(true));
 
     aggFact->SetParameter("aggregation: enable phase 1", Teuchos::ParameterEntry(bPhase1));
     aggFact->SetParameter("aggregation: enable phase 2a", Teuchos::ParameterEntry(bPhase2a));
@@ -155,6 +156,7 @@ class AggregateGenerator {
     aggFact->SetParameter("aggregation: min agg size", Teuchos::ParameterEntry(3));
     aggFact->SetParameter("aggregation: max selected neighbors", Teuchos::ParameterEntry(0));
     aggFact->SetParameter("aggregation: ordering", Teuchos::ParameterEntry(std::string("natural")));
+    aggFact->SetParameter("aggregation: deterministic", Teuchos::ParameterEntry(true));
     aggFact->SetParameter("aggregation: enable phase 1", Teuchos::ParameterEntry(true));
     aggFact->SetParameter("aggregation: enable phase 2a", Teuchos::ParameterEntry(true));
     aggFact->SetParameter("aggregation: enable phase 2b", Teuchos::ParameterEntry(true));
@@ -810,20 +812,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Aggregates, GreedyDirichlet, Scalar, LocalOrdi
   //    RCP<Matrix> A = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(30);
   // Make a Matrix with multiple degrees of freedom per node
   GlobalOrdinal nx = 20, ny = 20;
-
-  // Describes the initial layout of matrix rows across processors.
-  Teuchos::ParameterList galeriList;
-  galeriList.set("nx", nx);
-  galeriList.set("ny", ny);
-  RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
-  RCP<const Map> map                 = Galeri::Xpetra::CreateMap<LocalOrdinal, GlobalOrdinal, Node>(TestHelpers::Parameters::getLib(), "Cartesian2D", comm, galeriList);
-
-  map = Xpetra::MapFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(map, 2);  // expand map for 2 DOFs per node
-
-  RCP<Galeri::Xpetra::Problem<Map, CrsMatrixWrap, MultiVector>> Pr =
-      Galeri::Xpetra::BuildProblem<Scalar, LocalOrdinal, GlobalOrdinal, Map, CrsMatrixWrap, MultiVector>("Elasticity2D", map, galeriList);
-  RCP<Matrix> A = Pr->BuildMatrix();
-  A->SetFixedBlockSize(2);
+  auto A = TestHelpers::TestFactory<SC, LO, GO, NO>::Build2DElasticity(nx, ny);
 
   Teuchos::ArrayView<const LocalOrdinal> indices;
   Teuchos::ArrayView<const Scalar> values;

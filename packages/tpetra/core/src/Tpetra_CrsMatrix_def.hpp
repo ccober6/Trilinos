@@ -47,7 +47,6 @@
 #include "KokkosBlas1_scal.hpp"
 #include "KokkosSparse_getDiagCopy.hpp"
 #include "KokkosSparse_spmv.hpp"
-#include "Kokkos_StdAlgorithms.hpp"
 
 #include <memory>
 #include <sstream>
@@ -60,7 +59,7 @@ namespace Tpetra {
 namespace { // (anonymous)
 
   template<class T, class BinaryFunction>
-  T atomic_binary_function_update (volatile T* const dest,
+  T atomic_binary_function_update (T* const dest,
                                    const T& inputVal,
                                    BinaryFunction f)
   {
@@ -2773,7 +2772,7 @@ namespace Tpetra {
             //const ST newVal = f (rowVals[offset], newVals[j]);
             //Kokkos::atomic_assign (&rowVals[offset], newVal);
 
-            volatile ST* const dest = &rowVals[offset];
+            ST* const dest = &rowVals[offset];
             (void) atomic_binary_function_update (dest, newVals[j], f);
           }
           else {
@@ -2817,7 +2816,7 @@ namespace Tpetra {
               //const ST newVal = f (rowVals[offset], newVals[j]);
               //Kokkos::atomic_assign (&rowVals[offset], newVal);
 
-              volatile ST* const dest = &rowVals[offset];
+              ST* const dest = &rowVals[offset];
               (void) atomic_binary_function_update (dest, newVals[j], f);
             }
             else {
@@ -2882,7 +2881,7 @@ namespace Tpetra {
             //const ST newVal = f (rowVals[offset], newVals[j]);
             //Kokkos::atomic_assign (&rowVals[offset], newVal);
 
-            volatile ST* const dest = &rowVals[offset];
+            ST* const dest = &rowVals[offset];
             (void) atomic_binary_function_update (dest, newVals[j], f);
           }
           else {
@@ -2925,7 +2924,7 @@ namespace Tpetra {
               //const ST newVal = f (rowVals[offset], newVals[j]);
               //Kokkos::atomic_assign (&rowVals[offset], newVal);
 
-              volatile ST* const dest = &rowVals[offset];
+              ST* const dest = &rowVals[offset];
               (void) atomic_binary_function_update (dest, newVals[j], f);
             }
             else {
@@ -3603,23 +3602,17 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
       "diag.getMap ()->isCompatible (A.getRowMap ());");
 #endif // HAVE_TPETRA_DEBUG
 
-    if (this->isFillComplete ()) {
-      const auto D_lcl = diag.getLocalViewDevice(Access::OverwriteAll);
-      // 1-D subview of the first (and only) column of D_lcl.
-      const auto D_lcl_1d =
-        Kokkos::subview (D_lcl, Kokkos::make_pair (LO (0), myNumRows), 0);
+    const auto D_lcl = diag.getLocalViewDevice(Access::OverwriteAll);
+    // 1-D subview of the first (and only) column of D_lcl.
+    const auto D_lcl_1d =
+      Kokkos::subview (D_lcl, Kokkos::make_pair (LO (0), myNumRows), 0);
 
-      const auto lclRowMap = rowMap.getLocalMap ();
-      const auto lclColMap = colMap.getLocalMap ();
-      using ::Tpetra::Details::getDiagCopyWithoutOffsets;
-      (void) getDiagCopyWithoutOffsets (D_lcl_1d, lclRowMap,
-                                        lclColMap,
-                                        getLocalMatrixDevice ());
-    }
-    else {
-      using ::Tpetra::Details::getLocalDiagCopyWithoutOffsetsNotFillComplete;
-      (void) getLocalDiagCopyWithoutOffsetsNotFillComplete (diag, *this);
-    }
+    const auto lclRowMap = rowMap.getLocalMap ();
+    const auto lclColMap = colMap.getLocalMap ();
+    using ::Tpetra::Details::getDiagCopyWithoutOffsets;
+    (void) getDiagCopyWithoutOffsets (D_lcl_1d, lclRowMap,
+				      lclColMap,
+				      getLocalMatrixDevice ());
   }
 
   template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
@@ -6270,7 +6263,7 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
       // Allocate 'exports', and copy exports_a back into it.
       const size_t newAllocSize = static_cast<size_t> (exports_a.size ());
       if (static_cast<size_t> (exports.extent (0)) < newAllocSize) {
-        const std::string oldLabel = exports.d_view.label ();
+        const std::string oldLabel = exports.view_device().label ();
         const std::string newLabel = (oldLabel == "") ? "exports" : oldLabel;
         exports = exports_type (newLabel, newAllocSize);
       }
@@ -6573,7 +6566,7 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     if (static_cast<size_t> (exports.extent (0)) < allocSize) {
       using exports_type = Kokkos::DualView<char*, buffer_device_type>;
 
-      const std::string oldLabel = exports.d_view.label ();
+      const std::string oldLabel = exports.view_device().label ();
       const std::string newLabel = (oldLabel == "") ? "exports" : oldLabel;
       exports = exports_type (newLabel, allocSize);
     }
@@ -8302,16 +8295,24 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
                << std::endl;
             std::cerr << os.str ();
           }
-          destMat->numExportPacketsPerLID_.sync_device();
-          auto numExportPacketsPerLID = destMat->numExportPacketsPerLID_.view_device();
-          auto numImportPacketsPerLID = destMat->numImportPacketsPerLID_.view_device();
+          // Make sure that host has the latest version, since we're
+          // using the version on host.  If host has the latest
+          // version, syncing to host does nothing.
+          destMat->numExportPacketsPerLID_.sync_host ();
+          Teuchos::ArrayView<const size_t> numExportPacketsPerLID =
+            getArrayViewFromDualView (destMat->numExportPacketsPerLID_);
+          destMat->numImportPacketsPerLID_.sync_host ();
+          Teuchos::ArrayView<size_t> numImportPacketsPerLID =
+            getArrayViewFromDualView (destMat->numImportPacketsPerLID_);
+
           if (verbose) {
             std::ostringstream os;
             os << *verbosePrefix << "Calling 3-arg doReversePostsAndWaits"
                << std::endl;
             std::cerr << os.str ();
           }
-          Distor.doReversePostsAndWaits(numExportPacketsPerLID, 1, numImportPacketsPerLID);
+          Distor.doReversePostsAndWaits(destMat->numExportPacketsPerLID_.view_host(), 1,
+                                            destMat->numImportPacketsPerLID_.view_host());
           if (verbose) {
             std::ostringstream os;
             os << *verbosePrefix << "Finished 3-arg doReversePostsAndWaits"
@@ -8319,26 +8320,34 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
             std::cerr << os.str ();
           }
 
-          size_t totalImportPackets = Kokkos::Experimental::reduce(typename Node::execution_space(), numImportPacketsPerLID);
+          size_t totalImportPackets = 0;
+          for (Array_size_type i = 0; i < numImportPacketsPerLID.size (); ++i) {
+            totalImportPackets += numImportPacketsPerLID[i];
+          }
 
           // Reallocation MUST go before setting the modified flag,
           // because it may clear out the flags.
           destMat->reallocImportsIfNeeded (totalImportPackets, verbose,
                                            verbosePrefix.get ());
           destMat->imports_.modify_host ();
-          auto deviceImports = destMat->imports_.view_device();
-          auto deviceExports = destMat->exports_.view_device();
+          auto hostImports = destMat->imports_.view_host();
+          // This is a legacy host pack/unpack path, so use the host
+          // version of exports_.
+          destMat->exports_.sync_host ();
+          auto hostExports = destMat->exports_.view_host();
           if (verbose) {
             std::ostringstream os;
-            os << *verbosePrefix << "Calling 4-arg doReversePostsAndWaitsKokkos"
+            os << *verbosePrefix << "Calling 4-arg doReversePostsAndWaits"
                << std::endl;
             std::cerr << os.str ();
           }
-          destMat->imports_.sync_device();
-          Distor.doReversePostsAndWaitsKokkos (deviceExports, numExportPacketsPerLID, deviceImports, numImportPacketsPerLID);
+          Distor.doReversePostsAndWaits (hostExports,
+                                         numExportPacketsPerLID,
+                                         hostImports,
+                                         numImportPacketsPerLID);
           if (verbose) {
             std::ostringstream os;
-            os << *verbosePrefix << "Finished 4-arg doReversePostsAndWaitsKokkos"
+            os << *verbosePrefix << "Finished 4-arg doReversePostsAndWaits"
                << std::endl;
             std::cerr << os.str ();
           }
@@ -8381,16 +8390,23 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
                << std::endl;
             std::cerr << os.str ();
           }
-          destMat->numExportPacketsPerLID_.sync_device ();
-          auto numExportPacketsPerLID = destMat->numExportPacketsPerLID_.view_device();
-          auto numImportPacketsPerLID = destMat->numImportPacketsPerLID_.view_device();
+          // Make sure that host has the latest version, since we're
+          // using the version on host.  If host has the latest
+          // version, syncing to host does nothing.
+          destMat->numExportPacketsPerLID_.sync_host ();
+          Teuchos::ArrayView<const size_t> numExportPacketsPerLID =
+            getArrayViewFromDualView (destMat->numExportPacketsPerLID_);
+          destMat->numImportPacketsPerLID_.sync_host ();
+          Teuchos::ArrayView<size_t> numImportPacketsPerLID =
+            getArrayViewFromDualView (destMat->numImportPacketsPerLID_);
           if (verbose) {
             std::ostringstream os;
             os << *verbosePrefix << "Calling 3-arg doPostsAndWaits"
                << std::endl;
             std::cerr << os.str ();
           }
-          Distor.doPostsAndWaits(numExportPacketsPerLID, 1, numImportPacketsPerLID);
+          Distor.doPostsAndWaits(destMat->numExportPacketsPerLID_.view_host(), 1,
+                                      destMat->numImportPacketsPerLID_.view_host());
           if (verbose) {
             std::ostringstream os;
             os << *verbosePrefix << "Finished 3-arg doPostsAndWaits"
@@ -8398,26 +8414,34 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
             std::cerr << os.str ();
           }
 
-          size_t totalImportPackets = Kokkos::Experimental::reduce(typename Node::execution_space(), numImportPacketsPerLID);
+          size_t totalImportPackets = 0;
+          for (Array_size_type i = 0; i < numImportPacketsPerLID.size (); ++i) {
+            totalImportPackets += numImportPacketsPerLID[i];
+          }
 
           // Reallocation MUST go before setting the modified flag,
           // because it may clear out the flags.
           destMat->reallocImportsIfNeeded (totalImportPackets, verbose,
                                            verbosePrefix.get ());
           destMat->imports_.modify_host ();
-          auto deviceImports = destMat->imports_.view_device();
-          auto deviceExports = destMat->exports_.view_device();
+          auto hostImports = destMat->imports_.view_host();
+          // This is a legacy host pack/unpack path, so use the host
+          // version of exports_.
+          destMat->exports_.sync_host ();
+          auto hostExports = destMat->exports_.view_host();
           if (verbose) {
             std::ostringstream os;
-            os << *verbosePrefix << "Calling 4-arg doPostsAndWaitsKokkos"
+            os << *verbosePrefix << "Calling 4-arg doPostsAndWaits"
                << std::endl;
             std::cerr << os.str ();
           }
-          destMat->imports_.sync_device ();
-          Distor.doPostsAndWaitsKokkos (deviceExports, numExportPacketsPerLID, deviceImports, numImportPacketsPerLID);
+          Distor.doPostsAndWaits (hostExports,
+                                  numExportPacketsPerLID,
+                                  hostImports,
+                                  numImportPacketsPerLID);
           if (verbose) {
             std::ostringstream os;
-            os << *verbosePrefix << "Finished 4-arg doPostsAndWaitsKokkos"
+            os << *verbosePrefix << "Finished 4-arg doPostsAndWaits"
                << std::endl;
             std::cerr << os.str ();
           }
@@ -8464,6 +8488,12 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     Teuchos::Array<int> RemotePids;
     if (runOnHost) {
       Teuchos::Array<int> TargetPids;
+      // Backwards compatibility measure.  We'll use this again below.
+  
+      // TODO JHU Need to track down why numImportPacketsPerLID_ has not been corrently marked as modified on host (which it has been)
+      // TODO JHU somewhere above, e.g., call to Distor.doPostsAndWaits().
+      // TODO JHU This only becomes apparent as we begin to convert TAFC to run on device.
+      destMat->numImportPacketsPerLID_.modify_host(); //FIXME
   
 #  ifdef HAVE_TPETRA_MMM_TIMINGS
       RCP<TimeMonitor> tmCopySPRdata = rcp(new TimeMonitor(*TimeMonitor::getNewTimer(prefix + std::string("TAFC unpack-count-resize + copy same-perm-remote data"))));
@@ -8483,7 +8513,7 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
       auto PermuteFromLIDs_d = PermuteFromLIDs.view_device();
 
       Details::unpackAndCombineIntoCrsArrays(
-                                     *this, 
+                                     *this,
                                      RemoteLIDs_d,
                                      destMat->imports_.view_device(),                //hostImports
                                      destMat->numImportPacketsPerLID_.view_device(), //numImportPacketsPerLID
@@ -8655,6 +8685,14 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     } else {
       // run on device
   
+  
+      // Backwards compatibility measure.  We'll use this again below.
+  
+      // TODO JHU Need to track down why numImportPacketsPerLID_ has not been corrently marked as modified on host (which it has been)
+      // TODO JHU somewhere above, e.g., call to Distor.doPostsAndWaits().
+      // TODO JHU This only becomes apparent as we begin to convert TAFC to run on device.
+      destMat->numImportPacketsPerLID_.modify_host(); //FIXME
+  
 #  ifdef HAVE_TPETRA_MMM_TIMINGS
       RCP<TimeMonitor> tmCopySPRdata = rcp(new TimeMonitor(*TimeMonitor::getNewTimer(prefix + std::string("TAFC unpack-count-resize + copy same-perm-remote data"))));
 #  endif
@@ -8679,7 +8717,7 @@ CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
       Kokkos::View<int*,device_type>    TargetPids_d;
   
       Details::unpackAndCombineIntoCrsArrays(
-                                     *this, 
+                                     *this,
                                      RemoteLIDs_d,
                                      destMat->imports_.view_device(),                //hostImports
                                      destMat->numImportPacketsPerLID_.view_device(), //numImportPacketsPerLID

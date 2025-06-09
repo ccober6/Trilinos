@@ -36,7 +36,7 @@
 
 #include <stk_util/stk_config.h>
 #include <stk_util/util/PairIter.hpp>
-#include <Kokkos_Core.hpp>
+#include "Kokkos_Macros.hpp"
 
 namespace stk
 {
@@ -61,7 +61,7 @@ public:
   KOKKOS_INLINE_FUNCTION
   StridedArray(T* e,
                unsigned n,
-               int stride_in=defaultStride)
+               [[maybe_unused]] int stride_in=defaultStride)
   : dataPointer(e),
     length(n)
 #ifdef STK_ENABLE_GPU

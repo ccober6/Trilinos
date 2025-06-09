@@ -71,9 +71,12 @@ getValues(       OutputViewType output,
     Impl::Basis_HGRAD_TET_Cn_FEM_ORTH::
     Serial<OpType>::getValues(phis, input, workView, order);
 
-    for (ordinal_type i=0;i<card;++i)
-      for (ordinal_type j=0;j<npts;++j)
-        for (ordinal_type k=0;k<spaceDim;++k) {
+    // loop order interchanged to workaround nvcc compiler issues with sems-cuda/11.4.2
+    // nvcc error   : 'ptxas' died due to signal 11 (Invalid memory reference)
+    for (ordinal_type j=0;j<npts;++j)
+      for (ordinal_type k=0;k<spaceDim;++k)
+        for (ordinal_type i=0;i<card;++i)
+        {
           output.access(i,j,k) = 0.0;
           for (ordinal_type l=0;l<card;++l)
             output.access(i,j,k) += vinv(l,i)*phis.access(l,j,k);
@@ -455,19 +458,19 @@ Basis_HGRAD_TET_Cn_FEM( const ordinal_type order,
       using range_type = Kokkos::pair<ordinal_type,ordinal_type>;
       switch(operatorType) {
         case OPERATOR_VALUE:
-          Kokkos::parallel_for (Kokkos::TeamThreadRange (team_member, numPoints), [=] (ordinal_type& pt) {
+          Kokkos::parallel_for (Kokkos::TeamThreadRange (team_member, numPoints), [=, &vinv_ = this->vinv_, basisDegree_ = this->basisDegree_] (ordinal_type& pt) {
             auto       output = Kokkos::subview( outputValues, Kokkos::ALL(), range_type  (pt,pt+1), Kokkos::ALL() );
             const auto input  = Kokkos::subview( inputPoints,                 range_type(pt, pt+1), Kokkos::ALL() );
             WorkViewType  work(workView.data() + sizePerPoint*team_member.team_rank(), sizePerPoint);
-            Impl::Basis_HGRAD_TET_Cn_FEM::Serial<OPERATOR_VALUE>::getValues( output, input, work, this->vinv_, this->basisDegree_);
+            Impl::Basis_HGRAD_TET_Cn_FEM::Serial<OPERATOR_VALUE>::getValues( output, input, work, vinv_, basisDegree_);
           });
           break;
         case OPERATOR_GRAD:
-          Kokkos::parallel_for (Kokkos::TeamThreadRange (team_member, numPoints), [=] (ordinal_type& pt) {
+          Kokkos::parallel_for (Kokkos::TeamThreadRange (team_member, numPoints), [=, &vinv_ = this->vinv_, basisDegree_ = this->basisDegree_] (ordinal_type& pt) {
             auto       output = Kokkos::subview( outputValues, Kokkos::ALL(), range_type(pt,pt+1), Kokkos::ALL() );
             const auto input  = Kokkos::subview( inputPoints,                 range_type(pt,pt+1), Kokkos::ALL() );
             WorkViewType  work(workView.data() + sizePerPoint*team_member.team_rank(), sizePerPoint);
-            Impl::Basis_HGRAD_TET_Cn_FEM::Serial<OPERATOR_GRAD>::getValues( output, input, work, this->vinv_, this->basisDegree_);
+            Impl::Basis_HGRAD_TET_Cn_FEM::Serial<OPERATOR_GRAD>::getValues( output, input, work, vinv_, basisDegree_);
           });
           break;
         default: {          

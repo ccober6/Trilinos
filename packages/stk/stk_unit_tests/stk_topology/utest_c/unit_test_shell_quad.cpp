@@ -71,7 +71,7 @@ std::vector<std::vector<uint8_t>> get_gold_side_node_ordinals_shell_quad4() {
   };
 }
 
-TEST(stk_topology, shell_shell_quad4)
+TEST(stk_topology, shell_quad_4)
 {
   stk::topology t = stk::topology::SHELL_QUAD_4;
 
@@ -104,10 +104,10 @@ TEST(stk_topology, shell_shell_quad4)
 
   EXPECT_EQ(t.side_topology(0), stk::topology::QUAD_4);
   EXPECT_EQ(t.side_topology(1), stk::topology::QUAD_4);
-  EXPECT_EQ(t.side_topology(2), stk::topology::SHELL_SIDE_BEAM_2);
-  EXPECT_EQ(t.side_topology(3), stk::topology::SHELL_SIDE_BEAM_2);
-  EXPECT_EQ(t.side_topology(4), stk::topology::SHELL_SIDE_BEAM_2);
-  EXPECT_EQ(t.side_topology(5), stk::topology::SHELL_SIDE_BEAM_2);
+  EXPECT_EQ(t.side_topology(2), stk::topology::LINE_2);
+  EXPECT_EQ(t.side_topology(3), stk::topology::LINE_2);
+  EXPECT_EQ(t.side_topology(4), stk::topology::LINE_2);
+  EXPECT_EQ(t.side_topology(5), stk::topology::LINE_2);
 
   check_edge_node_ordinals(t, get_gold_edge_node_ordinals_shell_quad4());
   check_edge_nodes(t, get_gold_edge_node_ordinals_shell_quad4());
@@ -129,7 +129,7 @@ void check_shell_quad_4_on_device()
   constexpr unsigned numNodes = stk::topology_detail::topology_data<stk::topology::SHELL_QUAD_4>::num_nodes;
   EXPECT_EQ(4u, numNodes);
 
-  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int i)
+  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int /*i*/)
   {
     NGP_EXPECT_TRUE(t.is_valid());
     NGP_EXPECT_TRUE(t.has_homogeneous_faces());
@@ -159,16 +159,16 @@ void check_shell_quad_4_on_device()
   
     NGP_EXPECT_EQ(t.side_topology(0), stk::topology::QUAD_4);
     NGP_EXPECT_EQ(t.side_topology(1), stk::topology::QUAD_4);
-    NGP_EXPECT_EQ(t.side_topology(2), stk::topology::SHELL_SIDE_BEAM_2);
-    NGP_EXPECT_EQ(t.side_topology(3), stk::topology::SHELL_SIDE_BEAM_2);
-    NGP_EXPECT_EQ(t.side_topology(4), stk::topology::SHELL_SIDE_BEAM_2);
-    NGP_EXPECT_EQ(t.side_topology(5), stk::topology::SHELL_SIDE_BEAM_2);
+    NGP_EXPECT_EQ(t.side_topology(2), stk::topology::LINE_2);
+    NGP_EXPECT_EQ(t.side_topology(3), stk::topology::LINE_2);
+    NGP_EXPECT_EQ(t.side_topology(4), stk::topology::LINE_2);
+    NGP_EXPECT_EQ(t.side_topology(5), stk::topology::LINE_2);
 
     check_edge_node_ordinals_ngp<numNodes>(t, goldEdgeNodeOrdinals);
     check_edge_nodes_ngp<numNodes>(t, goldEdgeNodeOrdinals);
   });
 
-  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int i)
+  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int /*i*/)
   {
     check_face_node_ordinals_ngp<numNodes>(t, goldFaceNodeOrdinals);
     check_face_nodes_ngp<numNodes>(t, goldFaceNodeOrdinals);
@@ -210,7 +210,7 @@ std::vector<std::vector<uint8_t>> get_gold_side_node_ordinals_shell_quad8() {
   };
 }
 
-TEST(stk_topology, shell_shell_quad8)
+TEST(stk_topology, shell_quad_8)
 {
   stk::topology t = stk::topology::SHELL_QUAD_8;
 
@@ -243,10 +243,10 @@ TEST(stk_topology, shell_shell_quad8)
 
   EXPECT_EQ(t.side_topology(0), stk::topology::QUAD_8);
   EXPECT_EQ(t.side_topology(1), stk::topology::QUAD_8);
-  EXPECT_EQ(t.side_topology(2), stk::topology::SHELL_SIDE_BEAM_3);
-  EXPECT_EQ(t.side_topology(3), stk::topology::SHELL_SIDE_BEAM_3);
-  EXPECT_EQ(t.side_topology(4), stk::topology::SHELL_SIDE_BEAM_3);
-  EXPECT_EQ(t.side_topology(5), stk::topology::SHELL_SIDE_BEAM_3);
+  EXPECT_EQ(t.side_topology(2), stk::topology::LINE_3);
+  EXPECT_EQ(t.side_topology(3), stk::topology::LINE_3);
+  EXPECT_EQ(t.side_topology(4), stk::topology::LINE_3);
+  EXPECT_EQ(t.side_topology(5), stk::topology::LINE_3);
 
   check_edge_node_ordinals(t, get_gold_edge_node_ordinals_shell_quad8());
   check_edge_nodes(t, get_gold_edge_node_ordinals_shell_quad8());
@@ -268,7 +268,7 @@ void check_shell_quad_8_on_device()
   constexpr unsigned numNodes = stk::topology_detail::topology_data<stk::topology::SHELL_QUAD_8>::num_nodes;
   EXPECT_EQ(8u, numNodes);
 
-  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int i)
+  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int /*i*/)
   {
     NGP_EXPECT_TRUE(t.is_valid());
     NGP_EXPECT_TRUE(t.has_homogeneous_faces());
@@ -298,16 +298,16 @@ void check_shell_quad_8_on_device()
   
     NGP_EXPECT_EQ(t.side_topology(0), stk::topology::QUAD_8);
     NGP_EXPECT_EQ(t.side_topology(1), stk::topology::QUAD_8);
-    NGP_EXPECT_EQ(t.side_topology(2), stk::topology::SHELL_SIDE_BEAM_3);
-    NGP_EXPECT_EQ(t.side_topology(3), stk::topology::SHELL_SIDE_BEAM_3);
-    NGP_EXPECT_EQ(t.side_topology(4), stk::topology::SHELL_SIDE_BEAM_3);
-    NGP_EXPECT_EQ(t.side_topology(5), stk::topology::SHELL_SIDE_BEAM_3);
+    NGP_EXPECT_EQ(t.side_topology(2), stk::topology::LINE_3);
+    NGP_EXPECT_EQ(t.side_topology(3), stk::topology::LINE_3);
+    NGP_EXPECT_EQ(t.side_topology(4), stk::topology::LINE_3);
+    NGP_EXPECT_EQ(t.side_topology(5), stk::topology::LINE_3);
 
     check_edge_node_ordinals_ngp<numNodes>(t, goldEdgeNodeOrdinals);
     check_edge_nodes_ngp<numNodes>(t, goldEdgeNodeOrdinals);
   });
 
-  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int i)
+  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int /*i*/)
   {
     check_face_node_ordinals_ngp<numNodes>(t, goldFaceNodeOrdinals);
     check_face_nodes_ngp<numNodes>(t, goldFaceNodeOrdinals);
@@ -349,7 +349,7 @@ std::vector<std::vector<uint8_t>> get_gold_side_node_ordinals_shell_quad9() {
   };
 }
 
-TEST(stk_topology, shell_shell_quad9)
+TEST(stk_topology, shell_quad_9)
 {
   stk::topology t = stk::topology::SHELL_QUAD_9;
 
@@ -382,10 +382,10 @@ TEST(stk_topology, shell_shell_quad9)
 
   EXPECT_EQ(t.side_topology(0), stk::topology::QUAD_9);
   EXPECT_EQ(t.side_topology(1), stk::topology::QUAD_9);
-  EXPECT_EQ(t.side_topology(2), stk::topology::SHELL_SIDE_BEAM_3);
-  EXPECT_EQ(t.side_topology(3), stk::topology::SHELL_SIDE_BEAM_3);
-  EXPECT_EQ(t.side_topology(4), stk::topology::SHELL_SIDE_BEAM_3);
-  EXPECT_EQ(t.side_topology(5), stk::topology::SHELL_SIDE_BEAM_3);
+  EXPECT_EQ(t.side_topology(2), stk::topology::LINE_3);
+  EXPECT_EQ(t.side_topology(3), stk::topology::LINE_3);
+  EXPECT_EQ(t.side_topology(4), stk::topology::LINE_3);
+  EXPECT_EQ(t.side_topology(5), stk::topology::LINE_3);
 
   check_edge_node_ordinals(t, get_gold_edge_node_ordinals_shell_quad9());
   check_edge_nodes(t, get_gold_edge_node_ordinals_shell_quad9());
@@ -407,7 +407,7 @@ void check_shell_quad_9_on_device()
   constexpr unsigned numNodes = stk::topology_detail::topology_data<stk::topology::SHELL_QUAD_9>::num_nodes;
   EXPECT_EQ(9u, numNodes);
 
-  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int i)
+  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int /*i*/)
   {
     NGP_EXPECT_TRUE(t.is_valid());
     NGP_EXPECT_TRUE(t.has_homogeneous_faces());
@@ -437,16 +437,16 @@ void check_shell_quad_9_on_device()
   
     NGP_EXPECT_EQ(t.side_topology(0), stk::topology::QUAD_9);
     NGP_EXPECT_EQ(t.side_topology(1), stk::topology::QUAD_9);
-    NGP_EXPECT_EQ(t.side_topology(2), stk::topology::SHELL_SIDE_BEAM_3);
-    NGP_EXPECT_EQ(t.side_topology(3), stk::topology::SHELL_SIDE_BEAM_3);
-    NGP_EXPECT_EQ(t.side_topology(4), stk::topology::SHELL_SIDE_BEAM_3);
-    NGP_EXPECT_EQ(t.side_topology(5), stk::topology::SHELL_SIDE_BEAM_3);
+    NGP_EXPECT_EQ(t.side_topology(2), stk::topology::LINE_3);
+    NGP_EXPECT_EQ(t.side_topology(3), stk::topology::LINE_3);
+    NGP_EXPECT_EQ(t.side_topology(4), stk::topology::LINE_3);
+    NGP_EXPECT_EQ(t.side_topology(5), stk::topology::LINE_3);
 
     check_edge_node_ordinals_ngp<numNodes>(t, goldEdgeNodeOrdinals);
     check_edge_nodes_ngp<numNodes>(t, goldEdgeNodeOrdinals);
   });
 
-  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int i)
+  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1), KOKKOS_LAMBDA(const int /*i*/)
   {
     check_face_node_ordinals_ngp<numNodes>(t, goldFaceNodeOrdinals);
     check_face_nodes_ngp<numNodes>(t, goldFaceNodeOrdinals);

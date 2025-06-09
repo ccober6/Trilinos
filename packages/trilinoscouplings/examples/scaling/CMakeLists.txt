@@ -85,32 +85,7 @@ IF(${PACKAGE_NAME}_ENABLE_Epetra AND ${PACKAGE_NAME}_ENABLE_EpetraExt AND
   ENDIF()
 
 
-  IF(${PACKAGE_NAME}_ENABLE_Belos AND
-      ${PACKAGE_NAME}_ENABLE_MueLu)
-
-    TRIBITS_ADD_EXECUTABLE_AND_TEST(
-      Example_Poisson2D_p2_tpetra
-      SOURCES example_Poisson2D_p2_tpetra.cpp
-        TrilinosCouplings_Pamgen_Utils.cpp
-      NUM_MPI_PROCS 1
-      COMM mpi # Fails to build in serial (see Trilinos #465)
-      )
-
-    TRIBITS_ADD_EXECUTABLE(
-      Example_Poisson2D_pn_tpetra
-      SOURCES example_Poisson2D_pn_tpetra.cpp
-      TrilinosCouplings_Pamgen_Utils.cpp
-      TrilinosCouplings_IntrepidPoissonExampleHelpers.cpp
-      COMM mpi
-      )
-
-    TRIBITS_ADD_TEST(
-      Example_Poisson2D_pn_tpetra
-      NAME "Poisson2D_pn=4_tpetra"
-      ARGS "--mesh=Poisson2D_p4.xml --solver=muelu_ho.xml"
-      COMM mpi
-      NUM_MPI_PROCS 1
-      )
+  IF(${PACKAGE_NAME}_ENABLE_Belos AND ${PACKAGE_NAME}_ENABLE_MueLu)
 
     IF(MueLu_ENABLE_Epetra AND ${PACKAGE_NAME}_ENABLE_Kokkos)
       TRIBITS_ADD_TEST(
@@ -266,14 +241,15 @@ IF(${PACKAGE_NAME}_ENABLE_Epetra AND ${PACKAGE_NAME}_ENABLE_EpetraExt AND
 ENDIF()
 
 
-IF(${PACKAGE_NAME}_ENABLE_Epetra AND ${PACKAGE_NAME}_ENABLE_EpetraExt AND
-   ${PACKAGE_NAME}_ENABLE_Amesos AND ${PACKAGE_NAME}_ENABLE_AztecOO AND
-   ${PACKAGE_NAME}_ENABLE_Intrepid AND ${PACKAGE_NAME}_ENABLE_ML AND
+IF(TPL_ENABLE_MPI AND ${PACKAGE_NAME}_ENABLE_Tpetra AND
+   ${PACKAGE_NAME}_ENABLE_Amesos2 AND ${PACKAGE_NAME}_ENABLE_Belos AND
+   ${PACKAGE_NAME}_ENABLE_Intrepid AND ${PACKAGE_NAME}_ENABLE_MueLu AND
    ${PACKAGE_NAME}_ENABLE_STKIO AND ${PACKAGE_NAME}_ENABLE_STKMesh)
- message(STATUS "Building Example_Poisson_STK")
+ message(STATUS "TrilinosCouplings: Building Example_Poisson_STK")
  TRIBITS_ADD_EXECUTABLE(
     Example_Poisson_STK
     SOURCES example_Poisson_stk.cpp
+    TrilinosCouplings_TpetraIntrepidPoissonExample_SolveWithBelos.cpp
     )
   TRIBITS_COPY_FILES_TO_BINARY_DIR(CopyMeshFilesSTK
   SOURCE_FILES unit_cube_10int_hex.exo
@@ -345,6 +321,31 @@ IF(${PACKAGE_NAME}_ENABLE_Belos AND
     COMM serial mpi
     )
 
+   TRIBITS_ADD_EXECUTABLE_AND_TEST(
+      Example_Poisson2D_p2_tpetra
+      SOURCES example_Poisson2D_p2_tpetra.cpp
+        TrilinosCouplings_Pamgen_Utils.cpp
+      NUM_MPI_PROCS 1
+      COMM mpi # Fails to build in serial (see Trilinos #465)
+      )
+
+    TRIBITS_ADD_EXECUTABLE(
+      Example_Poisson2D_pn_tpetra
+      SOURCES example_Poisson2D_pn_tpetra.cpp
+      TrilinosCouplings_Pamgen_Utils.cpp
+      TrilinosCouplings_IntrepidPoissonExampleHelpers.cpp
+      COMM mpi
+      )
+
+    TRIBITS_ADD_TEST(
+      Example_Poisson2D_pn_tpetra
+      NAME "Poisson2D_pn=4_tpetra"
+      ARGS "--mesh=Poisson2D_p4.xml --solver=muelu_ho.xml"
+      COMM mpi
+      NUM_MPI_PROCS 1
+      )
+
+
   ASSERT_DEFINED(${PACKAGE_NAME}_ENABLE_AvatarT)
   IF( TPL_ENABLE_AVATAR OR ${PACKAGE_NAME}_ENABLE_AvatarT)
     TRIBITS_ADD_TEST(
@@ -354,7 +355,6 @@ IF(${PACKAGE_NAME}_ENABLE_Belos AND
       NUM_MPI_PROCS 1
       COMM mpi serial
       )
-
   ENDIF()
 
 

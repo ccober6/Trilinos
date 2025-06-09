@@ -88,6 +88,7 @@
   #endif
 #endif
 
+
 namespace Tacho {
 
 template <typename ValueType, typename DeviceType, int Var>
@@ -112,6 +113,7 @@ public:
   using typename base_type::supernode_info_type;
   using typename base_type::supernode_type_array_host;
   using typename base_type::value_type;
+  using typename base_type::mag_type;
   using typename base_type::int_type_array;
   using typename base_type::value_type_array;
   using typename base_type::value_type_matrix;
@@ -408,7 +410,7 @@ public:
   /// initialization / release
   ///
   inline void initialize(const ordinal_type device_level_cut, const ordinal_type device_factorize_thres,
-                         const ordinal_type device_solve_thres, const int nstreams = 1, const ordinal_type verbose = 0) {
+                         const ordinal_type device_solve_thres, const int nstreams_in = 1, const ordinal_type verbose = 0) {
     stat_level.n_device_factorize = 0;
     stat_level.n_device_solve = 0;
     stat_level.n_team_factorize = 0;
@@ -417,6 +419,8 @@ public:
     Kokkos::Timer timer;
 
     timer.reset();
+    // # of streams needs to be at least 1
+    const int nstreams = max(1, nstreams_in);
 
     ///
     /// level data structure
@@ -790,6 +794,8 @@ public:
   }
 
   inline void createStream(const ordinal_type nstreams, const ordinal_type verbose = 0) {
+    // # of streams needs to be at least 1
+    if (nstreams <= 0) return;
 #if defined(KOKKOS_ENABLE_CUDA)
     _nstreams = nstreams;
     if (_streams.size() == size_t(nstreams)) return;
@@ -1623,14 +1629,7 @@ public:
     }
   }
 
-  inline void extractCRS(bool lu) {
-#if (defined(KOKKOS_ENABLE_CUDA) && defined(TACHO_HAVE_CUSPARSE)) || \
-     defined(KOKKOS_ENABLE_HIP)
-
-    const ordinal_type nrhs = 1;
-    const ordinal_type m = _m;
-    const value_type one(1);
-    const value_type zero(0);
+  inline void extractCRS(bool lu, bool store_transpose) {
 
     // ========================
     // free CRS, 
@@ -1643,7 +1642,15 @@ public:
 
     // ========================
     // workspace
+    const ordinal_type m = _m;
+    const ordinal_type nrhs = 1;
     Kokkos::resize(_w_vec, m, nrhs);
+
+#if (defined(KOKKOS_ENABLE_CUDA) && defined(TACHO_HAVE_CUSPARSE)) || \
+     defined(KOKKOS_ENABLE_HIP)
+    const value_type one(1);
+    const value_type zero(0);
+
     int ldw = _w_vec.stride(1);
 #if defined(KOKKOS_ENABLE_CUDA)
     cudaDataType computeType;
@@ -1696,6 +1703,7 @@ public:
     rocsparse_create_dnvec_descr(&vecX, m, (void*)_w_vec.data(), rocsparse_compute_type);
     rocsparse_create_dnvec_descr(&vecY, m, (void*)_w_vec.data(), rocsparse_compute_type);
 #endif
+#endif
 
     // allocate rowptrs
     Kokkos::resize(rowptrU, _team_serial_level_cut*(1+m));
@@ -1711,11 +1719,7 @@ public:
 
       // the first supernode in this lvl (where the CRS matrix is stored)
       auto &s0 = _h_supernodes(_h_level_sids(pbeg));
-#if defined(KOKKOS_ENABLE_HIP)
-      s0.spmv_explicit_transpose = true;
-#else
-      s0.spmv_explicit_transpose = false; // okay for SpMV, though may not for SpMM
-#endif
+      s0.spmv_explicit_transpose = store_transpose;
 
       #define TACHO_INSERT_DIAGONALS
       // NOTE: this needs extra vector-entry copy for the non-active rows at each level for solve (copy t to w, and w back to t)
@@ -1741,7 +1745,6 @@ public:
 
       // ========================
       // shift to generate rowptr
-      using range_type = Kokkos::pair<int, int>;
       {
         using range_policy_type = Kokkos::RangePolicy<exec_space>;
         Kokkos::parallel_scan("shiftRowptr", range_policy_type(0, m+1), rowptr_sum(s0.rowptrU));
@@ -1910,6 +1913,7 @@ public:
           using team_policy_type = Kokkos::RangePolicy<typename functor_type::TransMatTag, exec_space>;
           team_policy_type team_policy(0, m);
           Kokkos::parallel_for("transpose pointer", team_policy, extractor_crs);
+          exec_space().fence();
         }
         // ========================
         // shift back
@@ -1925,6 +1929,8 @@ public:
       }
       ptr += (1+m);
 
+#if (defined(KOKKOS_ENABLE_CUDA) && defined(TACHO_HAVE_CUSPARSE)) || \
+     defined(KOKKOS_ENABLE_HIP)
       // ========================
       // create NVIDIA/AMD data structures for SpMV
       size_t buffer_size_L = 0;
@@ -2073,10 +2079,13 @@ public:
             rocsparse_spmv_stage_preprocess,
            &buffer_size_L, (void*)buffer_L.data());
         #endif
-      } 
+      }
+#endif
 #endif
     }
 
+#if (defined(KOKKOS_ENABLE_CUDA) && defined(TACHO_HAVE_CUSPARSE)) || \
+     defined(KOKKOS_ENABLE_HIP)
 #if defined(KOKKOS_ENABLE_CUDA)
 #ifdef USE_SPMM_FOR_WORKSPACE_SIZE
     cusparseDestroyDnMat(vecX);
@@ -2137,7 +2146,7 @@ public:
   ///
   /// Level set factorize
   ///
-  inline void factorizeCholesky(const value_type_array &ax, const ordinal_type verbose) {
+  inline void factorizeCholesky(const value_type_array &ax, const bool store_transpose, const mag_type pivot_tol, const ordinal_type verbose) {
     constexpr bool is_host = std::is_same<exec_memory_space, Kokkos::HostSpace>::value;
     Kokkos::Timer timer;
     Kokkos::Timer tick;
@@ -2184,8 +2193,16 @@ public:
       // const ordinal_type team_size_factor[2] = { 16, 16 }, vector_size_factor[2] = { 32, 32};
       const ordinal_type team_size_factor[2] = {64, 64}, vector_size_factor[2] = {8, 4};
       const ordinal_type team_size_update[2] = {16, 8}, vector_size_update[2] = {32, 32};
+      // returned value from team Chol
+      colind_view d_rval("rval",1);
+      auto h_rval = Kokkos::create_mirror_view(host_memory_space(), d_rval);
       {
         typedef TeamFunctor_FactorizeChol<supernode_info_type> functor_type;
+        functor_type functor(_info, _factorize_mode, _level_sids, _buf, d_rval.data());
+        if (pivot_tol > 0.0) {
+          functor.setDiagPertubationTol(pivot_tol);
+        }
+
 #if defined(TACHO_TEST_LEVELSET_TOOLS_KERNEL_OVERHEAD)
         typedef Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Static>, exec_space, typename functor_type::DummyTag>
             team_policy_factorize;
@@ -2198,11 +2215,8 @@ public:
         typedef Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Static>, exec_space, typename functor_type::UpdateTag>
             team_policy_update;
 #endif
-
-        int rval = 0;
         team_policy_factor policy_factor(1, 1, 1);
         team_policy_update policy_update(1, 1, 1);
-        functor_type functor(_info, _factorize_mode, _level_sids, _buf, &rval);
 
         // get max vector size
         const ordinal_type vmax = policy_factor.vector_length_max();
@@ -2253,7 +2267,8 @@ public:
               Kokkos::fence(); time_device += tick.seconds();
               tick.reset();
             }
-            Kokkos::fence();
+            Kokkos::deep_copy(h_rval, d_rval);
+            int rval = h_rval(0);
             if (rval != 0) {
               TACHO_TEST_FOR_EXCEPTION(rval, std::runtime_error, "POTRF (team) returns non-zero error code.");
             }
@@ -2273,14 +2288,19 @@ public:
     if (variant == 3) {
       // compress each partitioned inverse at each level into CRS matrix
       bool lu = false;
-      extractCRS(lu);
+      extractCRS(lu, store_transpose);
     }
     stat.t_extra += timer.seconds();
 
     if (verbose) {
       printf("Summary: LevelSetTools-Variant-%d (CholeskyFactorize)\n", variant);
       printf("=====================================================\n");
-      printf( "\n  ** Team = %f s, Device = %f s, Update = %f s **\n\n",time_parallel,time_device,time_update );
+      printf( "\n  ** Team = %f s, Device = %f s, Update = %f s **\n",time_parallel,time_device,time_update );
+      if (variant == 3) {
+        printf( "  extractCRS with total nnzL = %ld and nnzU = %ld\n",colindL.extent(0),colindU.extent(0) );
+	if (store_transpose) printf( "  > explicitly storing transpose\n" );
+      }
+      printf( "\n" );
       print_stat_factor();
       fflush(stdout);
     }
@@ -2387,10 +2407,19 @@ public:
   inline void solveGenericLowerOnDeviceVar2_SpMV(const ordinal_type lvl, const ordinal_type nlvls,
                                                  const ordinal_type pbeg, const ordinal_type pend,
                                                  const value_type_matrix &t) {
-#if (defined(KOKKOS_ENABLE_CUDA) && defined(TACHO_HAVE_CUSPARSE)) || \
-     defined(KOKKOS_ENABLE_HIP)
     const ordinal_type m = t.extent(0);
     const ordinal_type nrhs = t.extent(1);
+    const ordinal_type old_nrhs = _w_vec.extent(1);
+
+    auto &s0 = _h_supernodes(_h_level_sids(pbeg));
+    if (old_nrhs != nrhs) {
+      // expand workspace
+      Kokkos::resize(_w_vec, m, nrhs);
+    }
+#if (defined(KOKKOS_ENABLE_CUDA) && defined(TACHO_HAVE_CUSPARSE)) || \
+     defined(KOKKOS_ENABLE_HIP)
+    const ordinal_type ldt = t.stride(1);
+
 #if defined(KOKKOS_ENABLE_CUDA)
     cudaDataType computeType = CUDA_R_64F;
     if (std::is_same<value_type, float>::value) {
@@ -2412,9 +2441,7 @@ public:
     // compute t = L^{-1}*w
     const value_type alpha (1);
     const value_type beta  (0);
-    if (_w_vec.extent(1) != size_t(nrhs)) {
-      // expand workspace
-      Kokkos::resize(_w_vec, m, nrhs);
+    if (old_nrhs != nrhs) {
       // attach to Cusparse/Rocsparse data struct
       int ldw = _w_vec.stride(1);
 #if defined(KOKKOS_ENABLE_CUDA)
@@ -2433,8 +2460,6 @@ public:
       rocsparse_create_dnvec_descr(&vecW, m, (void*)(_w_vec.data()), rocsparse_compute_type);
 #endif
     }
-    const ordinal_type ldt = t.stride(1);
-    auto &s0 = _h_supernodes(_h_level_sids(pbeg));
     #else
     exit(0);
     #endif
@@ -2552,6 +2577,7 @@ public:
     if (rocsparse_status_success != status) {
       printf( " Failed rocsparse_spmv for L\n" );
     }
+#endif
 #else
     const value_type zero(0);
     auto h_w = Kokkos::create_mirror_view_and_copy(host_memory_space(), ((nlvls-1-lvl)%2 == 0 ? t : _w_vec));
@@ -2587,6 +2613,11 @@ public:
         }
       }
     }
+    if ((nlvls-1-lvl)%2 == 0) {
+      Kokkos::deep_copy(_w_vec, h_t);
+    } else {
+      Kokkos::deep_copy(t, h_t);
+    }
 #endif
     if (lvl == 0) {
       // end : copy to output
@@ -2594,7 +2625,6 @@ public:
         Kokkos::deep_copy(t, _w_vec);
       }
     }
-#endif
   }
 
   inline void solveCholeskyLowerOnDeviceVar2(const ordinal_type pbeg, const ordinal_type pend,
@@ -2756,13 +2786,13 @@ public:
   inline void solveGenericUpperOnDeviceVar2_SpMV(const ordinal_type lvl, const ordinal_type nlvls,
                                                  const ordinal_type pbeg, const ordinal_type pend,
                                                  const value_type_matrix &t) {
-#if (defined(KOKKOS_ENABLE_CUDA) && defined(TACHO_HAVE_CUSPARSE)) || \
-     defined(KOKKOS_ENABLE_HIP)
     const ordinal_type m = t.extent(0);
     const ordinal_type nrhs = t.extent(1);
 
     auto &s0 = _h_supernodes(_h_level_sids(pbeg));
 
+#if (defined(KOKKOS_ENABLE_CUDA) && defined(TACHO_HAVE_CUSPARSE)) || \
+     defined(KOKKOS_ENABLE_HIP)
     #ifdef TACHO_INSERT_DIAGONALS
     // x = t & y = w (lvl = 0,2,4)
     // compute t = L^{-1}*w
@@ -2868,6 +2898,7 @@ public:
     if (rocsparse_status_success != status) {
       printf( " Failed rocsparse_spmv for U\n" );
     }
+#endif
 #else
     const value_type zero(0);
     auto h_w = Kokkos::create_mirror_view_and_copy(host_memory_space(), (lvl%2 == 0 ? t : _w_vec));
@@ -2888,7 +2919,11 @@ public:
         }
       }
     }
-    Kokkos::deep_copy(t, h_t);
+    if (lvl%2 == 0) {
+      Kokkos::deep_copy(_w_vec, h_t);
+    } else {
+      Kokkos::deep_copy(t, h_t);
+    }
 #endif
     if (lvl == nlvls-1) {
       // end : copy to output
@@ -2896,7 +2931,6 @@ public:
         Kokkos::deep_copy(t, _w_vec);
       }
     }
-#endif
   }
 
   inline void solveCholeskyUpperOnDeviceVar2(const ordinal_type pbeg, const ordinal_type pend,
@@ -3284,7 +3318,7 @@ public:
 
             const ordinal_type offm = s.row_begin;
             const auto tT = Kokkos::subview(t, range_type(offm, offm + m), Kokkos::ALL());
-            const UnmanagedViewType<value_type_matrix> bT(bptr, m, nrhs);
+            const auto bT = Kokkos::subview(b, range_type(0, m), Kokkos::ALL());
 
             ConstUnmanagedViewType<ordinal_type_array> P(_piv.data() + offm * 4, m * 4);
             ConstUnmanagedViewType<value_type_matrix> D(_diag.data() + offm * 2, m, 2);
@@ -3669,7 +3703,7 @@ public:
         Kokkos::parallel_for(
             policy, KOKKOS_LAMBDA(const ordinal_type &i) { buf_solve_nrhs_ptr(i) = nrhs * buf_solve_ptr(i); });
         Kokkos::deep_copy(_h_buf_solve_nrhs_ptr, _buf_solve_nrhs_ptr);
-	_nrhs = nrhs;
+        _nrhs = nrhs;
       }
     }
   }
@@ -3915,8 +3949,13 @@ public:
       const ordinal_type team_size_factor[2] = {64, 64}, vector_size_factor[2] = {8, 4};
 #endif
       const ordinal_type team_size_update[2] = {16, 8},  vector_size_update[2] = {32, 32};
+      // returned value from team LDL
+      colind_view d_rval("rval",1);
+      auto h_rval = Kokkos::create_mirror_view(host_memory_space(), d_rval);
       {
         typedef TeamFunctor_FactorizeLDL<supernode_info_type> functor_type;
+        functor_type functor(_info, _factorize_mode, _level_sids, _piv, _diag, _buf, d_rval.data());
+
 #if defined(TACHO_TEST_LEVELSET_TOOLS_KERNEL_OVERHEAD)
         typedef Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Static>, exec_space, typename functor_type::DummyTag>
             team_policy_factorize;
@@ -3929,12 +3968,10 @@ public:
         typedef Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Static>, exec_space, typename functor_type::UpdateTag>
             team_policy_update;
 #endif
-        int rval = 0;
-        team_policy_factor policy_factor(1, 1, 1);
-        team_policy_update policy_update(1, 1, 1);
-        functor_type functor(_info, _factorize_mode, _level_sids, _piv, _diag, _buf, &rval);
 
         // get max vector length
+        team_policy_factor policy_factor(1, 1, 1);
+        team_policy_update policy_update(1, 1, 1);
         const ordinal_type vmax = policy_factor.vector_length_max();
         {
           for (ordinal_type lvl = (_team_serial_level_cut - 1); lvl >= 0; --lvl) {
@@ -3983,7 +4020,8 @@ public:
               Kokkos::fence(); time_device += tick.seconds();
               tick.reset();
             }
-            Kokkos::fence();
+            Kokkos::deep_copy(h_rval, d_rval);
+            int rval = h_rval(0);
             if (rval != 0) {
               TACHO_TEST_FOR_EXCEPTION(rval, std::runtime_error, "SYTRF (team) returns non-zero error code.");
             }
@@ -4204,7 +4242,7 @@ public:
     }
   }
 
-  inline void factorizeLU(const value_type_array &ax, const ordinal_type verbose) {
+  inline void factorizeLU(const value_type_array &ax, const bool store_transpose, const mag_type pivot_tol, const ordinal_type verbose) {
     constexpr bool is_host = std::is_same<exec_memory_space, Kokkos::HostSpace>::value;
     Kokkos::Timer timer;
     Kokkos::Timer tick;
@@ -4260,6 +4298,10 @@ public:
       const ordinal_type team_size_factor[2] = {64, 64}, vector_size_factor[2] = {8, 4};
 #endif
       const ordinal_type team_size_update[2] = {16, 8},  vector_size_update[2] = {32, 32};
+
+      // returned value from team LU
+      colind_view d_rval("rval",1);
+      auto h_rval = Kokkos::create_mirror_view(host_memory_space(), d_rval);
       {
         typedef TeamFunctor_FactorizeLU<supernode_info_type> functor_type;
 #if defined(TACHO_TEST_LEVELSET_TOOLS_KERNEL_OVERHEAD)
@@ -4274,11 +4316,12 @@ public:
         typedef Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Static>, exec_space, typename functor_type::UpdateTag>
             team_policy_update;
 #endif
-        int rval = 0;
         team_policy_factor policy_factor(1, 1, 1);
         team_policy_update policy_update(1, 1, 1);
-        functor_type functor(_info, _factorize_mode, _level_sids, _piv, _buf, &rval);
-
+        functor_type functor(_info, _factorize_mode, _level_sids, _piv, _buf, d_rval.data());
+        if (pivot_tol > 0.0) {
+          functor.setDiagPertubationTol(pivot_tol);
+        }
         // get max vector length
         const ordinal_type vmax = policy_factor.vector_length_max();
         {
@@ -4329,7 +4372,8 @@ public:
               Kokkos::fence(); time_device += tick.seconds();
               tick.reset();
             }
-            Kokkos::fence();
+            Kokkos::deep_copy(h_rval, d_rval);
+            int rval = h_rval(0);
             if (rval != 0) {
               TACHO_TEST_FOR_EXCEPTION(rval, std::runtime_error, "GETRF (team) returns non-zero error code.");
             }
@@ -4351,14 +4395,19 @@ public:
     if (variant == 3) {
       // compress each partitioned inverse at each level into CRS matrix
       bool lu = true;
-      extractCRS(lu);
+      extractCRS(lu, store_transpose);
     }
     stat.t_extra += timer.seconds();
 
     if (verbose) {
       printf("Summary: LevelSetTools-Variant-%d (LU Factorize)\n", variant);
       printf("================================================\n");
-      printf( "\n  ** Team = %f s, Device = %f s, Update = %f s (%d streams) **\n\n",time_parallel,time_device,time_update,_nstreams );
+      printf( "\n  ** Team = %f s, Device = %f s, Update = %f s (%d streams) **\n",time_parallel,time_device,time_update,_nstreams );
+      if (variant == 3) {
+        printf( " extractCRS with total nnzL = %ld and nnzU = %ld\n\n",colindL.extent(0),colindU.extent(0) );
+      } else {
+        printf( "\n" );
+      }
       print_stat_factor();
       fflush(stdout);
     }
@@ -4564,11 +4613,11 @@ public:
     }
   }
 
-  inline void factorize(const value_type_array &ax, const ordinal_type verbose = 0) override {
+  inline void factorize(const value_type_array &ax, const bool store_transpose, const mag_type pivot_tol = 0.0, const ordinal_type verbose = 0) override {
     Kokkos::deep_copy(_superpanel_buf, value_type(0));
     switch (this->getSolutionMethod()) {
     case 1: { /// Cholesky
-      factorizeCholesky(ax, verbose);
+      factorizeCholesky(ax, store_transpose, pivot_tol, verbose);
       break;
     }
     case 2: { /// LDL
@@ -4600,7 +4649,7 @@ public:
           track_alloc(_piv.span() * sizeof(ordinal_type));
         }
       }
-      factorizeLU(ax, verbose);
+      factorizeLU(ax, store_transpose, pivot_tol, verbose);
       break;
     }
     default: {

@@ -150,8 +150,6 @@ class TrilinosPRConfigurationInstallationTest(TestCase):
         Generate dummy command line arguments
         """
         output = argparse.Namespace(
-            source_repo_url="https://github.com/trilinos/Trilinos",
-            target_repo_url="https://github.com/trilinos/Trilinos",
             target_branch_name="develop",
             pullrequest_build_name="Trilinos-pullrequest-gcc-installation-testing",
             genconfig_build_name="rhel8_sems-gnu-openmpi_release_static_no-kokkos-arch_no-asan_no-complex_no-fpic_mpi_no-pt_no-rdc_no-package-enables",
@@ -168,6 +166,7 @@ class TrilinosPRConfigurationInstallationTest(TestCase):
             ctest_drop_site="testint.sandia.gov",
             filename_packageenables="../packageEnables.cmake",
             filename_subprojects="../package_subproject_list.cmake",
+            skip_create_packageenables=False,
             mode="standard",
             req_mem_per_core=3.0,
             max_cores_allowed=12,

@@ -63,10 +63,11 @@ void process_nodeblocks(Ioss::Region &region, stk::mesh::MetaData &meta)
   stk::io::define_io_fields(nb, Ioss::Field::ATTRIBUTE, meta.universal_part(), stk::topology::NODE_RANK);
 }
 
-void process_elementblocks(Ioss::Region &region, stk::mesh::MetaData &meta, TopologyErrorHandler handler)
+void process_elementblocks(Ioss::Region &region, stk::mesh::MetaData &meta,
+                           TopologyErrorHandler handler, bool createEmptyOmittedBlocks)
 {
   const Ioss::ElementBlockContainer& elem_blocks = region.get_element_blocks();
-  stk::io::default_part_processing(elem_blocks, meta, handler);
+  stk::io::default_part_processing(elem_blocks, meta, handler, createEmptyOmittedBlocks);
 }
 
 void process_nodesets_without_distribution_factors(Ioss::Region &region, stk::mesh::MetaData &meta)
@@ -112,7 +113,6 @@ void process_surface_entity(Ioss::SideSet *sset, stk::mesh::MetaData &meta)
   STKIORequire(ss_part !=  nullptr);
 
   stk::mesh::FieldBase *distribution_factors_field = nullptr;
-  bool surface_df_defined = false; // Has the surface df field been defined yet?
 
   size_t block_count = sset->block_count();
   for (size_t i=0; i < block_count; i++) {
@@ -125,13 +125,14 @@ void process_surface_entity(Ioss::SideSet *sset, stk::mesh::MetaData &meta)
       }
 
       if (sb->field_exists("distribution_factors")) {
-        if (!surface_df_defined) {
-          stk::topology::rank_t side_rank = static_cast<stk::topology::rank_t>(stk::io::part_primary_entity_rank(*sb_part));
-          std::string field_name = sset->name() + "_df";
-          distribution_factors_field = &meta.declare_field<double>(side_rank, field_name);
+        stk::topology::rank_t side_block_rank = static_cast<stk::topology::rank_t>(stk::io::part_primary_entity_rank(*sb_part));
+        std::string field_name = sset->name() + "_df";
+        distribution_factors_field = meta.get_field(side_block_rank, field_name);
+
+        if (distribution_factors_field == nullptr) {
+          distribution_factors_field = &meta.declare_field<double>(side_block_rank, field_name);
           stk::io::set_field_role(*distribution_factors_field, Ioss::Field::MESH);
           stk::io::set_distribution_factor_field(*ss_part, *distribution_factors_field);
-          surface_df_defined = true;
         }
         stk::io::set_distribution_factor_field(*sb_part, *distribution_factors_field);
         int side_node_count = sb->topology()->number_nodes();

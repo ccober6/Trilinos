@@ -13,28 +13,15 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //@HEADER
-#ifndef __KOKKOSBLAS_INNER_MULTIPLE_DOT_PRODUCT_SERIAL_IMPL_HPP__
-#define __KOKKOSBLAS_INNER_MULTIPLE_DOT_PRODUCT_SERIAL_IMPL_HPP__
+#ifndef KOKKOSBLAS_INNER_MULTIPLE_DOT_PRODUCT_SERIAL_IMPL_HPP
+#define KOKKOSBLAS_INNER_MULTIPLE_DOT_PRODUCT_SERIAL_IMPL_HPP
+
+#include "KokkosBlas_util.hpp"
 
 /// \author Kyungjoo Kim (kyukim@sandia.gov)
 
 namespace KokkosBlas {
 namespace Impl {
-
-struct OpID {
-  template <typename ValueType>
-  KOKKOS_INLINE_FUNCTION ValueType operator()(ValueType v) const {
-    return v;
-  }
-};
-
-struct OpConj {
-  template <typename ValueType>
-  KOKKOS_INLINE_FUNCTION ValueType operator()(ValueType v) const {
-    using KAT = Kokkos::ArithTraits<ValueType>;
-    return KAT::conj(v);
-  }
-};
 
 template <int mb>
 struct InnerMultipleDotProduct {
@@ -356,4 +343,4 @@ KOKKOS_INLINE_FUNCTION int InnerMultipleDotProduct<1>::serial_invoke(const Scala
 }  // namespace Impl
 }  // namespace KokkosBlas
 
-#endif  // __KOKKOSBLAS_INNER_MULTIPLE_DOT_PRODUCT_SERIAL_IMPL_HPP__
+#endif  // KOKKOSBLAS_INNER_MULTIPLE_DOT_PRODUCT_SERIAL_IMPL_HPP

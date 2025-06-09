@@ -50,7 +50,6 @@
 #include <stk_mesh/base/EntityKey.hpp>
 #include <stk_mesh/base/GetEntities.hpp>
 #include <stk_mesh/base/Selector.hpp>
-#include <stk_mesh/base/GetBuckets.hpp>
 #include <stk_mesh/base/CreateEdges.hpp>
 
 #include "stk_unit_test_utils/stk_mesh_fixtures/HexFixture.hpp"
@@ -307,7 +306,7 @@ void communicate_and_create_shared_nodes( stk::mesh::BulkData & mesh,
 void separate_and_skin_mesh(
     stk::mesh::MetaData & fem_meta,
     stk::mesh::BulkData & mesh,
-    stk::mesh::Part     & skin_part,
+    stk::mesh::Part     & /*skin_part*/,
     stk::mesh::EntityVector & entities_to_separate
     )
 {

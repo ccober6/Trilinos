@@ -255,19 +255,32 @@ test_cmd_options=(
     --filename-subprojects=${WORKSPACE:?}/package_subproject_list.cmake
     --source-dir=${WORKSPACE}/Trilinos
     --build-dir=${TRILINOS_BUILD_DIR:?}
-    --ctest-driver=${WORKSPACE:?}/Trilinos/cmake/SimpleTesting/cmake/ctest-driver.cmake
     --ctest-drop-site=${TRILINOS_CTEST_DROP_SITE:?}
-    --dashboard-build-name=${DASHBOARD_BUILD_NAME}
 )
+
+if [[ ${DASHBOARD_BUILD_NAME:-} ]]
+then
+    test_cmd_options+=( "--dashboard-build-name=${DASHBOARD_BUILD_NAME} ")
+fi
 
 if [[ ${extra_configure_args} ]]
 then
-    test_cmd_options+=( "--extra-configure-args=\"${extra_configure_args}\"")
+    test_cmd_options+=( "--extra-configure-args=\"${extra_configure_args}\" ")
 fi
 
 if [[ ${GENCONFIG_BUILD_NAME} == *"gnu"* ]]
 then
     test_cmd_options+=( "--use-explicit-cachefile ")
+fi
+
+if [[ ${GENCONFIG_BUILD_NAME} == *"framework"* ]]
+then
+    test_cmd_options+=( "--skip-create-packageenables ")
+fi
+
+if [[ ${GENCONFIG_BUILD_NAME} == *"_uvm_"* && ${GENCONFIG_BUILD_NAME} == *"no-package-enables"* ]]
+then
+    test_cmd_options+=( "--skip-run-tests" )
 fi
 
 test_cmd="${PYTHON_EXE:?} ${REPO_ROOT:?}/packages/framework/pr_tools/PullRequestLinuxDriverTest.py ${test_cmd_options[@]}"

@@ -87,7 +87,7 @@ void device_runTwoBoxTest(stk::search::SearchMethod searchMethod, const double d
 
   if (procId == 0) {
     Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1),
-      KOKKOS_LAMBDA(const unsigned & i) {
+      KOKKOS_LAMBDA(const unsigned & /*i*/) {
         domain[0] =
             stk::unit_test_util::device_generateBoxIdentProc<StkBox, IdentProc>(0, 0, 0, boxSize/2, 1, procId);
       });
@@ -95,7 +95,7 @@ void device_runTwoBoxTest(stk::search::SearchMethod searchMethod, const double d
 
   if (procId == numProcs - 1) {
     Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1),
-      KOKKOS_LAMBDA(const unsigned & i) {
+      KOKKOS_LAMBDA(const unsigned & /*i*/) {
         range[0] =
             stk::unit_test_util::device_generateBoxIdentProc<StkBox, IdentProc>(distanceBetweenBoxCenters, 0, 0,
                                                                                           boxSize/2, 2, procId);
@@ -188,6 +188,7 @@ TEST(CoarseSearchCorrectness, OverlappingBoxes_ARBORX)
   const double distanceBetweenBoxCenters = 0.5;
   const unsigned expectedNumOverlap = 1;
   runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
 }
 
@@ -199,6 +200,7 @@ TEST(CoarseSearchCorrectness, NonOverlappingBoxes_ARBORX)
   const double distanceBetweenBoxCenters = 2.0;
   const unsigned expectedNumOverlap = 0;
   runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
 }
 
@@ -210,6 +212,7 @@ TEST(CoarseSearchCorrectness, JustEdgeOverlappingBoxes_ARBORX)
   double distanceBetweenBoxCenters = 0.999999999;
   const unsigned expectedNumOverlap = 1;
   runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
 }
 
@@ -221,6 +224,7 @@ TEST(CoarseSearchCorrectness, NotQuiteEdgeOverlappingBoxes_ARBORX)
   double distanceBetweenBoxCenters = 1.00001;
   const unsigned expectedNumOverlap = 0;
   runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
 }
 
@@ -232,23 +236,24 @@ TEST(CoarseSearchCorrectness, NotQuiteEdgeOverlappingBoxes_FloatTruncation_ARBOR
   double distanceBetweenBoxCenters = 1.0000000001;
   const unsigned expectedNumOverlap = 1;
   runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
 }
 
 void host_local_runTwoBoxTest(stk::search::SearchMethod searchMethod,
     const double distanceBetweenBoxCenters,
-    const double boxSize,
+    const double boxDim,
     const unsigned expectedNumOverlap)
 {
   StkBoxIdentVector domain;
   StkBoxIdentVector range;
 
   domain.emplace_back(stk::unit_test_util::box_ident_to_pair(
-      stk::unit_test_util::device_generateBoxIdent<StkBox, Ident>(0, 0, 0, boxSize / 2, 1)));
+      stk::unit_test_util::device_generateBoxIdent<StkBox, Ident>(0, 0, 0, boxDim / 2, 1)));
 
   range.emplace_back(stk::unit_test_util::box_ident_to_pair(
       stk::unit_test_util::device_generateBoxIdent<StkBox, Ident>(
-          distanceBetweenBoxCenters, 0, 0, boxSize / 2, 2)));
+          distanceBetweenBoxCenters, 0, 0, boxDim / 2, 2)));
 
   LocalSearchResults intersections;
   
@@ -264,19 +269,19 @@ void host_local_runTwoBoxTest(stk::search::SearchMethod searchMethod,
 }
 
 void device_local_runTwoBoxTest(stk::search::SearchMethod searchMethod, const double distanceBetweenBoxCenters,
-                                const double boxSize, const unsigned expectedNumOverlap)
+                                const double boxDim, const unsigned expectedNumOverlap)
 {
   auto domain = Kokkos::View<StkBoxIdent*, stk::ngp::ExecSpace>("domain box-ident", 1);
   auto range = Kokkos::View<StkBoxIdent*, stk::ngp::ExecSpace>("range box-ident", 1);
 
   Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1),
-    KOKKOS_LAMBDA(const unsigned & i) {
+    KOKKOS_LAMBDA(const unsigned & /*i*/) {
       domain[0] =
-          stk::unit_test_util::device_generateBoxIdent<StkBox, Ident>(0, 0, 0, boxSize/2, 1);
+          stk::unit_test_util::device_generateBoxIdent<StkBox, Ident>(0, 0, 0, boxDim/2, 1);
 
       range[0] =
           stk::unit_test_util::device_generateBoxIdent<StkBox, Ident>(distanceBetweenBoxCenters, 0, 0,
-                                                                                          boxSize/2, 2);
+                                                                                          boxDim/2, 2);
     });
 
   auto intersections = Kokkos::View<IdentIntersection*, stk::ngp::ExecSpace>("intersections", 0);
@@ -365,6 +370,7 @@ TEST(CoarseSearchCorrectness, Ngp_Local_OverlappingBoxes_ARBORX)
   const double distanceBetweenBoxCenters = 0.5;
   const unsigned expectedNumOverlap = 1;
   host_local_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_local_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
 }
 
@@ -376,6 +382,7 @@ TEST(CoarseSearchCorrectness, Ngp_Local_NonOverlappingBoxes_ARBORX)
   const double distanceBetweenBoxCenters = 2.0;
   const unsigned expectedNumOverlap = 0;
   host_local_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_local_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
 }
 
@@ -387,6 +394,7 @@ TEST(CoarseSearchCorrectness, Ngp_Local_JustEdgeOverlappingBoxes_ARBORX)
   double distanceBetweenBoxCenters = 0.999999999;
   const unsigned expectedNumOverlap = 1;
   host_local_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_local_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
 }
 
@@ -398,7 +406,48 @@ TEST(CoarseSearchCorrectness, Ngp_Local_NotQuiteEdgeOverlappingBoxes_ARBORX)
   double distanceBetweenBoxCenters = 1.0000000001;
   const unsigned expectedNumOverlap = 1;
   host_local_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+  if (!stk::unit_test_util::can_run_device_tests(stk::parallel_machine_world())) GTEST_SKIP();
   device_local_runTwoBoxTest(stk::search::ARBORX, distanceBetweenBoxCenters, boxSize, expectedNumOverlap);
+}
+
+TEST(CoarseSearchCorrectness, UpdateInteriorNodeBVsAtomicsIssueReproducer)
+{
+  std::vector<stk::search::Box<double>> boxes(256);
+
+  double coord_min = -2.1;
+  double coord_max = 2.1;
+
+  int x_points = 5;
+  int y_points = 5;
+  int z_points = 9;
+
+  for (int i=0; i < z_points; i++) {
+    double z_coord_min = coord_min + 1*i;
+    double z_coord_max = coord_max + 1*i;
+
+    for (int j=0; j < y_points; j++) {
+      double y_coord_min = coord_min + 1*j;
+      double y_coord_max = coord_max + 1*j;
+
+      for (int k=0; k < x_points; k++) {
+        double x_coord_min = coord_min + 1*k;
+        double x_coord_max = coord_max + 1*k;
+
+        int index = k + x_points*j + x_points*y_points*i;
+        boxes[index] = stk::search::Box(x_coord_min, y_coord_min, z_coord_min,
+                                        x_coord_max, y_coord_max, z_coord_max);
+      }
+    }
+  }  
+
+  using ExecSpace = Kokkos::DefaultExecutionSpace;
+  stk::search::CollisionList<ExecSpace> collisions("collision_list");
+  stk::search::morton_lbvh_search<stk::search::Box<double>::value_type, ExecSpace, stk::search::Box<double>>(boxes, boxes, collisions);
+  collisions.sync_from_device();
+
+  int numExpectedCollisions = 38125;
+  EXPECT_EQ(collisions.get_num_collisions(), numExpectedCollisions);
+ 
 }
 
 }

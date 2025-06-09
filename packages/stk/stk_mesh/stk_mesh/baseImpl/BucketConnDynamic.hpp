@@ -65,7 +65,7 @@ public:
     m_ordinals(),
     m_permutations(),
     m_numUnusedEntries(0),
-    m_compressionThreshold(0.5)
+    m_compressionThreshold(2)
   {
     STK_ThrowRequireMsg(bucketCapacity > 0, "BucketConnDynamic must have bucketCapacity strictly greater than 0");
   }
@@ -167,7 +167,7 @@ public:
   bool remove_connectivity(unsigned bktOrdinal,
                            Entity entity,
                            ConnectivityOrdinal ordinal,
-                           Permutation perm = INVALID_PERMUTATION)
+                           [[maybe_unused]] Permutation perm = INVALID_PERMUTATION)
   {
     IndexRange& indices = m_offsets[bktOrdinal];
     UpwardConnIndexType idx = indices.second;
@@ -258,7 +258,7 @@ public:
   size_t total_num_connectivity() const { return m_connectivity.size() - m_numUnusedEntries; }
   size_t num_unused_entries() const { return m_numUnusedEntries; }
 
-  void compress_connectivity(unsigned suggestedCapacity = 0)
+  void compress_connectivity()
   {
     if (m_numUnusedEntries == 0) {
       return;
@@ -303,7 +303,7 @@ public:
   {
     m_bucketCapacity = std::max(bktOrdinal+1, m_bucketCapacity);
     if (bktOrdinal >= m_offsets.size()) {
-      const unsigned candidate = m_offsets.empty() ? bktOrdinal+1 : 2*m_offsets.size();
+      const unsigned candidate = std::max(static_cast<unsigned>(bktOrdinal+1u), static_cast<unsigned>(2u*m_offsets.size()));
       const unsigned newSize = std::min(m_bucketCapacity, candidate);
       m_offsets.resize(newSize, IndexRange(0u, 0u));
 
@@ -356,9 +356,10 @@ private:
                            Permutation perm = INVALID_PERMUTATION)
   {
     static constexpr unsigned minSizeHeuristic = 256;
-    if (total_num_connectivity() > minSizeHeuristic && (static_cast<double>(m_numUnusedEntries)/total_num_connectivity()) > m_compressionThreshold)
+    if ((total_num_connectivity() > minSizeHeuristic) &&
+        (total_num_connectivity() < m_numUnusedEntries*m_compressionThreshold))
     {
-      compress_connectivity(total_num_connectivity()+m_numUnusedEntries/2);
+      compress_connectivity();
     }
 
     grow_if_necessary(bktOrdinal);
@@ -501,7 +502,7 @@ private:
   std::vector<ConnectivityOrdinal> m_ordinals;
   std::vector<Permutation> m_permutations;
   unsigned m_numUnusedEntries;
-  double m_compressionThreshold;
+  int m_compressionThreshold;
 };
 
 } // namespace impl

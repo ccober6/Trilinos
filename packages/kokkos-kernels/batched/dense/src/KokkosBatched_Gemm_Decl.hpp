@@ -13,8 +13,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //@HEADER
-#ifndef __KOKKOSBATCHED_GEMM_DECL_HPP__
-#define __KOKKOSBATCHED_GEMM_DECL_HPP__
+#ifndef KOKKOSBATCHED_GEMM_DECL_HPP
+#define KOKKOSBATCHED_GEMM_DECL_HPP
 
 #include "KokkosBatched_Vector.hpp"
 
@@ -61,10 +61,12 @@ struct Gemm {
   KOKKOS_FORCEINLINE_FUNCTION static int invoke(const MemberType &member, const ScalarType alpha, const AViewType &A,
                                                 const BViewType &B, const ScalarType beta, const CViewType &C) {
     int r_val = 0;
-    if (std::is_same<ArgMode, Mode::Serial>::value) {
+    if constexpr (std::is_same_v<ArgMode, Mode::Serial>) {
       r_val = SerialGemm<ArgTransA, ArgTransB, ArgAlgo>::invoke(alpha, A, B, beta, C);
-    } else if (std::is_same<ArgMode, Mode::Team>::value) {
+    } else if constexpr (std::is_same_v<ArgMode, Mode::Team>) {
       r_val = TeamGemm<MemberType, ArgTransA, ArgTransB, ArgAlgo>::invoke(member, alpha, A, B, beta, C);
+    } else if constexpr (std::is_same_v<ArgMode, Mode::TeamVector>) {
+      r_val = TeamVectorGemm<MemberType, ArgTransA, ArgTransB, ArgAlgo>::invoke(member, alpha, A, B, beta, C);
     }
     return r_val;
   }
@@ -75,4 +77,4 @@ struct Gemm {
 #include "KokkosBatched_Gemm_Team_Impl.hpp"
 #include "KokkosBatched_Gemm_TeamVector_Impl.hpp"
 
-#endif  // __KOKKOSBATCHED_GEMM_DECL_HPP__
+#endif  // KOKKOSBATCHED_GEMM_DECL_HPP

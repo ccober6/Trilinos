@@ -40,6 +40,8 @@
 #include <stk_unit_test_utils/getOption.h>
 #include <stk_unit_test_utils/GetMeshSpec.hpp>
 #include <stk_unit_test_utils/stk_mesh_fixtures/TestHexFixture.hpp>
+#include <stk_unit_test_utils/TextMesh.hpp>
+#include <stk_mesh/base/CreateEdges.hpp>
 #include <stk_mesh/base/MetaData.hpp>
 #include <stk_mesh/base/BulkData.hpp>
 #include <stk_mesh/base/Bucket.hpp>
@@ -47,6 +49,7 @@
 #include <stk_mesh/base/GetEntities.hpp>
 #include <stk_mesh/base/Entity.hpp>
 #include <stk_mesh/base/FEMHelpers.hpp>
+#include <stk_mesh/base/NgpForEachEntity.hpp>
 #include <stk_util/stk_config.h>
 #include <stk_util/environment/WallTime.hpp>
 #include <stk_util/util/StkNgpVector.hpp>
@@ -68,7 +71,7 @@ public:
 
     stk::mesh::NgpMesh & ngpMesh = stk::mesh::get_updated_ngp_mesh(get_bulk());
     Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1),
-                         KOKKOS_LAMBDA(const int i)
+                         KOKKOS_LAMBDA(const int /*i*/)
                          {
                            stk::mesh::NgpMesh::ConnectedNodes nodes = ngpMesh.get_nodes(stk::topology::ELEM_RANK, stk::mesh::FastMeshIndex{0,0});
                            numNodesVec.device_get(0) = nodes.size();
@@ -87,7 +90,7 @@ public:
 
     stk::mesh::NgpMeshT<NgpMemSpace> & ngpMesh = stk::mesh::get_updated_ngp_mesh<NgpMemSpace>(get_bulk());
     Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1),
-                         KOKKOS_LAMBDA(const int i)
+                         KOKKOS_LAMBDA(const int /*i*/)
                          {
                            stk::mesh::NgpMesh::ConnectedNodes nodes = ngpMesh.get_nodes(stk::topology::ELEM_RANK, stk::mesh::FastMeshIndex{0,0});
                            numNodesVec.device_get(0) = nodes.size();
@@ -96,16 +99,81 @@ public:
     numNodesVec.copy_device_to_host();
     ASSERT_EQ(8u, numNodesVec[0]);
   }
+
+  void run_edge_check(unsigned numExpectedEdgesPerElem)
+  {
+    stk::mesh::NgpMesh& ngpMesh = stk::mesh::get_updated_ngp_mesh(get_bulk());
+    stk::NgpVector<unsigned> bucketIds = ngpMesh.get_bucket_ids(stk::topology::ELEM_RANK, !stk::mesh::Selector());
+    stk::mesh::for_each_entity_run(ngpMesh, stk::topology::ELEM_RANK, bucketIds,
+      KOKKOS_LAMBDA(const stk::mesh::FastMeshIndex& entityIndex) {
+        stk::mesh::ConnectedEntities edges = ngpMesh.get_edges(stk::topology::ELEM_RANK, entityIndex);
+        NGP_EXPECT_EQ(numExpectedEdgesPerElem, edges.size());
+      }, stk::ngp::ExecSpace()
+    );
+  }
+
+  void delete_edge_on_each_element()
+  {
+    get_bulk().modification_begin();
+
+    stk::mesh::Entity elem1 = get_bulk().get_entity(stk::topology::ELEM_RANK, 1);
+    stk::mesh::ConnectedEntities edges = get_bulk().get_connected_entities(elem1, stk::topology::EDGE_RANK);
+    stk::mesh::ConnectedEntities edgeElems = get_bulk().get_connected_entities(edges[0], stk::topology::ELEM_RANK);
+    EXPECT_EQ(1u, edgeElems.size());
+    EXPECT_EQ(elem1, edgeElems[0]);
+
+    const stk::mesh::ConnectivityOrdinal* edgeElemOrds = get_bulk().begin_ordinals(edges[0], stk::topology::ELEM_RANK);
+    stk::mesh::Entity edge = edges[0];
+    EXPECT_TRUE(get_bulk().destroy_relation(elem1, edge, edgeElemOrds[0]));
+    EXPECT_TRUE(get_bulk().destroy_entity(edge));
+
+    stk::mesh::Entity elem2 = get_bulk().get_entity(stk::topology::ELEM_RANK, 2);
+    edges = get_bulk().get_connected_entities(elem2, stk::topology::EDGE_RANK);
+    EXPECT_EQ(12u, edges.size());
+    edgeElems = get_bulk().get_connected_entities(edges[5], stk::topology::ELEM_RANK);
+    EXPECT_EQ(1u, edgeElems.size());
+    EXPECT_EQ(elem2, edgeElems[0]);
+    edgeElemOrds = get_bulk().begin_ordinals(edges[5], stk::topology::ELEM_RANK);
+    edge = edges[5];
+    EXPECT_TRUE(get_bulk().destroy_relation(elem2, edge, edgeElemOrds[0]));
+    EXPECT_TRUE(get_bulk().destroy_entity(edge));
+
+    get_bulk().modification_end();
+  }
 };
 
-TEST_F(NgpMeshTest, get_nodes_using_FastMeshIndex)
+NGP_TEST_F(NgpMeshTest, get_nodes_using_FastMeshIndex)
 {
   run_get_nodes_using_FastMeshIndex_test();
 }
 
-TEST_F(NgpMeshTest, get_nodes_using_FastMeshIndex_custom_NgpMemSpace)
+NGP_TEST_F(NgpMeshTest, get_nodes_using_FastMeshIndex_custom_NgpMemSpace)
 {
   run_get_nodes_using_FastMeshIndex_test<NgpMeshDefaultMemSpace>();
+}
+
+NGP_TEST_F(NgpMeshTest, hexes_with_edges_update_connectivity)
+{
+  if (stk::parallel_machine_size(MPI_COMM_WORLD) > 1) { GTEST_SKIP(); }
+
+  setup_mesh(1,1,2);
+  stk::mesh::get_updated_ngp_mesh(get_bulk());
+
+  stk::mesh::Part& edgePart = get_meta().declare_part("edges", stk::topology::EDGE_RANK);
+
+  stk::mesh::create_edges(get_bulk(), get_meta().universal_part(), &edgePart);
+  stk::mesh::get_updated_ngp_mesh(get_bulk());
+
+  EXPECT_EQ(20u, stk::mesh::count_entities(get_bulk(), stk::topology::EDGE_RANK, edgePart));
+
+  unsigned numExpectedEdgesPerElement = 12;
+  run_edge_check(numExpectedEdgesPerElement);
+
+  delete_edge_on_each_element();
+  EXPECT_EQ(18u, stk::mesh::count_entities(get_bulk(), stk::topology::EDGE_RANK, edgePart));
+
+  numExpectedEdgesPerElement = 11;
+  run_edge_check(numExpectedEdgesPerElement);
 }
 
 class NgpMeshRankLimit : public stk::mesh::fixtures::TestHexFixture {};
@@ -192,11 +260,14 @@ TEST(StkVectorGpuTest, gpu_runs)
   run_vector_gpu_test();
 }
 
-void check_volatile_fast_shared_comm_map_values_on_device(const stk::mesh::NgpMesh & ngpMesh, int proc, const stk::mesh::DeviceCommMapIndices & deviceCommMapIndicesGold)
+void check_volatile_fast_shared_comm_map_values_on_device(
+    const stk::mesh::NgpMesh & ngpMesh, int proc,
+    const stk::mesh::DeviceCommMapIndices<stk::ngp::MemSpace> & deviceCommMapIndicesGold)
 {
-  auto test = KOKKOS_LAMBDA(size_t i)
+  auto test = KOKKOS_LAMBDA(size_t /*i*/)
               {
-                stk::mesh::DeviceCommMapIndices deviceCommMapIndices = ngpMesh.volatile_fast_shared_comm_map(stk::topology::NODE_RANK, proc);
+                stk::mesh::DeviceCommMapIndices<stk::ngp::MemSpace> deviceCommMapIndices =
+                    ngpMesh.volatile_fast_shared_comm_map(stk::topology::NODE_RANK, proc);
 
                 for (size_t entry = 0; entry < deviceCommMapIndices.size(); ++entry) {
                   NGP_EXPECT_EQ(deviceCommMapIndicesGold[entry].bucket_id, deviceCommMapIndices[entry].bucket_id);
@@ -221,8 +292,10 @@ NGP_TEST_F(NgpMeshTest, volatileFastSharedCommMap)
   std::vector<int> comm_procs = get_bulk().all_sharing_procs(stk::topology::NODE_RANK);
 
   for (int proc : comm_procs) {
-    stk::mesh::HostCommMapIndices hostNgpMeshIndices = get_bulk().volatile_fast_shared_comm_map<stk::ngp::MemSpace>(stk::topology::NODE_RANK, proc);
-    stk::mesh::DeviceCommMapIndices deviceNgpMeshIndices("deviceNgpMeshIndices", hostNgpMeshIndices.extent(0));
+    stk::mesh::HostCommMapIndices<stk::ngp::MemSpace> hostNgpMeshIndices =
+        get_bulk().template volatile_fast_shared_comm_map<stk::ngp::MemSpace>(stk::topology::NODE_RANK, proc);
+    stk::mesh::DeviceCommMapIndices<stk::ngp::MemSpace> deviceNgpMeshIndices("deviceNgpMeshIndices",
+                                                                             hostNgpMeshIndices.extent(0));
 
     Kokkos::deep_copy(deviceNgpMeshIndices, hostNgpMeshIndices);
     check_volatile_fast_shared_comm_map_values_on_device(ngpMesh, proc, deviceNgpMeshIndices);
@@ -239,12 +312,102 @@ NGP_TEST_F(NgpMeshTest, volatileFastSharedCommMap_custom_NgpMemSpace)
   std::vector<int> comm_procs = get_bulk().all_sharing_procs(stk::topology::NODE_RANK);
 
   for (int proc : comm_procs) {
-    stk::mesh::HostCommMapIndices hostNgpMeshIndices = get_bulk().volatile_fast_shared_comm_map<stk::mesh::NgpMeshDefaultMemSpace>(stk::topology::NODE_RANK, proc);
-    stk::mesh::DeviceCommMapIndices deviceNgpMeshIndices("deviceNgpMeshIndices", hostNgpMeshIndices.extent(0));
+    stk::mesh::HostCommMapIndices<stk::ngp::MemSpace> hostNgpMeshIndices =
+        get_bulk().template volatile_fast_shared_comm_map<stk::mesh::NgpMeshDefaultMemSpace>(stk::topology::NODE_RANK, proc);
+    stk::mesh::DeviceCommMapIndices<stk::ngp::MemSpace> deviceNgpMeshIndices("deviceNgpMeshIndices",
+                                                                             hostNgpMeshIndices.extent(0));
 
     Kokkos::deep_copy(deviceNgpMeshIndices, hostNgpMeshIndices);
     check_volatile_fast_shared_comm_map_values_on_device(ngpMesh, proc, deviceNgpMeshIndices);
   }
+}
+
+void test_ngp_permutations_1side_2perms(const stk::mesh::BulkData& mesh,
+                                        const stk::mesh::Part& sidePart)
+{
+  stk::mesh::NgpMesh& ngpMesh = stk::mesh::get_updated_ngp_mesh(mesh);
+
+  stk::mesh::EntityRank sideRank = mesh.mesh_meta_data().side_rank();
+  stk::mesh::EntityVector sides;
+  stk::mesh::get_entities(mesh, sideRank, sidePart, sides);
+  EXPECT_EQ(1u, sides.size());
+  EXPECT_EQ(2u, mesh.num_connectivity(sides[0], stk::topology::ELEM_RANK));
+  const stk::mesh::Permutation* hostPerms = mesh.begin_permutations(sides[0], stk::topology::ELEM_RANK);
+  stk::mesh::Permutation expectedPerm1 = hostPerms[0];
+  stk::mesh::Permutation expectedPerm2 = hostPerms[1];
+
+  stk::mesh::for_each_entity_run(ngpMesh, sideRank, sidePart,
+  KOKKOS_LAMBDA(const stk::mesh::FastMeshIndex& sideIndex) {
+    stk::mesh::NgpMesh::Permutations perms = ngpMesh.get_permutations(sideRank, sideIndex, stk::topology::ELEM_RANK);
+    NGP_EXPECT_EQ(2u, perms.size());
+    NGP_EXPECT_EQ(expectedPerm1, perms[0]);
+    NGP_EXPECT_EQ(expectedPerm2, perms[1]);
+  });
+}
+
+NGP_TEST(TestNgpMesh, permutations)
+{
+  if (stk::parallel_machine_size(MPI_COMM_WORLD) > 1) { GTEST_SKIP(); }
+
+  std::string meshDesc =
+    "0,1,TRI_3_2D,1,2,3,block_1\n"
+    "0,2,TRI_3_2D,2,4,3,block_2\n"
+    "|dimension:2|sideset:name=surface_1; data=1,2";
+
+  std::shared_ptr<stk::mesh::BulkData> mesh = stk::mesh::MeshBuilder(MPI_COMM_WORLD)
+                                                  .set_spatial_dimension(2).create();
+  stk::unit_test_util::setup_text_mesh(*mesh, meshDesc);
+
+  stk::mesh::EntityRank sideRank = mesh->mesh_meta_data().side_rank();
+  stk::mesh::Part* sidePart = mesh->mesh_meta_data().get_part("surface_1");
+  STK_ThrowAssertMsg(sidePart != nullptr, "failed to find part for surface_1");
+
+  stk::mesh::EntityVector sides;
+  stk::mesh::get_entities(*mesh, sideRank, *sidePart, sides);
+  EXPECT_EQ(1u, sides.size());
+  EXPECT_EQ(2u, mesh->num_connectivity(sides[0], stk::topology::ELEM_RANK));
+
+  stk::mesh::Permutation expectedPerm1 = static_cast<stk::mesh::Permutation>(0);
+  stk::mesh::Permutation expectedPerm2 = static_cast<stk::mesh::Permutation>(1);
+  const stk::mesh::Permutation* permutations = mesh->begin_permutations(sides[0], stk::topology::ELEM_RANK);
+  EXPECT_EQ(expectedPerm1, permutations[0]);
+  EXPECT_EQ(expectedPerm2, permutations[1]);
+
+  test_ngp_permutations_1side_2perms(*mesh, *sidePart);
+}
+
+void test_ngp_local_ids(const stk::mesh::BulkData& mesh)
+{
+  stk::mesh::NgpMesh& ngpMesh = stk::mesh::get_updated_ngp_mesh(mesh);
+
+  stk::mesh::Entity elem1 = mesh.get_entity(stk::topology::ELEM_RANK, 1);
+  stk::mesh::Entity node1 = mesh.get_entity(stk::topology::NODE_RANK, 1);
+  unsigned expectedElem1LocalId = mesh.local_id(elem1);
+  unsigned expectedNode1LocalId = mesh.local_id(node1);
+
+  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1),
+    KOKKOS_LAMBDA(const int /*i*/) {
+    unsigned elem1LocalId = ngpMesh.local_id(elem1);
+    unsigned node1LocalId = ngpMesh.local_id(node1);
+    NGP_EXPECT_EQ(expectedElem1LocalId, elem1LocalId);
+    NGP_EXPECT_EQ(expectedNode1LocalId, node1LocalId);
+  });
+}
+
+NGP_TEST(TestNgpMesh, local_ids)
+{
+  if (stk::parallel_machine_size(MPI_COMM_WORLD) > 1) { GTEST_SKIP(); }
+
+  std::string meshDesc =
+    "0,1,TRI_3_2D,1,2,3,block_1\n"
+    "0,2,TRI_3_2D,2,4,3,block_2\n"
+    "|dimension:2|sideset:name=surface_1; data=1,2";
+
+  std::shared_ptr<stk::mesh::BulkData> mesh = stk::mesh::MeshBuilder(MPI_COMM_WORLD)
+                                                  .set_spatial_dimension(2).create();
+  stk::unit_test_util::setup_text_mesh(*mesh, meshDesc);
+
+  test_ngp_local_ids(*mesh);
 }
 
 namespace {
@@ -254,13 +417,12 @@ double reduce_on_host(stk::mesh::BulkData& bulk)
 
   double max_val = 0.0;
   Kokkos::Max<double> max_reduction(max_val);
-
   stk::mesh::for_each_entity_reduce(
     ngp_mesh,
     stk::topology::NODE_RANK,
     !stk::mesh::Selector(),
     max_reduction,
-    KOKKOS_LAMBDA(const stk::mesh::FastMeshIndex i, double& thread_value) {
+    KOKKOS_LAMBDA(const stk::mesh::FastMeshIndex /*i*/, double& thread_value) {
       max_reduction.join(thread_value, 1.0);
     });
 
@@ -277,6 +439,27 @@ TEST(NgpHostMesh, FieldForEachEntityReduceOnHost_fromTylerVoskuilen)
 
   auto maxZ = reduce_on_host(fixture.m_bulk_data);
   EXPECT_EQ(1.0, maxZ);
+}
+
+TEST(NgpDeviceMesh, dont_let_stacksize_get_out_of_control)
+{
+  constexpr size_t tol = 50;
+
+#ifdef SIERRA_MIGRATION
+  constexpr size_t expectedBulkDataSize = 1320;
+#else
+  constexpr size_t expectedBulkDataSize = 1256;
+#endif
+  EXPECT_NEAR(expectedBulkDataSize, sizeof(stk::mesh::BulkData), tol);
+
+  constexpr size_t expectedBucketSize = 976;
+  EXPECT_NEAR(expectedBucketSize, sizeof(stk::mesh::Bucket), tol);
+
+  constexpr size_t expectedDeviceMeshSize = 880;
+  EXPECT_NEAR(expectedDeviceMeshSize, sizeof(stk::mesh::DeviceMesh), tol);
+
+  constexpr size_t expectedDeviceBucketSize = 264;
+  EXPECT_NEAR(expectedDeviceBucketSize, sizeof(stk::mesh::DeviceBucket), tol);
 }
 
 void add_elements(std::unique_ptr<stk::mesh::BulkData>& bulk)

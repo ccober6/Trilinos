@@ -124,7 +124,7 @@ struct CuSparse10_SpMV_Data : public TPL_SpMV_Data<Kokkos::Cuda> {
     exec.fence();
     KOKKOS_IMPL_CUDA_SAFE_CALL(cudaFree(buffer));
 #endif
-    KOKKOS_CUSPARSE_SAFE_CALL(cusparseDestroySpMat(mat));
+    KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroySpMat(mat));
   }
 
   cusparseSpMatDescr_t mat;
@@ -136,7 +136,7 @@ struct CuSparse10_SpMV_Data : public TPL_SpMV_Data<Kokkos::Cuda> {
 // Data used by cuSPARSE <10.3 for CRS, and >=9 for BSR
 struct CuSparse9_SpMV_Data : public TPL_SpMV_Data<Kokkos::Cuda> {
   CuSparse9_SpMV_Data(const Kokkos::Cuda& exec_) : TPL_SpMV_Data(exec_) {}
-  ~CuSparse9_SpMV_Data() { KOKKOS_CUSPARSE_SAFE_CALL(cusparseDestroyMatDescr(mat)); }
+  ~CuSparse9_SpMV_Data() { KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroyMatDescr(mat)); }
 
   cusparseMatDescr_t mat;
 };
@@ -148,7 +148,7 @@ struct RocSparse_CRS_SpMV_Data : public TPL_SpMV_Data<Kokkos::HIP> {
   ~RocSparse_CRS_SpMV_Data() {
     // note: hipFree includes an implicit device synchronize
     KOKKOS_IMPL_HIP_SAFE_CALL(hipFree(buffer));
-    KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_destroy_spmat_descr(mat));
+    KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_destroy_spmat_descr(mat));
   }
 
   rocsparse_spmat_descr mat;
@@ -159,9 +159,9 @@ struct RocSparse_CRS_SpMV_Data : public TPL_SpMV_Data<Kokkos::HIP> {
 struct RocSparse_BSR_SpMV_Data : public TPL_SpMV_Data<Kokkos::HIP> {
   RocSparse_BSR_SpMV_Data(const Kokkos::HIP& exec_) : TPL_SpMV_Data(exec_) {}
   ~RocSparse_BSR_SpMV_Data() {
-    KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_destroy_mat_descr(mat));
+    KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_destroy_mat_descr(mat));
 #if (KOKKOSSPARSE_IMPL_ROCM_VERSION >= 50400)
-    KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_destroy_mat_info(info));
+    KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_destroy_mat_info(info));
 #endif
   }
 

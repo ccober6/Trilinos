@@ -85,7 +85,7 @@ public:
   {                                                                                                         \
     do {                                                                                                    \
       if (m_fpErrorBehavior == stk::expreval::Eval::FPErrorBehavior::Warn && !std::isfinite(val)) {         \
-        printf("error in expression evaluator function " name ": " __FILE__ ": " LINE_STRING);              \
+        printf("error in expression evaluator function " name ": " __FILE__ ": " LINE_STRING "\n");         \
       } else if (m_fpErrorBehavior == stk::expreval::Eval::FPErrorBehavior::Error && !std::isfinite(val)) { \
         STK_NGP_ThrowErrorMsg("error in expression evaluator function " name);                              \
       }                                                                                                     \
@@ -647,6 +647,19 @@ public:
         return val;
       }
       STK_NGP_ThrowErrorMsg("Incorrect number of arguments for pulse_3 function");
+      break;
+    }
+    case FunctionType::RELATIVE_ERROR: {
+      if (argumentCount == 2) {
+        double val = relative_error2(arguments[0], arguments[1]);
+        checkNgpNodeFPError(val, "relative_error2");
+        return val;
+      } else if (argumentCount == 3) {
+        double val = relative_error3(arguments[0], arguments[1], arguments[2]);
+        checkNgpNodeFPError(val, "relative_error3");
+        return val;
+      }
+      STK_NGP_ThrowErrorMsg("Incorrect number of arguments for relative_error function");
       break;
     }
     case FunctionType::EXPONENTIAL_PDF : {

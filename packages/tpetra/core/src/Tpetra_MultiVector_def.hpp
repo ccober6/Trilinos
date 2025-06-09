@@ -267,8 +267,8 @@ namespace { // (anonymous)
     // If you take a subview of a view with zero rows Kokkos::subview()
     // always returns a DualView with the same data pointers.  This will break
     // pointer equality testing in between two subviews of the same 2D View if
-    // it has zero row extent.  While the one (known) case where this was actually used 
-    // has been fixed, that sort of check could very easily be reintroduced in the future, 
+    // it has zero row extent.  While the one (known) case where this was actually used
+    // has been fixed, that sort of check could very easily be reintroduced in the future,
     // hence I've added this if check here.
     //
     // This is not a bug in Kokkos::subview(), just some very subtle behavior which
@@ -319,16 +319,16 @@ namespace { // (anonymous)
 
   template <class impl_scalar_type, class buffer_device_type>
   bool
-  runKernelOnHost ( 
-    Kokkos::DualView<impl_scalar_type*, buffer_device_type> imports 
+  runKernelOnHost (
+    Kokkos::DualView<impl_scalar_type*, buffer_device_type> imports
   )
   {
     if (! imports.need_sync_device ()) {
       return false; // most up-to-date on device
     }
-    else { // most up-to-date on host, 
+    else { // most up-to-date on host,
            // but if large enough, worth running on device anyway
-      size_t localLengthThreshold = 
+      size_t localLengthThreshold =
              Tpetra::Details::Behavior::multivectorKernelLocationThreshold();
       return imports.extent(0) <= localLengthThreshold;
     }
@@ -344,7 +344,7 @@ namespace { // (anonymous)
     }
     else { // most up-to-date on host
            // but if large enough, worth running on device anyway
-      size_t localLengthThreshold = 
+      size_t localLengthThreshold =
              Tpetra::Details::Behavior::multivectorKernelLocationThreshold();
       return X.getLocalLength () <= localLengthThreshold;
     }
@@ -863,7 +863,7 @@ namespace Tpetra {
       (LDA < lclNumRows, std::invalid_argument, "Map and DualView origView "
        "do not match.  LDA = " << LDA << " < this->getLocalLength() = " <<
        lclNumRows << ".  origView.extent(0) = " << origView.extent(0)
-       << ", origView.stride(1) = " << origView.d_view.stride(1) << ".");
+       << ", origView.stride(1) = " << origView.view_device().stride(1) << ".");
 
     if (whichVectors.size () == 1) {
       // If whichVectors has only one entry, we don't need to bother
@@ -1049,10 +1049,10 @@ namespace Tpetra {
   aliases(const MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>& other) const
   {
     //Don't actually get a view, just get pointers.
-    auto thisData = view_.getDualView().h_view.data();
-    auto otherData = other.view_.getDualView().h_view.data();
-    size_t thisSpan = view_.getDualView().h_view.span();
-    size_t otherSpan = other.view_.getDualView().h_view.span();
+    auto thisData = view_.getDualView().view_host().data();
+    auto otherData = other.view_.getDualView().view_host().data();
+    size_t thisSpan = view_.getDualView().view_host().span();
+    size_t otherSpan = other.view_.getDualView().view_host().span();
     return (otherData <= thisData && thisData < otherData + otherSpan)
       || (thisData <= otherData && otherData < thisData + thisSpan);
   }
@@ -1110,7 +1110,18 @@ namespace Tpetra {
 
     // We've already called checkSizes(), so this cast must succeed.
     MV& sourceMV = const_cast<MV &>(dynamic_cast<const MV&> (sourceObj));
-    const bool copyOnHost = runKernelOnHost(sourceMV);
+
+    bool copyOnHost;
+    if (importsAreAliased () && (this->constantNumberOfPackets () != 0) && Behavior::enableGranularTransfers()) {
+      // imports are aliased to the target. We already posted Irecvs
+      // into imports using a memory space that depends on GPU
+      // awareness. Therefore we want to modify target in the same
+      // memory space. See comments in DistObject::beginTransfer.
+      copyOnHost = ! Behavior::assumeMpiIsGPUAware ();
+    } else {
+      // We are free to choose the better memory space for copyAndPermute.
+      copyOnHost = runKernelOnHost(sourceMV);
+    }
     const char longFuncNameHost[] = "Tpetra::MultiVector::copyAndPermute[Host]";
     const char longFuncNameDevice[] = "Tpetra::MultiVector::copyAndPermute[Device]";
     const char tfecfFuncName[] = "copyAndPermute: ";
@@ -1150,7 +1161,7 @@ namespace Tpetra {
 
     if (verbose) {
       std::ostringstream os;
-      os << *prefix << "Copy" << endl;
+      os << *prefix << "Copy first " << numSameIDs << " elements" << endl;
       std::cerr << os.str ();
     }
 
@@ -1179,6 +1190,7 @@ namespace Tpetra {
     if (numSameIDs > 0) {
       const std::pair<size_t, size_t> rows (0, numSameIDs);
       if (copyOnHost) {
+        ProfilingRegion regionC ("Tpetra::MultiVector::copy[Host]");
         auto tgt_h = this->getLocalViewHost(Access::ReadWrite);
         auto src_h = sourceMV.getLocalViewHost(Access::ReadOnly);
 
@@ -1189,24 +1201,25 @@ namespace Tpetra {
 
           auto tgt_j = Kokkos::subview (tgt_h, rows, tgtCol);
           auto src_j = Kokkos::subview (src_h, rows, srcCol);
-          if (CM == ADD_ASSIGN) { 
+          if (CM == ADD_ASSIGN) {
             // Sum src_j into tgt_j
-            using range_t = 
+            using range_t =
                   Kokkos::RangePolicy<execution_space, size_t>;
             range_t rp(space, 0,numSameIDs);
             Tpetra::Details::AddAssignFunctor<decltype(tgt_j), decltype(src_j)>
                     aaf(tgt_j, src_j);
             Kokkos::parallel_for(rp, aaf);
           }
-          else { 
+          else {
             // Copy src_j into tgt_j
             // DEEP_COPY REVIEW - HOSTMIRROR-TO-HOSTMIRROR
-            Kokkos::deep_copy (space, tgt_j, src_j); 
+            Kokkos::deep_copy (space, tgt_j, src_j);
             space.fence();
           }
         }
       }
       else { // copy on device
+        ProfilingRegion regionC ("Tpetra::MultiVector::copy[Device]");
         auto tgt_d = this->getLocalViewDevice(Access::ReadWrite);
         auto src_d = sourceMV.getLocalViewDevice(Access::ReadOnly);
 
@@ -1217,19 +1230,19 @@ namespace Tpetra {
 
           auto tgt_j = Kokkos::subview (tgt_d, rows, tgtCol);
           auto src_j = Kokkos::subview (src_d, rows, srcCol);
-          if (CM == ADD_ASSIGN) { 
+          if (CM == ADD_ASSIGN) {
             // Sum src_j into tgt_j
-            using range_t = 
+            using range_t =
                   Kokkos::RangePolicy<execution_space, size_t>;
             range_t rp(space, 0,numSameIDs);
             Tpetra::Details::AddAssignFunctor<decltype(tgt_j), decltype(src_j)>
                     aaf(tgt_j, src_j);
             Kokkos::parallel_for(rp, aaf);
           }
-          else { 
+          else {
             // Copy src_j into tgt_j
             // DEEP_COPY REVIEW - DEVICE-TO-DEVICE
-            Kokkos::deep_copy (space, tgt_j, src_j); 
+            Kokkos::deep_copy (space, tgt_j, src_j);
             space.fence();
           }
         }
@@ -1256,6 +1269,7 @@ namespace Tpetra {
       }
       return;
     }
+    ProfilingRegion regionP ("Tpetra::MultiVector::permute");
 
     if (verbose) {
       std::ostringstream os;
@@ -1286,7 +1300,7 @@ namespace Tpetra {
         Kokkos::DualView<size_t*, device_type> tmpTgt ("tgtWhichVecs", numCols);
         tmpTgt.modify_host ();
         for (size_t j = 0; j < numCols; ++j) {
-          tmpTgt.h_view(j) = j;
+          tmpTgt.view_host()(j) = j;
         }
         if (! copyOnHost) {
           tmpTgt.sync_device ();
@@ -1311,7 +1325,7 @@ namespace Tpetra {
         Kokkos::DualView<size_t*, device_type> tmpSrc ("srcWhichVecs", numCols);
         tmpSrc.modify_host ();
         for (size_t j = 0; j < numCols; ++j) {
-          tmpSrc.h_view(j) = j;
+          tmpSrc.view_host()(j) = j;
         }
         if (! copyOnHost) {
           tmpSrc.sync_device ();
@@ -1588,7 +1602,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
     // clears out the 'modified' flags.
     if (packOnHost) {
       // nde 06 Feb 2020: If 'exports' does not require resize
-      // when reallocDualViewIfNeeded is called, the modified flags 
+      // when reallocDualViewIfNeeded is called, the modified flags
       // are not cleared out. This can result in host and device views
       // being out-of-sync, resuling in an error in exports.modify_* calls.
       // Clearing the sync flags prevents this possible case.
@@ -1597,7 +1611,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
     }
     else {
       // nde 06 Feb 2020: If 'exports' does not require resize
-      // when reallocDualViewIfNeeded is called, the modified flags 
+      // when reallocDualViewIfNeeded is called, the modified flags
       // are not cleared out. This can result in host and device views
       // being out-of-sync, resuling in an error in exports.modify_* calls.
       // Clearing the sync flags prevents this possible case.
@@ -1752,7 +1766,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
    Kokkos::DualView<impl_scalar_type*, buffer_device_type>& exports,
    Kokkos::DualView<size_t*, buffer_device_type> numExportPacketsPerLID,
    size_t& constantNumPackets) {
-     packAndPrepare(sourceObj, exportLIDs, exports, numExportPacketsPerLID, constantNumPackets, execution_space());    
+     packAndPrepare(sourceObj, exportLIDs, exports, numExportPacketsPerLID, constantNumPackets, execution_space());
    }
 // clang-format off
 
@@ -1804,7 +1818,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
         (newSize > 0)) {
 
       size_t offset = getLocalLength () - newSize;
-      reallocated = this->imports_.d_view.data() != view_.getDualView().d_view.data() + offset;
+      reallocated = this->imports_.view_device().data() != view_.getDualView().view_device().data() + offset;
       if (reallocated) {
         typedef std::pair<size_t, size_t> range_type;
         this->imports_ = DV(view_.getDualView(),
@@ -1864,8 +1878,8 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
   bool
   MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   importsAreAliased() {
-    return (this->imports_.d_view.data() + this->imports_.d_view.extent(0) ==
-            view_.getDualView().d_view.data() + view_.getDualView().d_view.extent(0));
+    return (this->imports_.view_device().data() + this->imports_.view_device().extent(0) ==
+            view_.getDualView().view_device().data() + view_.getDualView().view_device().extent(0));
   }
 
 
@@ -1893,7 +1907,6 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
     const char longFuncNameDevice[] = "Tpetra::MultiVector::unpackAndCombine[Device]";
     const char * longFuncName = unpackOnHost ? longFuncNameHost : longFuncNameDevice;
     const char tfecfFuncName[] = "unpackAndCombine: ";
-    ProfilingRegion regionUAC (longFuncName);
 
     // mfh 09 Sep 2016, 26 Sep 2017: The pack and unpack functions now
     // have the option to check indices.  We do so when Tpetra is in
@@ -1936,6 +1949,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
       return;
     }
 
+    ProfilingRegion regionUAC (longFuncName);
 
     const size_t numVecs = getNumVectors ();
     if (debugCheckIndices) {
@@ -2885,7 +2899,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
     k_alphas_type k_alphas ("alphas::tmp", numAlphas);
     k_alphas.modify_host ();
     for (size_t i = 0; i < numAlphas; ++i) {
-      k_alphas.h_view(i) = static_cast<impl_scalar_type> (alphas[i]);
+      k_alphas.view_host()(i) = static_cast<impl_scalar_type> (alphas[i]);
     }
     k_alphas.sync_device ();
     // Invoke the scale() overload that takes a device View of coefficients.
@@ -3185,7 +3199,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
         "The input MultiVector B has " << B.getNumVectors () << " column(s), "
         "but this MultiVector has " << numVecs << " column(s).");
     }
-  
+
     const impl_scalar_type theAlpha = static_cast<impl_scalar_type> (alpha);
     const impl_scalar_type theBeta = static_cast<impl_scalar_type> (beta);
     const impl_scalar_type theGamma = static_cast<impl_scalar_type> (gamma);
@@ -3708,22 +3722,20 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
     {
       const size_t newSize = X.imports_.extent (0) / numCols;
       const size_t offset = jj*newSize;
-      auto newImports = X.imports_;
-      newImports.d_view = subview (X.imports_.d_view,
+      auto device_view = subview (X.imports_.view_device(),
                                    range_type (offset, offset+newSize));
-      newImports.h_view = subview (X.imports_.h_view,
+      auto host_view = subview (X.imports_.view_host(),
                                    range_type (offset, offset+newSize));
-      this->imports_ = newImports;
+      this->imports_ = decltype(X.imports_)(device_view, host_view);
     }
     {
       const size_t newSize = X.exports_.extent (0) / numCols;
       const size_t offset = jj*newSize;
-      auto newExports = X.exports_;
-      newExports.d_view = subview (X.exports_.d_view,
+      auto device_view = subview (X.exports_.view_device(),
                                    range_type (offset, offset+newSize));
-      newExports.h_view = subview (X.exports_.h_view,
+      auto host_view = subview (X.exports_.view_host(),
                                    range_type (offset, offset+newSize));
-      this->exports_ = newExports;
+      this->exports_ = decltype(X.exports_)(device_view, host_view);
     }
     // These two DualViews already either have the right number of
     // entries, or zero entries.  This means that we don't need to
@@ -3800,7 +3812,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
       /// can change the local data and we do not know which one the user want as a copy
       throw std::runtime_error("Tpetra::MultiVector: A non-const view is alive outside and we cannot give a copy where host or device view can be modified outside");
     }
-    else { 
+    else {
       const bool useHostView = view_.host_view_use_count() >= view_.device_view_use_count();
       if (this->isConstantStride ()) {
         if (useHostView) {
@@ -3817,7 +3829,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
         for (size_t j = 0; j < numCols; ++j) {
           const size_t srcCol = this->whichVectors_[j];
           auto dstColView = Kokkos::subview (A_view, rowRange, j);
-          
+
           if (useHostView) {
             auto srcView_host = this->getLocalViewHost(Access::ReadOnly);
             auto srcColView_host = Kokkos::subview (srcView_host, rowRange, srcCol);
@@ -3993,7 +4005,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
   }
 
   template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-  typename MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::wrapped_dual_view_type 
+  typename MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::wrapped_dual_view_type
   MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   getWrappedDualView() const {
     return view_;
@@ -4488,7 +4500,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
     const size_t col = isConstantStride () ? j : whichVectors_[j];
     col_dual_view_type X_col =
       Kokkos::subview (view_, Kokkos::ALL (), col);
-    return Kokkos::Compat::persistingView (X_col.d_view);
+    return Kokkos::Compat::persistingView (X_col.view_device());
   }
 
   template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
@@ -4629,7 +4641,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
         // so we can't use our regular accessor functins
 
         // NOTE: This is an occasion where we do *not* want the auto-sync stuff
-        // to trigger (since this function is conceptually const).  Thus, we 
+        // to trigger (since this function is conceptually const).  Thus, we
         // get *copies* of the view's data instead.
         auto X_dev  = view_.getDeviceCopy();
         auto X_host = view_.getHostCopy();
@@ -4638,12 +4650,12 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
           // One single allocation
           Details::print_vector(out,"unified",X_host);
         }
-        else {          
+        else {
           Details::print_vector(out,"host",X_host);
           Details::print_vector(out,"dev",X_dev);
         }
       }
-    } 
+    }
     out.flush (); // make sure the ostringstream got everything
     return outStringP->str ();
   }

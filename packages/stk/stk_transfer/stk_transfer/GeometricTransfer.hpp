@@ -36,6 +36,7 @@
 #define  STK_GEOMETRICTRANSFER_HPP
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
@@ -83,14 +84,16 @@ public :
                     const std::string &name,
                     stk::ParallelMachine pm,
                     const double expansion_factor = 1.5,
-                    const stk::search::SearchMethod search_method = stk::search::KDTREE)
+                    const stk::search::SearchMethod search_method = stk::search::KDTREE,
+                    const double expansion_tolerance = std::numeric_limits<double>::max())
   : m_mesha(mesha),
   m_meshb(meshb),
   m_name (name),
   m_has_parallel_machine(true),
   m_parallel_machine(pm),
   m_expansion_factor(expansion_factor),
-  m_search_method(search_method)
+  m_search_method(search_method),
+  m_expansion_tolerance(expansion_tolerance)
   {
   }
 
@@ -98,13 +101,16 @@ public :
                     std::shared_ptr<MeshB> &meshb,
                     const std::string &name,
                     const double expansion_factor = 1.5,
-                    const stk::search::SearchMethod search_method = stk::search::KDTREE)
+                    const stk::search::SearchMethod search_method = stk::search::KDTREE,
+                    const double expansion_tolerance = std::numeric_limits<double>::max())
   : m_mesha(mesha),
   m_meshb(meshb),
   m_name (name),
   m_has_parallel_machine(false),
   m_expansion_factor(expansion_factor),
-  m_search_method(search_method)
+  m_search_method(search_method),
+  m_expansion_tolerance(expansion_tolerance)
+
   {
   }
 
@@ -130,43 +136,49 @@ protected :
   stk::ParallelMachine m_parallel_machine;
   const double          m_expansion_factor;
   const stk::search::SearchMethod m_search_method;
+  const double m_expansion_tolerance;
 
   EntityProcRelationVec m_global_range_to_domain;
   EntityKeyMap          m_local_range_to_domain;
 };
 
-
-template <class INTERPOLATE> void GeometricTransfer<INTERPOLATE>::coarse_search() {
-
+template <class INTERPOLATE>
+void GeometricTransfer<INTERPOLATE>::coarse_search()
+{
   if (!m_has_parallel_machine)  //in some cases we needed delayed construction since bulk data might not be set at transfer construction
   {
     m_parallel_machine = m_mesha->comm();
     m_has_parallel_machine = true;
   }
-  m_global_range_to_domain.clear();
 
   impl::coarse_search_impl<INTERPOLATE>(m_global_range_to_domain,
                 m_parallel_machine,
                 m_mesha.get(),
                 m_meshb.get(),
                 m_search_method,
-                m_expansion_factor);
+                m_expansion_factor,
+                m_expansion_tolerance);
 }
 
-template <class INTERPOLATE> void GeometricTransfer<INTERPOLATE>::communication() {
+template <class INTERPOLATE>
+void GeometricTransfer<INTERPOLATE>::communication()
+{
   const unsigned p_size = parallel_machine_size(m_parallel_machine);
   if (1 < p_size) {
     copy_domain_to_range_processors();
   }
 }
 
-template <class INTERPOLATE> void GeometricTransfer<INTERPOLATE>::local_search() {
+template <class INTERPOLATE>
+void GeometricTransfer<INTERPOLATE>::local_search()
+{
   localize_entity_key_map();
   INTERPOLATE::filter_to_nearest(m_local_range_to_domain, *m_mesha, *m_meshb);
 }
 
-
-template <class INTERPOLATE> void GeometricTransfer<INTERPOLATE>::apply(){
+template <class INTERPOLATE>
+void GeometricTransfer<INTERPOLATE>::apply()
+{
   m_mesha->update_values();
   INTERPOLATE::apply(*m_meshb, *m_mesha, m_local_range_to_domain);
   m_meshb->update_values();

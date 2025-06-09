@@ -112,7 +112,7 @@ namespace stk {
                           const stk::mesh::Part &part);
 
     stk::mesh::EntityRank get_entity_rank(const Ioss::GroupingEntity *entity,
-                                          const stk::mesh::MetaData &meta)
+                                          const stk::mesh::MetaData & /*meta*/)
     {
       switch (entity->type()) {
       case Ioss::NODEBLOCK:
@@ -1280,7 +1280,7 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
         return stk::topology::SHELL_TRI_6_ALL_FACE_SIDES;
       } else if (name == "shell4") {
         return stk::topology::SHELL_QUAD_4_ALL_FACE_SIDES;
-      } else if (name == "shel8") {
+      } else if (name == "shell8") {
         return stk::topology::SHELL_QUAD_8_ALL_FACE_SIDES;
       } else if (name == "shell9") {
         return stk::topology::SHELL_QUAD_9_ALL_FACE_SIDES;
@@ -1408,9 +1408,9 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
       }
     }
 
-    void internal_part_processing(Ioss::GroupingEntity *entity, stk::mesh::MetaData &meta, TopologyErrorHandler handler)
+    void internal_part_processing(Ioss::GroupingEntity *entity, stk::mesh::MetaData &meta, TopologyErrorHandler /*handler*/, bool createEmptyOmittedParts)
     {
-      if (include_entity(entity)) {
+      if (createEmptyOmittedParts || include_entity(entity)) {
         stk::mesh::Part & part = declare_stk_part(entity, meta);
         if(entity->property_exists("db_name")) {
           std::string canonName = entity->get_property("db_name").get_string();
@@ -1419,13 +1419,17 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
         if (entity->property_exists("id")) {
           meta.set_part_id(part, entity->get_property("id").get_int());
         }
-        set_io_part_attribute(entity, part);
+
+        if(include_entity(entity)) {
+          set_io_part_attribute(entity, part);
+        }
       }
     }
 
-    void internal_part_processing(Ioss::EntityBlock *entity, stk::mesh::MetaData &meta, TopologyErrorHandler handler)
+    void internal_part_processing(Ioss::EntityBlock *entity, stk::mesh::MetaData &meta, TopologyErrorHandler handler, bool createEmptyOmittedParts)
     {
-      if (include_entity(entity)) {
+      bool includeEntity = include_entity(entity);
+      if (createEmptyOmittedParts || includeEntity) {
         mesh::EntityRank type = get_entity_rank(entity, meta);
         stk::mesh::Part * part = nullptr;
         part = &meta.declare_part(entity->name(), type);
@@ -1436,7 +1440,10 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
         if (entity->property_exists("id")) {
             meta.set_part_id(*part, entity->get_property("id").get_int());
         }
-        set_io_part_attribute(entity, *part);
+
+        if(includeEntity) {
+          set_io_part_attribute(entity, *part);
+        }
 
         const Ioss::ElementTopology *topology = entity->topology();
         // Check spatial dimension of the element topology here so we can
@@ -1478,7 +1485,10 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
         } else {
           handler(*part);
         }
-        stk::io::define_io_fields(entity, Ioss::Field::ATTRIBUTE, *part, type);
+
+        if(includeEntity) {
+          stk::io::define_io_fields(entity, Ioss::Field::ATTRIBUTE, *part, type);
+        }
       }
     }
 
@@ -1513,7 +1523,7 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
         }
     }
 
-    bool is_valid_nodeset_field(const stk::mesh::Part &part,
+    bool is_valid_nodeset_field(const stk::mesh::Part & /*part*/,
                                        const stk::mesh::EntityRank partType,
                                        Ioss::GroupingEntity *entity,
                                        FieldAndName &namedField,
@@ -1667,7 +1677,7 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
     }
 
     void getNamedFields(const stk::mesh::MetaData &meta,
-                        Ioss::GroupingEntity *ioEntity,
+                        Ioss::GroupingEntity * /*ioEntity*/,
                         const Ioss::Field::RoleType filterRole,
                         std::vector<FieldAndName> &namedFields)
     {
@@ -1837,7 +1847,8 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
       }
     }
 
-    const std::string get_suffix_for_field_at_state(enum stk::mesh::FieldState fieldState, std::vector<std::string>* multiStateSuffixes)
+    const std::string get_suffix_for_field_at_state(enum stk::mesh::FieldState fieldState,
+                                                    const std::vector<std::string>* multiStateSuffixes)
     {
       if(nullptr != multiStateSuffixes) {
           STK_ThrowRequireMsg((multiStateSuffixes->size() >= fieldState),
@@ -1872,26 +1883,27 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
     }
 
     std::string get_stated_field_name(const std::string &fieldBaseName, stk::mesh::FieldState stateIdentifier,
-                                      std::vector<std::string>* multiStateSuffixes)
+                                      const std::vector<std::string>* multiStateSuffixes)
     {
       std::string field_name_with_suffix = fieldBaseName + get_suffix_for_field_at_state(stateIdentifier, multiStateSuffixes);
       return field_name_with_suffix;
     }
 
-    bool field_state_exists_on_io_entity(const std::string& dbName, const stk::mesh::FieldBase* field, stk::mesh::FieldState stateIdentifier,
-                                         Ioss::GroupingEntity *ioEntity, std::vector<std::string>* multiStateSuffixes)
+    bool field_state_exists_on_io_entity(const std::string& dbName, const stk::mesh::FieldBase* /*field*/, stk::mesh::FieldState stateIdentifier,
+                                         Ioss::GroupingEntity *ioEntity, const std::vector<std::string>* multiStateSuffixes)
     {
         std::string fieldNameWithSuffix = get_stated_field_name(dbName, stateIdentifier, multiStateSuffixes);
         return ioEntity->field_exists(fieldNameWithSuffix);
     }
 
-    bool all_field_states_exist_on_io_entity(const std::string& dbName, const stk::mesh::FieldBase* field, Ioss::GroupingEntity *ioEntity,
-                                             std::vector<stk::mesh::FieldState> &missingStates, std::vector<std::string>* inputMultiStateSuffixes)
+    bool all_field_states_exist_on_io_entity(const std::string& dbName, const stk::mesh::FieldBase* field,
+                                             Ioss::GroupingEntity *ioEntity, std::vector<stk::mesh::FieldState> &missingStates,
+                                             const std::vector<std::string>* inputMultiStateSuffixes)
     {
         bool allStatesExist = true;
         size_t stateCount = field->number_of_states();
 
-        std::vector<std::string>* multiStateSuffixes = stateCount > 2 ? inputMultiStateSuffixes : nullptr;
+        const std::vector<std::string>* multiStateSuffixes = stateCount > 2 ? inputMultiStateSuffixes : nullptr;
 
         if(nullptr != multiStateSuffixes) {
             STK_ThrowRequire(multiStateSuffixes->size() >= stateCount);
@@ -1928,7 +1940,7 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
             stk::mesh::FieldState stateIdentifier = static_cast<stk::mesh::FieldState>(state);
             bool fieldExists = field_state_exists_on_io_entity(name, field, stateIdentifier, ioEntity, multiStateSuffixes);
             if (!ignoreMissingFields) {
-              const sierra::String s = multiStateSuffixes != nullptr ? (*multiStateSuffixes)[state] : std::to_string(state);
+              const std::string s = multiStateSuffixes != nullptr ? (*multiStateSuffixes)[state] : std::to_string(state);
               STK_ThrowRequireMsg(fieldExists, "Field " << field->name() << s << " does not exist in input database");
             }
             if (fieldExists) {
@@ -2209,7 +2221,6 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
       if (params.get_subset_selector(    )) ownSelector &= *params.get_subset_selector();
       if (params.get_output_selector(rank)) ownSelector &= *params.get_output_selector(rank);
 
-      int64_t allNodes = count_selected_nodes(params, allSelector);
       int64_t ownNodes = count_selected_nodes(params, ownSelector);
 
       const std::string name("nodeblock_1");
@@ -2217,6 +2228,7 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
       Ioss::NodeBlock * nb = params.io_region().get_node_block(name);
       if(nb == nullptr)
       {
+          int64_t allNodes = count_selected_nodes(params, allSelector);
           nb = new Ioss::NodeBlock(params.io_region().get_database(),
                                    name, allNodes, spatialDim);
           params.io_region().add( nb );
@@ -2250,12 +2262,12 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
       if (params.get_subset_selector(    )) ownSelector &= *params.get_subset_selector();
       if (params.get_output_selector(rank)) ownSelector &= *params.get_output_selector(rank);
 
-      int64_t allNodes = count_selected_nodes(params, allSelector);
       int64_t ownNodes = count_selected_nodes(params, ownSelector);
 
       Ioss::NodeSet *ns = ioRegion.get_nodeset(name);
       if(ns == nullptr)
       {
+          int64_t allNodes = count_selected_nodes(params, allSelector);
           ns = new Ioss::NodeSet( ioRegion.get_database(), name, allNodes);
           ioRegion.add(ns);
 
@@ -2354,7 +2366,7 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
                              stk::mesh::Selector selector,
                              stk::mesh::Part &part,
                              Ioss::SideSet *sset,
-                             int spatialDimension,
+                             int /*spatialDimension*/,
                              bool createNodeset)
       {
         stk::mesh::EntityRank type = part.primary_entity_rank();
@@ -4025,7 +4037,7 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
 
     struct DefineOutputFunctor
     {
-      void operator()(stk::io::OutputParams& params, stk::mesh::Part &part, stk::mesh::EntityRank rank, Ioss::GroupingEntity *ge, Ioss::Field::RoleType role)
+      void operator()(stk::io::OutputParams& /*params*/, stk::mesh::Part &part, stk::mesh::EntityRank rank, Ioss::GroupingEntity *ge, Ioss::Field::RoleType role)
       {  stk::io::ioss_add_fields(part, rank, ge, role); }
     };
 
@@ -4115,12 +4127,19 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
 
     Ioss::DatabaseIO *create_database_for_subdomain(const std::string &baseFilename,
                                                     int indexSubdomain,
-                                                    int numSubdomains)
+                                                    int numSubdomains,
+                                                    bool use64Bit)
     {
         std::string parallelFilename{construct_filename_for_serial_or_parallel(baseFilename, numSubdomains, indexSubdomain)};
+        Ioss::PropertyManager properties;
+
+        if (use64Bit) {
+            properties.add(Ioss::Property("INTEGER_SIZE_DB", 8));
+            properties.add(Ioss::Property("INTEGER_SIZE_API", 8));
+        }
 
         std::string dbtype("exodusII");
-        Ioss::DatabaseIO *dbo = Ioss::IOFactory::create(dbtype, parallelFilename, Ioss::WRITE_RESULTS, MPI_COMM_SELF);
+        Ioss::DatabaseIO *dbo = Ioss::IOFactory::create(dbtype, parallelFilename, Ioss::WRITE_RESULTS, MPI_COMM_SELF, properties);
 
         return dbo;
     }
@@ -4414,7 +4433,6 @@ const stk::mesh::FieldBase *declare_stk_field_internal(stk::mesh::MetaData &meta
 
         filter_nodes_by_local_connectivity(bulk, params.get_subset_selector(), nodes);
     }
-
 
   }//namespace io
 }//namespace stk

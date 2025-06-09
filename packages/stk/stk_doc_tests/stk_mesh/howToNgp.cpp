@@ -15,6 +15,7 @@
 #include <stk_mesh/base/CreateEdges.hpp>
 #include <stk_mesh/base/SkinBoundary.hpp>
 #include <stk_mesh/base/GetNgpField.hpp>
+#include <stk_mesh/base/GetNgpMesh.hpp>
 #include <stk_util/util/ReportHandler.hpp>
 #include <stk_util/parallel/Parallel.hpp>
 #include <stk_util/environment/WallTime.hpp>
@@ -372,13 +373,12 @@ void run_connected_face_test(const stk::mesh::BulkData& bulk)
   typedef stk::ngp::TeamPolicy<stk::mesh::NgpMesh::MeshExecSpace>::member_type TeamHandleType;
   const auto& teamPolicy = stk::ngp::TeamPolicy<stk::mesh::NgpMesh::MeshExecSpace>(ngpMesh.num_buckets(stk::topology::ELEM_RANK),
                                                                                  Kokkos::AUTO);
-
   Kokkos::parallel_for(teamPolicy,
                        KOKKOS_LAMBDA(const TeamHandleType& team)
                        {
                          const stk::mesh::NgpMesh::BucketType& bucket = ngpMesh.get_bucket(stk::topology::ELEM_RANK,
                          team.league_rank());
-                         unsigned numElems = bucket.size();
+                         const unsigned numElems = bucket.size();
 
                          Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numElems), [&] (const int& i)
                          {
@@ -409,9 +409,8 @@ void run_connected_face_test(const stk::mesh::BulkData& bulk)
 
 TEST_F(NgpHowTo, loopOverElemFaces)
 {
-  if (stk::parallel_machine_size(MPI_COMM_WORLD) > 1) {
-    GTEST_SKIP();
-  }
+  if (stk::parallel_machine_size(MPI_COMM_WORLD) > 1) { GTEST_SKIP(); }
+
   setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
   auto &field = get_meta().declare_field<double>(stk::topology::NODE_RANK, "myField");
   stk::mesh::put_field_on_mesh(field, get_meta().universal_part(), nullptr);
@@ -424,7 +423,7 @@ void add_constraint_on_nodes_1_thru_4(stk::mesh::BulkData& bulk,
                                       stk::mesh::EntityId constraintId)
 {
   bulk.modification_begin();
-  stk::mesh::Entity constraintEntity = bulk.declare_constraint(constraintId);
+  stk::mesh::Entity constraintEntity = bulk.declare_entity(stk::topology::CONSTRAINT_RANK, constraintId, bulk.mesh_meta_data().universal_part());
   for(stk::mesh::EntityId nodeId = 1; nodeId <= 4; ++nodeId) {
     stk::mesh::Entity node = bulk.get_entity(stk::topology::NODE_RANK, nodeId);
     stk::mesh::ConnectivityOrdinal ord = static_cast<stk::mesh::ConnectivityOrdinal>(nodeId-1);
@@ -451,7 +450,7 @@ void run_constraint_node_test(const stk::mesh::BulkData& bulk,
 
   const stk::mesh::NgpMesh & ngpMesh = stk::mesh::get_updated_ngp_mesh(bulk);
   Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, 1),
-                       KOKKOS_LAMBDA(const unsigned& i) {
+                       KOKKOS_LAMBDA(const unsigned& /*i*/) {
                          stk::mesh::FastMeshIndex constraintMeshIndex = ngpMesh.fast_mesh_index(constraint);
 
                          stk::mesh::NgpMesh::ConnectedEntities ngpNodes = ngpMesh.get_connected_entities(stk::topology::CONSTRAINT_RANK, constraintMeshIndex, stk::topology::NODE_RANK);

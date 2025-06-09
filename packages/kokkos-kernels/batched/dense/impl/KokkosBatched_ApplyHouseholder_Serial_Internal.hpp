@@ -13,8 +13,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //@HEADER
-#ifndef __KOKKOSBATCHED_APPLY_HOUSEHOLDER_SERIAL_INTERNAL_HPP__
-#define __KOKKOSBATCHED_APPLY_HOUSEHOLDER_SERIAL_INTERNAL_HPP__
+#ifndef KOKKOSBATCHED_APPLY_HOUSEHOLDER_SERIAL_INTERNAL_HPP
+#define KOKKOSBATCHED_APPLY_HOUSEHOLDER_SERIAL_INTERNAL_HPP
 
 /// \author Kyungjoo Kim (kyukim@sandia.gov)
 
@@ -35,7 +35,7 @@ struct SerialApplyLeftHouseholderInternal {
                                            /* */ ValueType* a1t, const int a1ts,
                                            /* */ ValueType* A2, const int as0, const int as1,
                                            /* */ ValueType* w1t) {
-    typedef ValueType value_type;
+    using value_type = ValueType;
 
     /// u2  m x 1
     /// a1t 1 x n
@@ -75,7 +75,7 @@ struct SerialApplyRightHouseholderInternal {
                                            /* */ ValueType* a1, const int a1s,
                                            /* */ ValueType* A2, const int as0, const int as1,
                                            /* */ ValueType* w1) {
-    typedef ValueType value_type;
+    using value_type = ValueType;
     /// u2 n x 1
     /// a1 m x 1
     /// A2 m x n

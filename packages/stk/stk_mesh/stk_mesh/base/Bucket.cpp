@@ -64,7 +64,7 @@ struct AddEntityFunctor
 
   template <EntityRank Rank, ConnectivityType OtherType>
   void operator()(Bucket& thisBucket, impl::BucketConnDynamic& connectivity, Bucket*)
-  {connectivity.grow_if_necessary(thisBucket.size());}
+  {connectivity.grow_if_necessary(thisBucket.size()-1);}
 
   bool is_modifying() const { return true; }
 };
@@ -101,8 +101,6 @@ struct ClearEntityFunctor
   void operator()(Bucket&, impl::BucketConnDynamic& connectivity)
   { connectivity.remove_connectivity(m_bucketOrdinal); }
 
-  bool is_modifying() const { return true; }
-
   unsigned m_bucketOrdinal;
 };
 
@@ -115,16 +113,19 @@ struct ReplaceEntityFunctor
   template <EntityRank Rank, ConnectivityType OtherType>
   void operator()(Bucket&, impl::BucketConnectivity<Rank,OtherType>& connectivity, Bucket*)
   {
-    connectivity.replace_connectivity(m_destOrdinal,
-                      connectivity.num_connectivity(m_srcOrdinal),
-                      connectivity.begin(m_srcOrdinal),
-                      connectivity.begin_ordinals(m_srcOrdinal),
-                      connectivity.begin_permutations(m_srcOrdinal));
+    connectivity.replace_connectivity(m_destOrdinal, m_srcOrdinal);
   }
 
   template <EntityRank Rank, ConnectivityType OtherType>
   void operator()(Bucket&, impl::BucketConnDynamic& connectivity, Bucket*)
-  { connectivity.swap_connectivity(m_srcOrdinal, m_destOrdinal); }
+  {
+    if(connectivity.total_num_connectivity() > 0 &&
+       (connectivity.num_connectivity(m_srcOrdinal) > 0 ||
+        connectivity.num_connectivity(m_destOrdinal) > 0))
+    {
+      connectivity.swap_connectivity(m_srcOrdinal, m_destOrdinal);
+    }
+  }
 
   bool is_modifying() const { return true; }
 
@@ -245,36 +246,6 @@ unsigned get_default_bucket_capacity() { return impl::default_maximum_bucket_cap
 unsigned get_default_initial_bucket_capacity() { return impl::default_initial_bucket_capacity; }
 unsigned get_default_maximum_bucket_capacity() { return impl::default_maximum_bucket_capacity; }
 
-bool raw_part_equal( const unsigned * lhs , const unsigned * rhs )
-{
-  bool result = true ;
-  {
-    const unsigned * const end_lhs = lhs + *lhs + 1 ;
-    while ( result && end_lhs != lhs ) {
-      result = *lhs == *rhs ;
-      ++lhs ; ++rhs ;
-    }
-  }
-  return result ;
-}
-
-inline
-bool bucket_key_less( const unsigned * lhs , const unsigned * rhs )
-{
-  const unsigned * const last_lhs = lhs + ( *lhs < *rhs ? *lhs : *rhs );
-  while ( last_lhs != lhs && *lhs == *rhs ) { ++lhs ; ++rhs ; }
-  return *lhs < *rhs ;
-}
-
-// The part count and part ordinals are less
-bool BucketLess::operator()( const Bucket * lhs_bucket ,
-                             const unsigned * rhs ) const
-{ return bucket_key_less( lhs_bucket->key() , rhs ); }
-
-bool BucketLess::operator()( const unsigned * lhs ,
-                             const Bucket * rhs_bucket ) const
-{ return bucket_key_less( lhs , rhs_bucket->key() ); }
-
 //----------------------------------------------------------------------
 
 Bucket::Bucket(BulkData & mesh,
@@ -287,23 +258,23 @@ Bucket::Bucket(BulkData & mesh,
     m_entity_rank(entityRank),
     m_topology(),
     m_key(key),
-    m_partOrdsBeginEnd(m_key.data()+1,m_key.data()+1+m_key[0]),
+    m_partOrdsBeginEnd(m_key.data(),m_key.data()+m_key.size()),
     m_capacity(initialCapacity),
     m_maxCapacity(maximumCapacity),
     m_size(0),
     m_bucket_id(bucketId),
-    m_ngp_bucket_id(INVALID_BUCKET_ID),
-    m_is_modified(true),
+    m_ngpMeshBucketId(INVALID_BUCKET_ID),
+    m_ngpFieldBucketId(INVALID_BUCKET_ID),
+    m_ngpMeshBucketIsModified(true),
+    m_ngpFieldBucketIsModified(true),
     m_entities(maximumCapacity),
     m_partition(nullptr),
     m_node_kind(INVALID_CONNECTIVITY_TYPE),
     m_edge_kind(INVALID_CONNECTIVITY_TYPE),
     m_face_kind(INVALID_CONNECTIVITY_TYPE),
-    m_element_kind(INVALID_CONNECTIVITY_TYPE),
     m_fixed_node_connectivity(),
     m_fixed_edge_connectivity(),
     m_fixed_face_connectivity(),
-    m_fixed_element_connectivity(),
     m_dynamic_node_connectivity(initialCapacity),
     m_dynamic_edge_connectivity(initialCapacity, should_store_permutations(entityRank, stk::topology::EDGE_RANK)),
     m_dynamic_face_connectivity(initialCapacity, should_store_permutations(entityRank, stk::topology::FACE_RANK)),
@@ -321,13 +292,10 @@ Bucket::Bucket(BulkData & mesh,
   setup_connectivity(m_topology, entityRank, stk::topology::NODE_RANK, m_node_kind, m_fixed_node_connectivity);
   setup_connectivity(m_topology, entityRank, stk::topology::EDGE_RANK, m_edge_kind, m_fixed_edge_connectivity);
   setup_connectivity(m_topology, entityRank, stk::topology::FACE_RANK, m_face_kind, m_fixed_face_connectivity);
-  setup_connectivity(m_topology, entityRank, stk::topology::ELEMENT_RANK, m_element_kind, m_fixed_element_connectivity);
 
-  m_parts.reserve(m_key.size()-1);
+  m_parts.reserve(m_key.size());
   supersets(m_parts);
   m_mesh.new_bucket_callback(m_entity_rank, m_parts, m_capacity, this);
-
-  initialize_ngp_field_bucket_ids();
 }
 
 Bucket::~Bucket()
@@ -342,7 +310,6 @@ size_t Bucket::memory_size_in_bytes() const
   bytes += m_fixed_node_connectivity.heap_memory_in_bytes();
   bytes += m_fixed_edge_connectivity.heap_memory_in_bytes();
   bytes += m_fixed_face_connectivity.heap_memory_in_bytes();
-  bytes += m_fixed_element_connectivity.heap_memory_in_bytes();
   bytes += m_dynamic_node_connectivity.heap_memory_in_bytes();
   bytes += m_dynamic_edge_connectivity.heap_memory_in_bytes();
   bytes += m_dynamic_face_connectivity.heap_memory_in_bytes();
@@ -372,10 +339,7 @@ void Bucket::change_existing_connectivity(unsigned bucket_ordinal, stk::mesh::En
 
 void Bucket::change_existing_permutation_for_connected_element(unsigned bucket_ordinal_of_lower_ranked_entity, unsigned elem_connectivity_ordinal, stk::mesh::Permutation permut)
 {
-    stk::mesh::Permutation *perms = m_element_kind == FIXED_CONNECTIVITY ?
-        m_fixed_element_connectivity.begin_permutations(bucket_ordinal_of_lower_ranked_entity)
-        :
-        m_dynamic_element_connectivity.begin_permutations(bucket_ordinal_of_lower_ranked_entity);
+    stk::mesh::Permutation *perms = m_dynamic_element_connectivity.begin_permutations(bucket_ordinal_of_lower_ranked_entity);
 
     if (perms)
     {
@@ -522,7 +486,8 @@ std::ostream & operator << ( std::ostream & s , const Bucket & k )
   return s ;
 }
 
-std::ostream &
+#ifndef STK_HIDE_DEPRECATED_CODE // Delete after June 2025
+STK_DEPRECATED std::ostream &
 print( std::ostream & os , const std::string & indent , const Bucket & bucket )
 {
   const MetaData & mesh_meta_data = bucket.mesh().mesh_meta_data();
@@ -553,6 +518,7 @@ print( std::ostream & os , const std::string & indent , const Bucket & bucket )
 
   return os ;
 }
+#endif
 
 struct EntityRankLess
 {
@@ -605,69 +571,15 @@ unsigned Bucket::get_others_index_count(unsigned bucket_ordinal, EntityRank rank
 }
 
 //----------------------------------------------------------------------
-void Bucket::initialize_ngp_field_bucket_ids()
-{
-  const MetaData& meta = mesh().mesh_meta_data();
-  const FieldVector& allFields = meta.get_fields();
-  m_ngp_field_bucket_id.resize(allFields.size());
-  m_ngp_field_is_modified.resize(allFields.size());
-
-  for(FieldBase* field : allFields) {
-    m_ngp_field_bucket_id[field->mesh_meta_data_ordinal()] = INVALID_BUCKET_ID;
-    m_ngp_field_is_modified[field->mesh_meta_data_ordinal()] = false;
-  }
-}
-
-void Bucket::grow_ngp_field_bucket_ids()
-{
-  const MetaData& meta = mesh().mesh_meta_data();
-  const FieldVector& allFields = meta.get_fields();
-
-  const unsigned oldNumFields = m_ngp_field_bucket_id.size();
-  const unsigned newNumFields = allFields.size();
-  STK_ThrowRequire(newNumFields >= oldNumFields);
-
-  const unsigned numNewFields = newNumFields - oldNumFields;
-  for (unsigned i = 0; i < numNewFields; ++i) {
-    m_ngp_field_bucket_id.push_back(INVALID_BUCKET_ID);
-    m_ngp_field_is_modified.push_back(false);
-  }
-}
-
-void Bucket::set_ngp_field_bucket_id(unsigned fieldOrdinal, unsigned ngpFieldBucketId)
-{
-  STK_ThrowRequire(fieldOrdinal < m_ngp_field_bucket_id.size());
-  m_ngp_field_bucket_id[fieldOrdinal] = ngpFieldBucketId;
-  m_ngp_field_is_modified[fieldOrdinal] = false;
-}
-
-unsigned Bucket::get_ngp_field_bucket_id(unsigned fieldOrdinal) const
-{
-  STK_ThrowRequire(fieldOrdinal < m_ngp_field_bucket_id.size());
-  return m_ngp_field_bucket_id[fieldOrdinal];
-}
-
-unsigned Bucket::get_ngp_field_bucket_is_modified(unsigned fieldOrdinal) const
-{
-  return m_ngp_field_is_modified[fieldOrdinal];
-}
-
 void Bucket::reset_part_ord_begin_end()
 {
-  m_partOrdsBeginEnd.first = m_key.data()+1;
-  m_partOrdsBeginEnd.second = m_key.data()+1+m_key[0];
+  m_partOrdsBeginEnd.first = m_key.data();
+  m_partOrdsBeginEnd.second = m_key.data()+m_key.size();
 }
 
 void Bucket::reset_bucket_key(const OrdinalVector& newPartOrdinals)
 {
-  unsigned newPartCount = newPartOrdinals.size();
-
-  m_key.resize(newPartCount + 1);
-  m_key[0] = newPartCount;
-
-  for(unsigned i = 0; i < newPartCount; i++) {
-    m_key[i+1] = newPartOrdinals[i];
-  }
+  m_key = newPartOrdinals;
 }
 
 void Bucket::reset_bucket_parts(const OrdinalVector& newPartOrdinals)
@@ -691,18 +603,17 @@ int Bucket::parallel_owner_rank(unsigned ordinal) const
   return m_mesh.parallel_owner_rank(m_entities[ordinal]);
 }
 
-void Bucket::reset_entity_location(Entity entity, unsigned to_ordinal, const FieldVector* fields)
+void Bucket::reset_entity_location(unsigned to_ordinal, const Bucket* fromBucket, unsigned fromOrdinal, const std::vector<FieldBase*>* fields)
 {
+  STK_ThrowAssert(fromBucket != nullptr);
   mark_for_modification();
-  Bucket & from_bucket = mesh().bucket(entity);
-  const unsigned from_ordinal = mesh().bucket_ordinal(entity);
 
-  m_entities[to_ordinal]    = entity;
+  m_entities[to_ordinal] = (*fromBucket)[fromOrdinal];
 
-  mesh().set_mesh_index(entity, this, to_ordinal);
+  mesh().set_mesh_index(m_entities[to_ordinal], this, to_ordinal);
 
   m_mesh.copy_entity_fields_callback(m_entity_rank, m_bucket_id, to_ordinal,
-                                     from_bucket.m_bucket_id, from_ordinal, fields);
+                                     fromBucket->m_bucket_id, fromOrdinal, fields);
 }
 
 void Bucket::reset_empty_space(const FieldVector & fields)
@@ -723,7 +634,7 @@ void Bucket::add_entity(Entity entity)
     mesh().set_mesh_index(entity, this, m_size);
   }
 
-  this->mesh().add_entity_callback(entity_rank(), bucket_id(), capacity(), m_size);
+  this->mesh().add_entity_callback(entity_rank(), bucket_id(), m_size+1, capacity(), m_size);
   ++m_size;
 
   AddEntityFunctor functor;
@@ -742,11 +653,15 @@ Bucket::grow_capacity()
   m_dynamic_other_connectivity.increase_bucket_capacity(m_capacity);
 }
 
-bool Bucket::destroy_relation(Entity e_from, Entity e_to, const RelationIdentifier local_id )
+bool Bucket::destroy_relation(Entity e_from, Entity e_to, const Ordinal local_id )
 {
   const unsigned from_bucket_ordinal = mesh().bucket_ordinal(e_from);
   DestroyRelationFunctor functor(from_bucket_ordinal, e_to, static_cast<ConnectivityOrdinal>(local_id));
   modify_connectivity(functor, m_mesh.entity_rank(e_to));
+
+  if (functor.m_modified) {
+    mark_for_modification();
+  }
 
   return functor.m_modified;
 }
@@ -755,6 +670,10 @@ bool Bucket::declare_relation(unsigned bucket_ordinal, Entity e_to, const Connec
 {
   DeclareRelationFunctor functor(bucket_ordinal, e_to, ordinal, permutation);
   modify_connectivity(functor, m_mesh.entity_rank(e_to));
+
+  if (functor.m_modified) {
+    mark_for_modification();
+  }
 
   return functor.m_modified;
 }
@@ -780,7 +699,7 @@ void Bucket::remove_entity()
   STK_ThrowAssert(m_size > 0);
 
   mark_for_modification();
-  mesh().remove_entity_field_data_callback(entity_rank(), bucket_id(), m_size-1);
+  mesh().remove_entity_field_data_callback(entity_rank(), bucket_id(), m_size-1, m_size-1);
   const unsigned bktOrdinal = m_size-1;
   --m_size;
 
@@ -790,22 +709,20 @@ void Bucket::remove_entity()
   process_all_connectivity(functor);
 }
 
-void Bucket::copy_entity(Entity entity)
+void Bucket::copy_entity(const Bucket* fromBucket, unsigned fromOrdinal)
 {
   STK_ThrowAssert(m_size < m_capacity);
-  STK_ThrowAssert(mesh().is_valid(entity));
+  STK_ThrowAssert(mesh().is_valid((*fromBucket)[fromOrdinal]));
   STK_ThrowAssert(!mesh().is_valid(m_entities[m_size]));
-  STK_ThrowAssert(mesh().bucket_ptr(entity) != nullptr);
-  STK_ThrowAssert(mesh().bucket_ptr(entity) != this);
-  STK_ThrowAssert(mesh().entity_rank(entity) == m_entity_rank);
+  STK_ThrowAssert(fromBucket != nullptr);
+  STK_ThrowAssert(fromBucket != this);
+  STK_ThrowAssert(fromBucket->entity_rank() == m_entity_rank);
 
   mark_for_modification();
-  Bucket* old_bucket = mesh().bucket_ptr(entity);
-  const unsigned old_ordinal = mesh().bucket_ordinal(entity);
 
-  this->mesh().add_entity_callback(entity_rank(), bucket_id(), capacity(), m_size);
+  this->mesh().add_entity_callback(entity_rank(), bucket_id(), m_size+1, capacity(), m_size);
   const unsigned newOrdinal = m_size;
-  reset_entity_location(entity, newOrdinal);
+  reset_entity_location(newOrdinal, fromBucket, fromOrdinal);
 
   ++m_size;
 
@@ -815,30 +732,27 @@ void Bucket::copy_entity(Entity entity)
   EntityRank endRank = static_cast<EntityRank>(mesh().mesh_meta_data().entity_rank_count());
 
   for(EntityRank rank = stk::topology::NODE_RANK; rank<endRank; ++rank) {
-    const unsigned numConn = old_bucket->num_connectivity(old_ordinal, rank);
+    const unsigned numConn = fromBucket->num_connectivity(fromOrdinal, rank);
     if (numConn > 0) {
-      const Entity* conn = old_bucket->begin(old_ordinal, rank);
-      const ConnectivityOrdinal* ordinals = old_bucket->begin_ordinals(old_ordinal, rank);
-      const Permutation* perms = old_bucket->begin_permutations(old_ordinal, rank);
+      const Entity* conn = fromBucket->begin(fromOrdinal, rank);
+      const ConnectivityOrdinal* ordinals = fromBucket->begin_ordinals(fromOrdinal, rank);
+      const Permutation* perms = fromBucket->begin_permutations(fromOrdinal, rank);
       replace_relations(newOrdinal, rank, numConn, conn, ordinals, perms);
     }
   }
 }
 
-void Bucket::overwrite_entity(unsigned to_ordinal, Entity entity, const FieldVector* fields)
+void Bucket::overwrite_entity(unsigned to_ordinal, const Bucket* fromBucket, unsigned fromOrdinal, const std::vector<FieldBase*>* fields)
 {
   STK_ThrowAssert(to_ordinal < m_capacity);
-  STK_ThrowAssert(mesh().is_valid(entity));
-  STK_ThrowAssert(mesh().bucket_ptr(entity) != nullptr);
-  STK_ThrowAssert(mesh().entity_rank(entity) == m_entity_rank);
+  STK_ThrowAssert(fromBucket != nullptr);
+  STK_ThrowAssert(mesh().is_valid((*fromBucket)[fromOrdinal]));
+  STK_ThrowAssert(fromBucket->m_entity_rank == m_entity_rank);
 
-  const MeshIndex from_index = m_mesh.mesh_index(entity);
-  const Bucket* old_bucket = from_index.bucket;
-  const unsigned old_ordinal = from_index.bucket_ordinal;
-  reset_entity_location(entity, to_ordinal, fields);
+  reset_entity_location(to_ordinal, fromBucket, fromOrdinal, fields);
 
-  if (bucket_id() == old_bucket->bucket_id()) {
-    ReplaceEntityFunctor functor(old_ordinal, to_ordinal);
+  if (bucket_id() == fromBucket->bucket_id()) {
+    ReplaceEntityFunctor functor(fromOrdinal, to_ordinal);
     process_all_connectivity(functor);
   }
   else {
@@ -846,11 +760,11 @@ void Bucket::overwrite_entity(unsigned to_ordinal, Entity entity, const FieldVec
     EntityRank endRank = static_cast<EntityRank>(mesh().mesh_meta_data().entity_rank_count());
 
     for(EntityRank rank = stk::topology::NODE_RANK; rank<endRank; ++rank) {
-      const unsigned numConn = old_bucket->num_connectivity(old_ordinal, rank);
+      const unsigned numConn = fromBucket->num_connectivity(fromOrdinal, rank);
       if (numConn > 0) {
-        const Entity* conn = old_bucket->begin(old_ordinal, rank);
-        const ConnectivityOrdinal* ordinals = old_bucket->begin_ordinals(old_ordinal, rank);
-        const Permutation* perms = old_bucket->begin_permutations(old_ordinal, rank);
+        const Entity* conn = fromBucket->begin(fromOrdinal, rank);
+        const ConnectivityOrdinal* ordinals = fromBucket->begin_ordinals(fromOrdinal, rank);
+        const Permutation* perms = fromBucket->begin_permutations(fromOrdinal, rank);
         replace_relations(to_ordinal, rank, numConn, conn, ordinals, perms);
       }
       else {
@@ -859,7 +773,6 @@ void Bucket::overwrite_entity(unsigned to_ordinal, Entity entity, const FieldVec
     }
   }
 }
-
 
 void Bucket::parent_topology( EntityRank parent_rank, std::vector<stk::topology> & parent_topologies) const
 {
@@ -882,11 +795,13 @@ void Bucket::check_size_invariant() const
 {
 }
 
-void Bucket::debug_dump(std::ostream& out, unsigned ordinal) const
+#ifndef STK_HIDE_DEPRECATED_CODE // Delete after June 2025
+STK_DEPRECATED void Bucket::debug_dump(std::ostream& /*out*/, unsigned /*ordinal*/) const
 {
 }
+#endif
 
-void Bucket::debug_check_for_invalid_connectivity_request(ConnectivityType const* type) const
+void Bucket::debug_check_for_invalid_connectivity_request([[maybe_unused]] ConnectivityType const* type) const
 {
 #ifndef NDEBUG
     EntityRank rank = stk::topology::END_RANK;
@@ -898,9 +813,6 @@ void Bucket::debug_check_for_invalid_connectivity_request(ConnectivityType const
     }
     else if (type == &m_face_kind) {
       rank = stk::topology::FACE_RANK;
-    }
-    else if (type == &m_element_kind) {
-      rank = stk::topology::ELEMENT_RANK;
     }
     else {
       STK_ThrowAssert(false);

@@ -19,6 +19,7 @@
 
 #include "KokkosKernels_Error.hpp"
 #include "KokkosKernels_ExecSpaceUtils.hpp"
+#include "KokkosBlas_util.hpp"
 
 #if defined(KOKKOS_ENABLE_CUDA) && (defined(KOKKOS_ARCH_VOLTA) || defined(KOKKOS_ARCH_AMPERE))
 
@@ -589,7 +590,7 @@ struct BSR_GEMV_Functor {
 //
 template <class Handle, class AT, class AO, class AD, class AS, class AlphaType, class XVector, class BetaType,
           class YVector,
-          typename std::enable_if<!KokkosKernels::Impl::kk_is_gpu_exec_space<typename YVector::execution_space>()>::type
+          typename std::enable_if<!KokkosKernels::Impl::is_gpu_exec_space_v<typename YVector::execution_space>>::type
               * = nullptr>
 void spMatVec_no_transpose(
     const typename AD::execution_space &exec, Handle *handle, const AlphaType &alpha,
@@ -636,8 +637,8 @@ void spMatVec_no_transpose(
 //
 template <class Handle, class AT, class AO, class AD, class AS, class AlphaType, class XVector, class BetaType,
           class YVector,
-          typename std::enable_if<KokkosKernels::Impl::kk_is_gpu_exec_space<typename YVector::execution_space>()>::type
-              * = nullptr>
+          typename std::enable_if<KokkosKernels::Impl::is_gpu_exec_space_v<typename YVector::execution_space>>::type * =
+              nullptr>
 void spMatVec_no_transpose(
     const typename AD::execution_space &exec, Handle *handle, const AlphaType &alpha,
     const KokkosSparse::Experimental::BsrMatrix<AT, AO, AD, Kokkos::MemoryTraits<Kokkos::Unmanaged>, AS> &A,
@@ -839,7 +840,7 @@ struct BSR_GEMV_Transpose_Functor {
 /// trivial serial impl used)
 template <class Handle, class AT, class AO, class AD, class AS, class AlphaType, class XVector, class BetaType,
           class YVector,
-          typename std::enable_if<!KokkosKernels::Impl::kk_is_gpu_exec_space<typename YVector::execution_space>()>::type
+          typename std::enable_if<!KokkosKernels::Impl::is_gpu_exec_space_v<typename YVector::execution_space>>::type
               * = nullptr>
 void spMatVec_transpose(
     const typename AD::execution_space &exec, Handle *handle, const AlphaType &alpha,
@@ -885,8 +886,8 @@ void spMatVec_transpose(
 // spMatVec_transpose: version for GPU execution spaces (TeamPolicy used)
 //
 template <class Handle, class AMatrix, class AlphaType, class XVector, class BetaType, class YVector,
-          typename std::enable_if<KokkosKernels::Impl::kk_is_gpu_exec_space<typename YVector::execution_space>()>::type
-              * = nullptr>
+          typename std::enable_if<KokkosKernels::Impl::is_gpu_exec_space_v<typename YVector::execution_space>>::type * =
+              nullptr>
 void spMatVec_transpose(const typename AMatrix::execution_space &exec, Handle *handle, const AlphaType &alpha,
                         const AMatrix &A, const XVector &x, const BetaType &beta, YVector &y, bool useConjugate) {
   if (A.numRows() <= 0) {
@@ -1028,10 +1029,12 @@ struct BSR_GEMM_Functor {
       for (ordinal_type ic = 0; ic < count; ++ic) {
         const auto Aview  = row.block(ic);
         const auto xstart = row.block_colidx(ic) * block_dim;
-        KokkosBatched::SerialGemmInternal<KokkosBatched::Algo::Gemm::Blocked>::invoke<value_type, value_type>(
-            static_cast<ordinal_type>(block_dim), static_cast<ordinal_type>(num_rhs),
-            static_cast<ordinal_type>(block_dim), alpha, Aview.data(), Aview.stride_0(), Aview.stride_1(),
-            &m_x(xstart, 0), m_x.stride_0(), ldx, beta1, &m_y(ystart, 0), m_y.stride_0(), ldy);
+        KokkosBatched::Impl::SerialGemmInternal<KokkosBatched::Algo::Gemm::Blocked>::invoke<
+            KokkosBlas::Impl::OpID, KokkosBlas::Impl::OpID, value_type, value_type>(
+            KokkosBlas::Impl::OpID(), KokkosBlas::Impl::OpID(), static_cast<ordinal_type>(block_dim),
+            static_cast<ordinal_type>(num_rhs), static_cast<ordinal_type>(block_dim), alpha, Aview.data(),
+            Aview.stride_0(), Aview.stride_1(), &m_x(xstart, 0), m_x.stride_0(), ldx, beta1, &m_y(ystart, 0),
+            m_y.stride_0(), ldy);
       }
     }
   }
@@ -1093,7 +1096,7 @@ struct BSR_GEMM_Functor {
 //
 template <class Handle, class AT, class AO, class AD, class AS, class AlphaType, class XVector, class BetaType,
           class YVector,
-          typename std::enable_if<!KokkosKernels::Impl::kk_is_gpu_exec_space<typename YVector::execution_space>()>::type
+          typename std::enable_if<!KokkosKernels::Impl::is_gpu_exec_space_v<typename YVector::execution_space>>::type
               * = nullptr>
 void spMatMultiVec_no_transpose(
     const typename AD::execution_space &exec, Handle *handle, const AlphaType &alpha,
@@ -1139,8 +1142,8 @@ void spMatMultiVec_no_transpose(
 //
 template <class Handle, class AT, class AO, class AD, class AS, class AlphaType, class XVector, class BetaType,
           class YVector,
-          typename std::enable_if<KokkosKernels::Impl::kk_is_gpu_exec_space<typename YVector::execution_space>()>::type
-              * = nullptr>
+          typename std::enable_if<KokkosKernels::Impl::is_gpu_exec_space_v<typename YVector::execution_space>>::type * =
+              nullptr>
 void spMatMultiVec_no_transpose(
     const typename AD::execution_space &exec, Handle *handle, const AlphaType &alpha,
     const KokkosSparse::Experimental::BsrMatrix<AT, AO, AD, Kokkos::MemoryTraits<Kokkos::Unmanaged>, AS> &A,
@@ -1352,7 +1355,7 @@ struct BSR_GEMM_Transpose_Functor {
 /// (RangePolicy or trivial serial impl used)
 template <class execution_space, class Handle, class AT, class AO, class AD, class AS, class AlphaType, class XVector,
           class BetaType, class YVector,
-          typename std::enable_if<!KokkosKernels::Impl::kk_is_gpu_exec_space<typename YVector::execution_space>()>::type
+          typename std::enable_if<!KokkosKernels::Impl::is_gpu_exec_space_v<typename YVector::execution_space>>::type
               * = nullptr>
 void spMatMultiVec_transpose(
     const execution_space &exec, Handle *handle, const AlphaType &alpha,
@@ -1391,7 +1394,7 @@ void spMatMultiVec_transpose(
 //
 template <class execution_space, class Handle, class AMatrix, class AlphaType, class XVector, class BetaType,
           class YVector,
-          typename std::enable_if<KokkosKernels::Impl::kk_is_gpu_exec_space<execution_space>()>::type * = nullptr>
+          typename std::enable_if<KokkosKernels::Impl::is_gpu_exec_space_v<execution_space>>::type * = nullptr>
 void spMatMultiVec_transpose(const execution_space &exec, Handle *handle, const AlphaType &alpha, const AMatrix &A,
                              const XVector &x, const BetaType &beta, YVector &y, bool useConjugate) {
   if (A.numRows() <= 0) {

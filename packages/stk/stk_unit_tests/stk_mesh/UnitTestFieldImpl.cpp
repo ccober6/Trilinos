@@ -114,8 +114,6 @@ void UnitTestFieldImpl::testFieldRestriction()
 
   FieldBase * const f3_old = nodeField->field_state( StateOld ) ;
 
-  //------------------------------
-  // Test for correctness of vector of declared fields.
   ASSERT_EQ(7u,  allocated_fields.size());
   ASSERT_TRUE( f2 == allocated_fields[0] );
   ASSERT_TRUE( nodeField == allocated_fields[1] );

@@ -73,8 +73,8 @@ struct SortLowDegreeCrsMatrixFunctor {
       Kokkos::single(Kokkos::PerTeam(t), [&]() { reducer++; });
       return;
     }
-    KokkosKernels::TeamBitonicSort2<lno_t, lno_t, scalar_t, team_mem>(entries.data() + rowStart,
-                                                                      values.data() + rowStart, rowNum, t);
+    Kokkos::Experimental::sort_by_key_team(t, Kokkos::subview(entries, Kokkos::make_pair(rowStart, rowEnd)),
+                                           Kokkos::subview(values, Kokkos::make_pair(rowStart, rowEnd)));
   }
 
   rowmap_t rowmap;
@@ -96,7 +96,7 @@ typename entries_t::non_const_value_type sort_low_degree_rows_crs_matrix(
     const typename entries_t::non_const_value_type degreeLimit) {
   using lno_t    = typename entries_t::non_const_value_type;
   using team_pol = Kokkos::TeamPolicy<execution_space>;
-  bool useRadix  = !KokkosKernels::Impl::kk_is_gpu_exec_space<execution_space>();
+  bool useRadix  = !KokkosKernels::Impl::is_gpu_exec_space_v<execution_space>;
   Impl::SortLowDegreeCrsMatrixFunctor<execution_space, rowmap_t, entries_t, values_t> funct(useRadix, rowmap, entries,
                                                                                             values, degreeLimit);
   lno_t numRows   = rowmap.extent(0) ? rowmap.extent(0) - 1 : 0;
@@ -177,8 +177,8 @@ class coarse_builder {
     matrix_t mtx;
     vtx_view_t vtx_wgts;
     matrix_t interp_mtx;
-    int level;
-    bool uniform_weights;
+    int level            = 0;
+    bool uniform_weights = false;
   };
 
   // define behavior-controlling enums
@@ -250,60 +250,56 @@ class coarse_builder {
     if (handle.b == Spgemm_transpose_first) {
       kh.create_spgemm_handle();
       edge_view_t row_map_p1("rows_partial", nc + 1);
-      KokkosSparse::Experimental::spgemm_symbolic(&kh, nc, n, n, interp_transpose.graph.row_map,
-                                                  interp_transpose.graph.entries, false, g.graph.row_map,
-                                                  g.graph.entries, false, row_map_p1);
+      KokkosSparse::spgemm_symbolic(&kh, nc, n, n, interp_transpose.graph.row_map, interp_transpose.graph.entries,
+                                    false, g.graph.row_map, g.graph.entries, false, row_map_p1);
 
       // partial-result matrix
       vtx_view_t entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
       wgt_view_t values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
 
-      KokkosSparse::Experimental::spgemm_numeric(
-          &kh, nc, n, n, interp_transpose.graph.row_map, interp_transpose.graph.entries, interp_transpose.values, false,
-          g.graph.row_map, g.graph.entries, g.values, false, row_map_p1, entries_p1, values_p1);
+      KokkosSparse::spgemm_numeric(&kh, nc, n, n, interp_transpose.graph.row_map, interp_transpose.graph.entries,
+                                   interp_transpose.values, false, g.graph.row_map, g.graph.entries, g.values, false,
+                                   row_map_p1, entries_p1, values_p1);
       kh.destroy_spgemm_handle();
 
       row_map_coarse = edge_view_t("rows_coarse", nc + 1);
       kh.create_spgemm_handle();
-      KokkosSparse::Experimental::spgemm_symbolic(&kh, nc, n, nc, row_map_p1, entries_p1, false,
-                                                  interp_mtx.graph.row_map, interp_mtx.graph.entries, false,
-                                                  row_map_coarse);
+      KokkosSparse::spgemm_symbolic(&kh, nc, n, nc, row_map_p1, entries_p1, false, interp_mtx.graph.row_map,
+                                    interp_mtx.graph.entries, false, row_map_coarse);
       // coarse-graph adjacency matrix
       adj_coarse = vtx_view_t("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
       wgt_coarse = wgt_view_t("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
 
-      KokkosSparse::Experimental::spgemm_numeric(&kh, nc, n, nc, row_map_p1, entries_p1, values_p1, false,
-                                                 interp_mtx.graph.row_map, interp_mtx.graph.entries, interp_mtx.values,
-                                                 false, row_map_coarse, adj_coarse, wgt_coarse);
+      KokkosSparse::spgemm_numeric(&kh, nc, n, nc, row_map_p1, entries_p1, values_p1, false, interp_mtx.graph.row_map,
+                                   interp_mtx.graph.entries, interp_mtx.values, false, row_map_coarse, adj_coarse,
+                                   wgt_coarse);
       kh.destroy_spgemm_handle();
     } else {
       edge_view_t row_map_p1("rows_partial", n + 1);
       kh.create_spgemm_handle();
-      KokkosSparse::Experimental::spgemm_symbolic(&kh, n, n, nc, g.graph.row_map, g.graph.entries, false,
-                                                  interp_mtx.graph.row_map, interp_mtx.graph.entries, false,
-                                                  row_map_p1);
+      KokkosSparse::spgemm_symbolic(&kh, n, n, nc, g.graph.row_map, g.graph.entries, false, interp_mtx.graph.row_map,
+                                    interp_mtx.graph.entries, false, row_map_p1);
 
       // partial-result matrix
       vtx_view_t entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
       wgt_view_t values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
 
-      KokkosSparse::Experimental::spgemm_numeric(&kh, n, n, nc, g.graph.row_map, g.graph.entries, g.values, false,
-                                                 interp_mtx.graph.row_map, interp_mtx.graph.entries, interp_mtx.values,
-                                                 false, row_map_p1, entries_p1, values_p1);
+      KokkosSparse::spgemm_numeric(&kh, n, n, nc, g.graph.row_map, g.graph.entries, g.values, false,
+                                   interp_mtx.graph.row_map, interp_mtx.graph.entries, interp_mtx.values, false,
+                                   row_map_p1, entries_p1, values_p1);
       kh.destroy_spgemm_handle();
 
       row_map_coarse = edge_view_t("rows_coarse", nc + 1);
       kh.create_spgemm_handle();
-      KokkosSparse::Experimental::spgemm_symbolic(&kh, nc, n, nc, interp_transpose.graph.row_map,
-                                                  interp_transpose.graph.entries, false, row_map_p1, entries_p1, false,
-                                                  row_map_coarse);
+      KokkosSparse::spgemm_symbolic(&kh, nc, n, nc, interp_transpose.graph.row_map, interp_transpose.graph.entries,
+                                    false, row_map_p1, entries_p1, false, row_map_coarse);
       // coarse-graph adjacency matrix
       adj_coarse = vtx_view_t("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
       wgt_coarse = wgt_view_t("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
 
-      KokkosSparse::Experimental::spgemm_numeric(
-          &kh, nc, n, nc, interp_transpose.graph.row_map, interp_transpose.graph.entries, interp_transpose.values,
-          false, row_map_p1, entries_p1, values_p1, false, row_map_coarse, adj_coarse, wgt_coarse);
+      KokkosSparse::spgemm_numeric(&kh, nc, n, nc, interp_transpose.graph.row_map, interp_transpose.graph.entries,
+                                   interp_transpose.values, false, row_map_p1, entries_p1, values_p1, false,
+                                   row_map_coarse, adj_coarse, wgt_coarse);
       kh.destroy_spgemm_handle();
     }
 

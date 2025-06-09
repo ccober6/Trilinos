@@ -69,8 +69,8 @@ public:
 
   size_t size() const { return m_size; }
 
-  /// Returns the representation used by BucketRepository to identify a bucket,
-  /// including the parts it corresponds to.
+  std::pair<const unsigned *, const unsigned *> superset_part_ordinals() const { return m_partOrdsBeginEnd; }
+
   const std::vector<PartOrdinal> &get_legacy_partition_id() const { return m_extPartitionKey; }
 
   const unsigned * key() const { return m_extPartitionKey.data(); }
@@ -152,8 +152,8 @@ private:
 
   void check_sorted(const std::string& prefixMsg);
 
-  // Identifies the partition, borrowing the representation from BucketRepository.
   std::vector<PartOrdinal> m_extPartitionKey;
+  std::pair<const PartOrdinal*,const PartOrdinal*> m_partOrdsBeginEnd;
 
   // Used if the set of buckets (not just bucket contents) are being modified.
   BucketVector m_buckets;
@@ -200,8 +200,6 @@ private:
 #endif
   }
 
-  void internal_swap_to_end(Entity entity);
-
   // Overwrite the location defined by the input arguments with the entity
   // at the very end of this entire partition
   void overwrite_from_end( Bucket& bucket, unsigned ordinal);
@@ -209,35 +207,26 @@ private:
 
 std::ostream &operator<<(std::ostream &, const stk::mesh::impl::Partition &);
 
-inline
-bool partition_key_less( const unsigned * lhs , const unsigned * rhs )
-{
-// The following (very old) code is clever... So I'm adding some comments.
-//
-// A partition key is an array of unsigned, laid out like this:
-// key[num-part-ordinals, first-part-ordinal, ..., last-part-ordinal]
-
-  if (*lhs == *rhs) { //num-part-ordinals is equal for lhs and rhs...
-    const unsigned * const last_lhs = lhs + *lhs;
-    do {
-      ++lhs ; ++rhs ;
-    } while ( last_lhs != lhs && *lhs == *rhs );
-  }
-  return *lhs < *rhs;
-}
-
 struct PartitionLess {
-  bool operator()( const Partition * lhs_Partition , const unsigned * rhs ) const
-  { return partition_key_less( lhs_Partition->key() , rhs ); }
+  bool operator()( const Partition * lhs_Partition , const OrdinalVector& rhs ) const
+  {
+    return lhs_Partition->get_legacy_partition_id().size() != rhs.size() ?
+           lhs_Partition->get_legacy_partition_id().size() < rhs.size() :
+           lhs_Partition->get_legacy_partition_id() < rhs;
+  }
 
-  bool operator()( const unsigned * lhs , const Partition * rhs_Partition ) const
-  { return partition_key_less( lhs , rhs_Partition->key() ); }
+  bool operator()( const OrdinalVector& lhs , const Partition * rhs_Partition ) const
+  {
+    return lhs.size() != rhs_Partition->get_legacy_partition_id().size() ?
+           lhs.size() < rhs_Partition->get_legacy_partition_id().size() :
+           lhs < rhs_Partition->get_legacy_partition_id();
+  }
 };
 
 inline
 std::vector<Partition*>::iterator
-lower_bound( std::vector<Partition*> & v , const unsigned * key )
-{ return std::lower_bound( v.begin() , v.end() , key , PartitionLess() ); }
+upper_bound( std::vector<Partition*> & v , const OrdinalVector& key )
+{ return std::upper_bound( v.begin() , v.end() , key , PartitionLess() ); }
 
 } // impl
 } // mesh

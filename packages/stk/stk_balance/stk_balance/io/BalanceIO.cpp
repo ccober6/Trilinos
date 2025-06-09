@@ -35,7 +35,7 @@
 #include "stk_balance/internal/privateDeclarations.hpp"
 #include "stk_balance/fixSplitCoincidentElements.hpp"
 #include "stk_tools/mesh_clone/MeshClone.hpp"
-#include "stk_tools/transfer_utils/TransientFieldTransferById.hpp"
+#include "stk_transfer_util/TransientFieldTransferById.hpp"
 #include "stk_mesh/base/MeshBuilder.hpp"
 
 #include <sys/stat.h> // move us
@@ -109,9 +109,18 @@ void BalanceIO::write(BalanceMesh& mesh)
 {
   stk::io::StkMeshIoBroker outputBroker;
   outputBroker.set_bulk_data(mesh.get_bulk());
+
+  const size_t inputFileIndex = m_inputBroker.get_active_mesh();
+  const Ioss::DatabaseIO* inputDBIO = m_inputBroker.get_input_database(inputFileIndex);
+  const int maxSymbolLength = inputDBIO->maximum_symbol_length();
+  if (maxSymbolLength > 0) {
+    outputBroker.property_add(Ioss::Property("MAXIMUM_NAME_LENGTH", maxSymbolLength));
+  }
+
   outputBroker.set_attribute_field_ordering_stored_by_part_ordinal(m_inputBroker.get_attribute_field_ordering_stored_by_part_ordinal());
   m_inputBroker.cache_entity_list_for_transient_steps(true);
 
+  internal::logMessage(m_comm, "Writing "+std::to_string(m_inputBroker.get_num_time_steps())+" time steps");
   stk::transfer_utils::TransientFieldTransferById transfer(m_inputBroker, outputBroker);
   transfer.transfer_and_write_transient_fields(m_settings.get_output_filename());
 

@@ -402,10 +402,11 @@ std::vector<SideInfo> getElementExposedFaceInfo(const stk::mesh::BulkData & bulk
   std::vector<SideInfo> sideInfoVec;
 
   for (unsigned ord : sideOrdinals) {
-    // FIXME SHELL_SIDE_TOPO
-    if (elemTopology.is_shell_side_ordinal(ord)) { continue; }
-
     const stk::topology sideTopology = elemTopology.side_topology(ord);
+
+    // FIXME SHELL_SIDE_TOPOLOGY
+    if (elemTopology.is_shell() && sideTopology != elemTopology.side_topology()) { break; }
+
     stk::mesh::get_subcell_nodes(bulk, element, bulk.mesh_meta_data().side_rank(), ord, sideNodes);
     const double tol = balanceSettings.getToleranceForFaceSearch(bulk, coords,
                                                                  sideNodes.data(), sideNodes.size());
@@ -843,7 +844,7 @@ bool has_decomp_work_in_this_comm(const stk::mesh::BulkData & bulk,
 
 void store_diagnostic_element_weights(const stk::mesh::BulkData & bulk,
                                       const BalanceSettings & balanceSettings,
-                                      const stk::mesh::Selector & selector,
+                                      const stk::mesh::Selector & /*selector*/,
                                       const Vertices & vertices)
 {
   if (stk::balance::get_diagnostic<TotalElementWeightDiagnostic>()) {

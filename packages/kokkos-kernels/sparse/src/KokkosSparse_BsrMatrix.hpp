@@ -21,8 +21,8 @@
 /// This implements a local (no MPI) sparse matrix stored in block-by-block
 /// compressed row sparse format.
 
-#ifndef KOKKOS_SPARSE_BSRMATRIX_HPP_
-#define KOKKOS_SPARSE_BSRMATRIX_HPP_
+#ifndef KOKKOSSPARSE_BSRMATRIX_HPP_
+#define KOKKOSSPARSE_BSRMATRIX_HPP_
 
 #include <set>
 #include <sstream>
@@ -30,7 +30,6 @@
 #include <type_traits>
 
 #include "Kokkos_Core.hpp"
-#include "Kokkos_StaticCrsGraph.hpp"
 #include "Kokkos_ArithTraits.hpp"
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosKernels_Error.hpp"
@@ -300,7 +299,7 @@ struct BsrRowViewConst {
 /// storage for sparse matrices, as described, for example, in Saad
 /// (2nd ed.).
 template <class ScalarType, class OrdinalType, class Device, class MemoryTraits = void,
-          class SizeType = default_size_type>
+          class SizeType = KokkosKernels::default_size_type>
 class BsrMatrix {
   static_assert(std::is_signed<OrdinalType>::value, "BsrMatrix requires that OrdinalType is a signed integer type.");
   static_assert(Kokkos::is_memory_traits_v<MemoryTraits> || std::is_void_v<MemoryTraits>,
@@ -332,11 +331,9 @@ class BsrMatrix {
   //! Type of a host-memory mirror of the sparse matrix.
   typedef BsrMatrix<ScalarType, OrdinalType, host_mirror_space, MemoryTraits, size_type> HostMirror;
   //! Type of the graph structure of the sparse matrix.
-  typedef Kokkos::StaticCrsGraph<ordinal_type, Kokkos::LayoutLeft, device_type, memory_traits, size_type>
-      StaticCrsGraphType;
+  typedef StaticCrsGraph<ordinal_type, Kokkos::LayoutLeft, device_type, memory_traits, size_type> StaticCrsGraphType;
   //! Type of the graph structure of the sparse matrix - consistent with Kokkos.
-  typedef Kokkos::StaticCrsGraph<ordinal_type, Kokkos::LayoutLeft, device_type, memory_traits, size_type>
-      staticcrsgraph_type;
+  typedef StaticCrsGraph<ordinal_type, Kokkos::LayoutLeft, device_type, memory_traits, size_type> staticcrsgraph_type;
   //! Type of column indices in the sparse matrix.
   typedef typename staticcrsgraph_type::entries_type index_type;
   //! Const version of the type of column indices in the sparse matrix.
@@ -529,7 +526,9 @@ class BsrMatrix {
       auto it = blocks.find(block);
       if (it == blocks.end()) {
         std::vector<Entry> entries = {entry};
-        entries.reserve(blockDim_ * blockDim_);
+        entries.reserve(
+            static_cast<typename std::common_type_t<typename std::vector<Entry>::size_type, ordinal_type>>(blockDim_) *
+            blockDim_);
         blocks[block] = std::move(entries);  // new block with entry
       } else {
         it->second.push_back(entry);  // add entry to block
@@ -698,7 +697,7 @@ class BsrMatrix {
     // create_staticcrsgraph takes the frequency of blocks per row
     // and returns the cum sum pointer row_map with nbrows+1 size, and total
     // numBlocks in the final entry
-    graph = Kokkos::create_staticcrsgraph<staticcrsgraph_type>("blockgraph", block_rows);
+    graph                                       = create_staticcrsgraph<staticcrsgraph_type>("blockgraph", block_rows);
     typename row_map_type::HostMirror h_row_map = Kokkos::create_mirror_view(graph.row_map);
     Kokkos::deep_copy(h_row_map, graph.row_map);
 
@@ -724,9 +723,9 @@ class BsrMatrix {
     Kokkos::deep_copy(h_crs_values, crs_mtx.values);
 
     typename values_type::HostMirror h_values = Kokkos::create_mirror_view(values);
-    if (h_values.extent(0) < size_t(numBlocks * blockDim_ * blockDim_)) {
-      Kokkos::resize(h_values, numBlocks * blockDim_ * blockDim_);
-      Kokkos::resize(values, numBlocks * blockDim_ * blockDim_);
+    if (h_values.extent(0) < static_cast<size_t>(numBlocks) * blockDim_ * blockDim_) {
+      Kokkos::resize(h_values, static_cast<size_t>(numBlocks) * blockDim_ * blockDim_);
+      Kokkos::resize(values, static_cast<size_t>(numBlocks) * blockDim_ * blockDim_);
     }
     Kokkos::deep_copy(h_values, 0);
 
@@ -967,7 +966,7 @@ class BsrMatrix {
             case BsrMatrix::valueOperation::ASSIGN: {
               for (ordinal_type lcol = 0; lcol < block_size; ++lcol) {
                 if (force_atomic) {
-                  Kokkos::atomic_assign(&(local_row_values[lcol]), vals[offset_into_vals + lrow * block_size + lcol]);
+                  Kokkos::atomic_store(&(local_row_values[lcol]), vals[offset_into_vals + lrow * block_size + lcol]);
                 } else {
                   local_row_values[lcol] = vals[offset_into_vals + lrow * block_size + lcol];
                 }
@@ -1005,4 +1004,4 @@ inline constexpr bool is_bsr_matrix_v = is_bsr_matrix<T>::value;
 
 }  // namespace Experimental
 }  // namespace KokkosSparse
-#endif
+#endif  // KOKKOSSPARSE_BSRMATRIX_HPP_

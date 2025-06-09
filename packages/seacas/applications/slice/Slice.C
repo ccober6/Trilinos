@@ -1,4 +1,4 @@
-// Copyright(C) 1999-2024 National Technology & Engineering Solutions
+// Copyright(C) 1999-2025 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
@@ -89,15 +89,27 @@ namespace {
       properties.add(Ioss::Property("FILE_TYPE", "netcdf5"));
     }
 
-    if (interFace.compressionLevel_ > 0 || interFace.shuffle_ || interFace.szip_) {
+    if (interFace.compressionLevel_ > 0 || interFace.shuffle_ || interFace.szip_ ||
+        interFace.zlib_ || interFace.zstd_) {
       properties.add(Ioss::Property("FILE_TYPE", "netcdf4"));
       properties.add(Ioss::Property("COMPRESSION_LEVEL", interFace.compressionLevel_));
       properties.add(Ioss::Property("COMPRESSION_SHUFFLE", static_cast<int>(interFace.shuffle_)));
-      if (interFace.szip_) {
+
+      if (interFace.zlib_) {
+        properties.add(Ioss::Property("COMPRESSION_METHOD", "zlib"));
+      }
+      else if (interFace.szip_) {
         properties.add(Ioss::Property("COMPRESSION_METHOD", "szip"));
       }
-      else if (interFace.zlib_) {
-        properties.add(Ioss::Property("COMPRESSION_METHOD", "zlib"));
+      else if (interFace.zstd_) {
+        properties.add(Ioss::Property("COMPRESSION_METHOD", "zstd"));
+      }
+      else if (interFace.bz2_) {
+        properties.add(Ioss::Property("COMPRESSION_METHOD", "bzip2"));
+      }
+
+      if (interFace.quantizeNSD_ > 0) {
+        properties.add(Ioss::Property("COMPRESSION_QUANTIZE_NSD", interFace.quantizeNSD_));
       }
     }
 
@@ -385,6 +397,7 @@ int main(int argc, char *argv[])
     dbi->set_int_byte_size_api(Ioss::USE_INT64_API);
   }
 
+  dbi->set_lowercase_database_names(false);
   dbi->set_surface_split_type(Ioss::SPLIT_BY_DONT_SPLIT);
   dbi->set_field_separator(0);
 
@@ -1418,7 +1431,10 @@ namespace {
     }
 
     if (debug_level & 32) {
-      Ioss::DecompUtils::output_decomposition_statistics(elem_to_proc, interFace.processor_count());
+      auto work_per_rank =
+          Ioss::DecompUtils::get_work_per_rank(elem_to_proc, interFace.processor_count());
+      auto avg_median = Ioss::DecompUtils::output_decomposition_statistics(work_per_rank);
+      Ioss::DecompUtils::output_histogram(work_per_rank, avg_median.first, avg_median.second);
     }
 
     if (!create_split_files) {

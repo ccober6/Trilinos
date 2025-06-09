@@ -142,7 +142,7 @@ struct BDF_system_wrapper2 {
     if (compute_jac) {
       mySys.evaluate_jacobian(t, dt, y, jac);
 
-      // J = I - dt*(dy/dy)
+      // J = I - dt*(df/dy)
       for (int rowIdx = 0; rowIdx < neqs; ++rowIdx) {
         for (int colIdx = 0; colIdx < neqs; ++colIdx) {
           jac(rowIdx, colIdx) = -dt * jac(rowIdx, colIdx);
@@ -321,7 +321,7 @@ KOKKOS_FUNCTION void BDFStep(ode_type& ode, scalar_type& t, scalar_type& dt, sca
 
   scalar_type max_step = Kokkos::ArithTraits<scalar_type>::max();
   scalar_type min_step = Kokkos::ArithTraits<scalar_type>::min();
-  scalar_type safety   = 0.675, error_norm;
+  scalar_type safety = 0.675, error_norm = 0.0;
   if (dt > max_step) {
     update_D(order, max_step / dt, coeffs, tempD, D);
     dt              = max_step;

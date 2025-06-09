@@ -465,7 +465,7 @@ public:
     EXPECT_EQ(expectedBucketCount, bucketCount);
   }
 
-  void test_partitions_equality(stk::mesh::EntityRank rank, stk::mesh::Bucket const* bucket1, stk::mesh::Bucket const* bucket2)
+  void test_partitions_equality(stk::mesh::EntityRank /*rank*/, stk::mesh::Bucket const* bucket1, stk::mesh::Bucket const* bucket2)
   {
     stk::mesh::impl::Partition* partition1 = bucket1->getPartition();
     stk::mesh::impl::Partition* partition2 = bucket2->getPartition();
@@ -910,7 +910,7 @@ TEST_F(TestChangePartsWithSelector, element_in_ranked_part_add_new_to_ranked_par
 
 TEST_F(TestChangePartsWithSelector, element_in_ranked_part_move_to_unranked_part_conflicting_partitions)
 {
-  if(get_bulk().parallel_size() > 1) { return; }
+  if(get_bulk().parallel_size() > 1) { GTEST_SKIP(); }
 
   unsigned numBlockParts = 2;
   unsigned numElem = 2;

@@ -1,4 +1,4 @@
-// Copyright(C) 1999-2024 National Technology & Engineering Solutions
+// Copyright(C) 1999-2025 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
@@ -11,6 +11,8 @@
 #include "Ioss_CoordinateFrame.h"
 #include "Ioss_DBUsage.h"
 #include "Ioss_DatabaseIO.h"
+#include "Ioss_DynamicTopologyFileControl.h"
+#include "Ioss_DynamicTopologyStateLocator.h"
 #include "Ioss_EdgeBlock.h"
 #include "Ioss_EdgeSet.h"
 #include "Ioss_ElementBlock.h"
@@ -28,6 +30,7 @@
 #include "Ioss_Property.h"
 #include "Ioss_PropertyManager.h"
 #include "Ioss_Region.h"
+#include "Ioss_SerializeIO.h"
 #include "Ioss_SideBlock.h"
 #include "Ioss_SideSet.h"
 #include "Ioss_SmartAssert.h"
@@ -308,6 +311,7 @@ namespace {
       entity->field_erase(role);
     }
   }
+
 } // namespace
 
 namespace Ioss {
@@ -366,7 +370,8 @@ namespace Ioss {
     properties.add(Property(this, "current_state", Property::INTEGER));
     properties.add(Property(this, "database_name", Property::STRING));
 
-    property_add(Property("base_filename", iodatabase->get_filename()));
+    property_add(Property("base_filename", iodatabase->get_property_manager().get_optional(
+                                               "base_filename", iodatabase->get_filename())));
     property_add(Property("database_type",
                           iodatabase->get_property_manager().get_optional("database_type", "")));
   }
@@ -383,12 +388,12 @@ namespace Ioss {
 
       // Region owns the database pointer even though other entities use it.
       GroupingEntity::really_delete_database();
+
+      if (topologyObserver) {
+        topologyObserver->register_region(nullptr);
+      }
     }
     catch (...) {
-    }
-
-    if(topologyObserver) {
-      topologyObserver->register_region(nullptr);
     }
   }
 
@@ -469,6 +474,8 @@ namespace Ioss {
 
     // Ioex:DatabaseIO::read_communication_metadata() adds comm fields that need to be cleared
     erase_fields(Field::COMMUNICATION);
+
+    aliases_.clear();
   }
 
   void Region::delete_database() { GroupingEntity::really_delete_database(); }
@@ -481,7 +488,7 @@ namespace Ioss {
       return MeshType::UNSTRUCTURED;
     }
     if (!elementBlocks.empty() && !structuredBlocks.empty()) {
-      return MeshType::HYBRID;
+      return MeshType::UNKNOWN;
     }
     if (!structuredBlocks.empty()) {
       return MeshType::STRUCTURED;
@@ -494,7 +501,6 @@ namespace Ioss {
   {
     switch (mesh_type()) {
     case MeshType::UNKNOWN: return "Unknown";
-    case MeshType::HYBRID: return "Hybrid";
     case MeshType::STRUCTURED: return "Structured";
     case MeshType::UNSTRUCTURED: return "Unstructured";
     }
@@ -588,11 +594,28 @@ namespace Ioss {
     int  num_width = Ioss::Utils::number_width(max_entity, true) + 2;
     int  sb_width  = Ioss::Utils::number_width(max_sb, true) + 2;
 
+    int         change_set_count = -1;
+    std::string change_set_name  = "unknown";
+
+    // If in file-per-rank parallel and serialize io is enabled, then usually only want summary on
+    // single rank. If called that way, then the following calls will fail since they expect all
+    // ranks to call...
+    if (!Ioss::SerializeIO::isEnabled()) {
+      change_set_count = get_database()->num_internal_change_set();
+      change_set_name  = get_internal_change_set_name();
+    }
+    if (!change_set_name.empty() && change_set_name != "/") {
+      change_set_name = ",\t[CS: " + change_set_name + "]";
+    }
+    else {
+      change_set_name.clear();
+    }
+
     // clang-format off
     fmt::print(
         strm,
-        "\n Database: {0}\n"
-        " Mesh Type = {1}, {39}\n"
+        "\n Database: {0}{56}\n"
+        " Mesh Type = {1}, {39}. Change Sets = {57}\n"
         "                      {38:{24}s}\t                 {38:{23}s}\t Variables : Transient / Reduction\n"
         " Spatial dimensions = {2:{24}}\t                 {38:{23}s}\t Global     = {26:{25}}\t{44:{25}}\n"
         " Node blocks        = {7:{24}}\t Nodes         = {3:{23}}\t Nodal      = {27:{25}}\t{45:{25}}\n"
@@ -607,8 +630,8 @@ namespace Ioss {
         " Element side sets  = {16:{24}}\t Element sides = {22:{23}}\t Sideset    = {31:{25}}\n"
         " Assemblies         = {40:{24}}\t                 {38:{23}s}\t Assembly   = {41:{25}}\t{54:{25}}\n"
         " Blobs              = {42:{24}}\t                 {38:{23}s}\t Blob       = {43:{25}}\t{55:{25}}\n\n"
-        " Time steps         = {32:{24}}\n",
-        get_database()->get_filename(), mesh_type_string(),
+        " Time steps         = {32:{24}}",
+        get_database()->get_filename(), mesh_type_string(),                /* 0, 1 */
         fmt::group_digits(get_property("spatial_dimension").get_int()),
 	fmt::group_digits(get_property("node_count").get_int()),
         fmt::group_digits(get_property("edge_count").get_int()),
@@ -617,7 +640,7 @@ namespace Ioss {
 	fmt::group_digits(get_property("node_block_count").get_int()),
         fmt::group_digits(get_property("edge_block_count").get_int()),
 	fmt::group_digits(get_property("face_block_count").get_int()),
-        fmt::group_digits(get_property("element_block_count").get_int()),
+        fmt::group_digits(get_property("element_block_count").get_int()), /* 10 */
         fmt::group_digits(get_property("structured_block_count").get_int()),
 	fmt::group_digits(get_property("node_set_count").get_int()),
         fmt::group_digits(get_property("edge_set_count").get_int()),
@@ -627,7 +650,7 @@ namespace Ioss {
         fmt::group_digits(total_cells),
 	fmt::group_digits(total_ns_nodes),
 	fmt::group_digits(total_es_edges),
-	fmt::group_digits(total_fs_faces),
+	fmt::group_digits(total_fs_faces), /* 20 */
 	fmt::group_digits(total_es_elements),
 	fmt::group_digits(total_sides),
         num_width,
@@ -637,7 +660,7 @@ namespace Ioss {
 	fmt::group_digits(num_nod_vars),
 	fmt::group_digits(num_ele_vars),
 	fmt::group_digits(num_str_vars),
-        fmt::group_digits(num_ns_vars),
+        fmt::group_digits(num_ns_vars), /* 30 */
 	fmt::group_digits(num_ss_vars),
 	fmt::group_digits(num_ts),
 	fmt::group_digits(num_edg_vars),
@@ -647,8 +670,8 @@ namespace Ioss {
         fmt::group_digits(num_els_vars),
 	" ",
 	get_database()->get_format(),
-	fmt::group_digits(get_property("assembly_count").get_int()),
-        fmt::group_digits(num_asm_vars) ,
+	fmt::group_digits(get_property("assembly_count").get_int()), /* 40 */
+        fmt::group_digits(num_asm_vars),
 	fmt::group_digits(get_property("blob_count").get_int()),
 	fmt::group_digits(num_blob_vars),
 	fmt::group_digits(num_glo_red_vars),
@@ -657,12 +680,21 @@ namespace Ioss {
 	fmt::group_digits(num_fac_red_vars),
 	fmt::group_digits(num_ele_red_vars),
 	fmt::group_digits(num_str_red_vars),
-        fmt::group_digits(num_ns_red_vars),
+        fmt::group_digits(num_ns_red_vars), /* 50 */
 	fmt::group_digits(num_es_red_vars),
 	fmt::group_digits(num_fs_red_vars),
 	fmt::group_digits(num_els_red_vars),
 	fmt::group_digits(num_asm_red_vars),
-        fmt::group_digits(num_blob_red_vars));
+        fmt::group_digits(num_blob_red_vars),
+	change_set_name, change_set_count);
+
+    if (num_ts > 0) {
+      auto mm = std::minmax_element(stateTimes.begin(), stateTimes.end());
+      fmt::print("\t({} to {})\n", *mm.first, *mm.second);
+    }
+    else {
+      fmt::print("\n");
+    }
     // clang-format on
   }
 
@@ -709,12 +741,12 @@ namespace Ioss {
       bool has_output_observer = topologyObserver && !get_database()->is_input();
 
       if (new_state == STATE_DEFINE_MODEL) {
-        if (has_output_observer &&
-            (topologyObserver->get_control_option() == FileControlOption::CONTROL_AUTO_GROUP_FILE)) {
+        if (has_output_observer && (topologyObserver->get_control_option() ==
+                                    FileControlOption::CONTROL_AUTO_GROUP_FILE)) {
           if (!fileGroupsStarted) {
             int  steps          = get_property("state_count").get_int();
             bool force_addition = true;
-            add_output_database_group(steps, force_addition);
+            add_output_database_change_set(steps, force_addition);
 
             fileGroupsStarted = true;
           }
@@ -732,17 +764,13 @@ namespace Ioss {
       // For the invalid transitions; provide a more meaningful
       // message in certain cases...
       case STATE_READONLY: {
-        std::ostringstream errmsg;
-        fmt::print(errmsg, "Cannot change state of an input (readonly) database in {}",
-                   get_database()->get_filename());
-        IOSS_ERROR(errmsg);
+        IOSS_ERROR(fmt::format("Cannot change state of an input (readonly) database in {}",
+                               get_database()->get_filename()));
       }
 
       default: {
-        std::ostringstream errmsg;
-        fmt::print(errmsg, "Invalid nesting of begin/end pairs in {}",
-                   get_database()->get_filename());
-        IOSS_ERROR(errmsg);
+        IOSS_ERROR(fmt::format("Invalid nesting of begin/end pairs in {}",
+                               get_database()->get_filename()));
       }
       }
     }
@@ -775,12 +803,9 @@ namespace Ioss {
     // Check that 'current_state' matches the current state of the
     // Region (that is, we are leaving the state we are in).
     if (get_state() != current_state) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg,
-                 "ERROR: Specified end state does not match currently open state\n"
-                 "       [{}]\n",
-                 get_database()->get_filename());
-      IOSS_ERROR(errmsg);
+      IOSS_ERROR(fmt::format("ERROR: Specified end state does not match currently open state\n"
+                             "       [{}]\n",
+                             get_database()->get_filename()));
     }
 
     if (current_state == STATE_DEFINE_MODEL) {
@@ -843,11 +868,9 @@ namespace Ioss {
       if (check_consistency) {
         bool ok = check_parallel_consistency(*this);
         if (!ok) {
-          std::ostringstream errmsg;
-          fmt::print(errmsg, "ERROR: Parallel Consistency Failure for {} database '{}'.",
-                     (get_database()->is_input() ? "input" : "output"),
-                     get_database()->get_filename());
-          IOSS_ERROR(errmsg);
+          IOSS_ERROR(fmt::format("ERROR: Parallel Consistency Failure for {} database '{}'.",
+                                 (get_database()->is_input() ? "input" : "output"),
+                                 get_database()->get_filename()));
         }
       }
 
@@ -893,6 +916,11 @@ namespace Ioss {
       }
     }
 
+    if (get_state() == STATE_TRANSIENT) {
+      // Makes sure we return proper stateCount in case of dynamic topology changes
+      update_dynamic_topology();
+    }
+
     if (get_database()->is_input() || get_database()->usage() == WRITE_RESULTS ||
         get_database()->usage() == WRITE_RESTART) {
       stateTimes.push_back(time);
@@ -930,10 +958,8 @@ namespace Ioss {
       if (get_database()->is_input() || get_database()->usage() == WRITE_RESULTS ||
           get_database()->usage() == WRITE_RESTART) {
         if (currentState == -1) {
-          std::ostringstream errmsg;
-          fmt::print(errmsg, "ERROR: No currently active state.\n       [{}]\n",
-                     get_database()->get_filename());
-          IOSS_ERROR(errmsg);
+          IOSS_ERROR(fmt::format("ERROR: No currently active state.\n       [{}]\n",
+                                 get_database()->get_filename()));
         }
         else {
           SMART_ASSERT((int)stateTimes.size() >= currentState)(stateTimes.size())(currentState);
@@ -946,12 +972,10 @@ namespace Ioss {
       }
     }
     else if (state <= 0 || state > stateCount) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg,
-                 "ERROR: Requested state ({}) is invalid. State must be between 1 and {}.\n"
-                 "       [{}]\n",
-                 state, stateCount, get_database()->get_filename());
-      IOSS_ERROR(errmsg);
+      IOSS_ERROR(
+          fmt::format("ERROR: Requested state ({}) is invalid. State must be between 1 and {}.\n"
+                      "       [{}]\n",
+                      state, stateCount, get_database()->get_filename()));
     }
     else {
       if (get_database()->is_input() || get_database()->usage() == WRITE_RESULTS ||
@@ -1042,26 +1066,20 @@ namespace Ioss {
   {
     double time = 0.0;
     if (get_database()->is_input() && stateCount == 0) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg,
-                 "ERROR: There are no states (time steps) on the input database.\n"
-                 "       [{}]\n",
-                 get_database()->get_filename());
-      IOSS_ERROR(errmsg);
+      IOSS_ERROR(fmt::format("ERROR: There are no states (time steps) on the input database.\n"
+                             "       [{}]\n",
+                             get_database()->get_filename()));
     }
     if (state <= 0 || state > stateCount) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg,
-                 "ERROR: Requested state ({}) is invalid. State must be between 1 and {}.\n"
-                 "       [{}]\n",
-                 state, stateCount, get_database()->get_filename());
-      IOSS_ERROR(errmsg);
+      IOSS_ERROR(
+          fmt::format("ERROR: Requested state ({}) is invalid. State must be between 1 and {}.\n"
+                      "       [{}]\n",
+                      state, stateCount, get_database()->get_filename()));
     }
     else if (currentState != -1 && !get_database()->is_input()) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg, "ERROR: State {} was not ended. Can not begin new state.\n       [{}]\n",
-                 currentState, get_database()->get_filename());
-      IOSS_ERROR(errmsg);
+      IOSS_ERROR(
+          fmt::format("ERROR: State {} was not ended. Can not begin new state.\n       [{}]\n",
+                      currentState, get_database()->get_filename()));
     }
     else {
       {
@@ -1096,12 +1114,10 @@ namespace Ioss {
   double Region::end_state(int state)
   {
     if (state != currentState) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg,
-                 "ERROR: The current database state ({}) does not match the ending state ({}).\n"
-                 "       [{}]\n",
-                 currentState, state, get_database()->get_filename());
-      IOSS_ERROR(errmsg);
+      IOSS_ERROR(fmt::format(
+          "ERROR: The current database state ({}) does not match the ending state ({}).\n"
+          "       [{}]\n",
+          currentState, state, get_database()->get_filename()));
     }
     DatabaseIO *db   = get_database();
     double      time = 0.0;
@@ -1681,15 +1697,13 @@ namespace Ioss {
       if (old_ge != nullptr && ge != old_ge) {
         if (!((old_ge->type() == SIDEBLOCK && ge->type() == SIDESET) ||
               (ge->type() == SIDEBLOCK && old_ge->type() == SIDESET))) {
-          auto               old_id = old_ge->get_optional_property(id_str(), -1);
-          auto               new_id = ge->get_optional_property(id_str(), -1);
-          std::ostringstream errmsg;
-          fmt::print(errmsg,
-                     "\n\nERROR: Duplicate names detected.\n"
-                     "       The name '{}' was found for both {} {} and {} {}.\n"
-                     "       Names must be unique over all types in a finite element model.\n\n",
-                     db_name, old_ge->type_string(), old_id, ge->type_string(), new_id);
-          IOSS_ERROR(errmsg);
+          auto old_id = old_ge->get_optional_property(id_str(), -1);
+          auto new_id = ge->get_optional_property(id_str(), -1);
+          IOSS_ERROR(fmt::format(
+              "\n\nERROR: Duplicate names detected.\n"
+              "       The name '{}' was found for both {} {} and {} {}.\n"
+              "       Names must be unique over all types in a finite element model.\n\n",
+              db_name, old_ge->type_string(), old_id, ge->type_string(), new_id));
         }
       }
     }
@@ -1737,17 +1751,21 @@ namespace Ioss {
         aliases_[type].insert(std::make_pair(uname, canon));
       }
 
+      std::string fname = alias;
+      Ioss::Utils::fixup_name(fname);
+      if (fname != alias && fname != canon) {
+        aliases_[type].insert(std::make_pair(fname, canon));
+      }
+
       bool result;
       std::tie(std::ignore, result) = aliases_[type].insert(std::make_pair(alias, canon));
       return result;
     }
-    std::ostringstream errmsg;
-    fmt::print(errmsg,
-               "\n\nERROR: The entity named '{}' of type {} which is being aliased to '{}' does "
-               "not exist in "
-               "region '{}'.\n",
-               db_name, static_cast<int>(type), alias, name());
-    IOSS_ERROR(errmsg);
+    IOSS_ERROR(fmt::format(
+        "\n\nERROR: The entity named '{}' of type {} which is being aliased to '{}' does "
+        "not exist in "
+        "region '{}'.\n",
+        db_name, static_cast<int>(type), alias, name()));
   }
 
   bool Region::add_alias(const std::string &db_name, const std::string &alias)
@@ -1957,17 +1975,14 @@ namespace Ioss {
       nfound++;
     }
     if (nfound > 1) {
-      std::string        filename = get_database()->get_filename();
-      std::ostringstream errmsg;
-      fmt::print(
-          errmsg,
+      std::string filename = get_database()->get_filename();
+      IOSS_ERROR(fmt::format(
           "ERROR: There are multiple ({}) blocks, sets, assemblies and/or blobs with the name '{}' "
           "defined in the "
           "database file '{}'.\n"
           "\tThis is allowed in general, but this application uses an API function (get_entity) "
           "that does not support duplicate names.",
-          nfound, my_name, filename);
-      IOSS_ERROR(errmsg);
+          nfound, my_name, filename));
     }
     return entity;
   }
@@ -2072,7 +2087,6 @@ namespace Ioss {
    */
   NodeBlock *Region::get_node_block(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, NODEBLOCK);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2093,7 +2107,6 @@ namespace Ioss {
    */
   EdgeBlock *Region::get_edge_block(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, EDGEBLOCK);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2114,7 +2127,6 @@ namespace Ioss {
    */
   FaceBlock *Region::get_face_block(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, FACEBLOCK);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2135,7 +2147,6 @@ namespace Ioss {
    */
   ElementBlock *Region::get_element_block(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, ELEMENTBLOCK);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2156,7 +2167,6 @@ namespace Ioss {
    */
   StructuredBlock *Region::get_structured_block(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, STRUCTUREDBLOCK);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2177,7 +2187,6 @@ namespace Ioss {
    */
   SideSet *Region::get_sideset(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, SIDESET);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2198,7 +2207,6 @@ namespace Ioss {
    */
   SideBlock *Region::get_sideblock(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     SideBlock *ge = nullptr;
     for (const auto &ss : sideSets) {
       ge = ss->get_side_block(my_name);
@@ -2216,7 +2224,6 @@ namespace Ioss {
    */
   NodeSet *Region::get_nodeset(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, NODESET);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2237,7 +2244,6 @@ namespace Ioss {
    */
   EdgeSet *Region::get_edgeset(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, EDGESET);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2258,7 +2264,6 @@ namespace Ioss {
    */
   FaceSet *Region::get_faceset(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, FACESET);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2279,7 +2284,6 @@ namespace Ioss {
    */
   ElementSet *Region::get_elementset(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, ELEMENTSET);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2300,7 +2304,6 @@ namespace Ioss {
    */
   CommSet *Region::get_commset(const std::string &my_name) const
   {
-    IOSS_FUNC_ENTER(m_);
     const std::string db_name = get_alias_nl(my_name, COMMSET);
     unsigned int      db_hash = Ioss::Utils::hash(db_name);
 
@@ -2321,15 +2324,12 @@ namespace Ioss {
    */
   const CoordinateFrame &Region::get_coordinate_frame(int64_t id) const
   {
-    IOSS_FUNC_ENTER(m_);
     for (const auto &coor_frame : coordinateFrames) {
       if (coor_frame.id() == id) {
         return coor_frame;
       }
     }
-    std::ostringstream errmsg;
-    fmt::print(errmsg, "Error: Invalid id {} specified for coordinate frame.", id);
-    IOSS_ERROR(errmsg);
+    IOSS_ERROR(fmt::format("Error: Invalid id {} specified for coordinate frame.", id));
   }
 
   /** \brief Determine whether the entity with the given name and type exists.
@@ -2446,12 +2446,10 @@ namespace Ioss {
       }
     }
     // Should not reach this point...
-    std::ostringstream errmsg;
-    fmt::print(errmsg,
-               "ERROR: In Ioss::Region::get_element_block, an invalid local_id of {} is specified. "
-               " The valid range is 1 to {}",
-               local_id, get_implicit_property("element_count").get_int());
-    IOSS_ERROR(errmsg);
+    IOSS_ERROR(fmt::format(
+        "ERROR: In Ioss::Region::get_element_block, an invalid local_id of {} is specified. "
+        " The valid range is 1 to {}",
+        local_id, get_implicit_property("element_count").get_int()));
   }
 
   /** \brief Get the structured block containing a specified global-offset-node.
@@ -2469,12 +2467,10 @@ namespace Ioss {
       }
     }
     // Should not reach this point...
-    std::ostringstream errmsg;
-    fmt::print(errmsg,
-               "ERROR: In Ioss::Region::get_structured_block, an invalid global_offset of {} is "
-               "specified.",
-               global_offset);
-    IOSS_ERROR(errmsg);
+    IOSS_ERROR(fmt::format(
+        "ERROR: In Ioss::Region::get_structured_block, an invalid global_offset of {} is "
+        "specified.",
+        global_offset));
   }
 
   /** \brief Get an implicit property -- These are calculated from data stored
@@ -2701,12 +2697,10 @@ namespace Ioss {
             // Get the entity from this region... Must be non-nullptr
             GroupingEntity *this_ge = get_entity(base);
             if (this_ge == nullptr) {
-              std::ostringstream errmsg;
-              fmt::print(errmsg,
-                         "INTERNAL ERROR: Could not find entity '{}' in synchronize_id_and_name() "
-                         "                [{}]\n",
-                         base, get_database()->get_filename());
-              IOSS_ERROR(errmsg);
+              IOSS_ERROR(fmt::format(
+                  "INTERNAL ERROR: Could not find entity '{}' in synchronize_id_and_name() "
+                  "                [{}]\n",
+                  base, get_database()->get_filename()));
             }
 
             // See if there is an 'id' property...
@@ -2806,17 +2800,15 @@ namespace Ioss {
 
       if (old_ge != nullptr &&
           !(old_ge->type() == Ioss::SIDEBLOCK || old_ge->type() == Ioss::SIDESET)) {
-        std::string        filename = get_database()->get_filename();
-        int64_t            id1      = entity->get_optional_property(id_str(), 0);
-        int64_t            id2      = old_ge->get_optional_property(id_str(), 0);
-        std::ostringstream errmsg;
-        fmt::print(errmsg,
-                   "ERROR: There are multiple blocks, sets, assemblies, and/or blobs with the same "
-                   "name defined in the "
-                   "database file '{}'.\n"
-                   "\tBoth {} {} and {} {} are named '{}'.  All names must be unique.",
-                   filename, entity->type_string(), id1, old_ge->type_string(), id2, name);
-        IOSS_ERROR(errmsg);
+        std::string filename = get_database()->get_filename();
+        int64_t     id1      = entity->get_optional_property(id_str(), 0);
+        int64_t     id2      = old_ge->get_optional_property(id_str(), 0);
+        IOSS_ERROR(fmt::format(
+            "ERROR: There are multiple blocks, sets, assemblies, and/or blobs with the same "
+            "name defined in the "
+            "database file '{}'.\n"
+            "\tBoth {} {} and {} {} are named '{}'.  All names must be unique.",
+            filename, entity->type_string(), id1, old_ge->type_string(), id2, name));
       }
     }
   }
@@ -2828,10 +2820,8 @@ namespace Ioss {
       if (observer->get_control_option() == FileControlOption::CONTROL_AUTO_GROUP_FILE) {
         const Ioss::PropertyManager &db_properties = get_database()->get_property_manager();
         if (!db_properties.exists("ENABLE_FILE_GROUPS")) {
-          std::ostringstream errmsg;
-          fmt::print(errmsg, "ERROR: File groups are not enabled in the database file '{}'.\n",
-                     get_database()->get_filename());
-          IOSS_ERROR(errmsg);
+          IOSS_ERROR(fmt::format("ERROR: File groups are not enabled in the database file '{}'.\n",
+                                 get_database()->get_filename()));
         }
       }
 
@@ -2852,32 +2842,28 @@ namespace Ioss {
     case FileControlOption::CONTROL_AUTO_MULTI_FILE:
       clone_and_replace_output_database(steps);
       break;
-    case FileControlOption::CONTROL_AUTO_GROUP_FILE: add_output_database_group(steps); break;
+    case FileControlOption::CONTROL_AUTO_GROUP_FILE: add_output_database_change_set(steps); break;
     case FileControlOption::CONTROL_NONE:
     default: return; break;
     }
   }
 
-  void Region::add_output_database_group(int steps, bool force_addition)
+  void Region::add_output_database_change_set(int steps, bool force_addition)
   {
     if (get_database()->is_input())
       return;
 
     const Ioss::PropertyManager &db_properties = get_database()->get_property_manager();
     if (!db_properties.exists("ENABLE_FILE_GROUPS")) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg, "ERROR: File groups are not enabled in the database file '{}'.\n",
-                 get_database()->get_filename());
-      IOSS_ERROR(errmsg);
+      IOSS_ERROR(fmt::format("ERROR: File groups are not enabled in the database file '{}'.\n",
+                             get_database()->get_filename()));
     }
 
     if (topologyObserver &&
         (topologyObserver->get_control_option() == FileControlOption::CONTROL_AUTO_MULTI_FILE)) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg,
-                 "ERROR: TopologyObserver for database file '{}' does not support file groups.\n",
-                 get_database()->get_filename());
-      IOSS_ERROR(errmsg);
+      IOSS_ERROR(fmt::format(
+          "ERROR: TopologyObserver for database file '{}' does not support file groups.\n",
+          get_database()->get_filename()));
     }
 
     int state = steps;
@@ -2894,10 +2880,16 @@ namespace Ioss {
 
       state++; // For the state we are going to write.
 
-      reset_region();
-      DynamicTopologyFileControl fileControl(this, fileCyclicCount, ifDatabaseExists,
-                                             dbChangeCount);
-      fileControl.add_output_database_group(state);
+      if (topologyObserver) {
+        topologyObserver->initialize_region();
+      }
+
+      DynamicTopologyFileControl fileControl(this);
+      fileControl.add_output_database_change_set(state);
+
+      // Reset based on fileControl values
+      dbChangeCount    = fileControl.get_topology_change_count();
+      ifDatabaseExists = fileControl.get_if_database_exists_behavior();
     }
   }
 
@@ -2933,59 +2925,57 @@ namespace Ioss {
 
       state++; // For the state we are going to write.
 
-      reset_region();
-      DynamicTopologyFileControl fileControl(this, fileCyclicCount, ifDatabaseExists,
-                                             dbChangeCount);
+      topologyObserver->initialize_region();
+
+      DynamicTopologyFileControl fileControl(this);
       fileControl.clone_and_replace_output_database(state);
+
+      // Reset based on fileControl values
+      dbChangeCount    = fileControl.get_topology_change_count();
+      ifDatabaseExists = fileControl.get_if_database_exists_behavior();
     }
   }
 
   void Region::reset_topology_modification()
   {
-    if(topologyObserver) {
+    if (topologyObserver) {
       topologyObserver->reset_topology_modification();
     }
   }
 
   void Region::set_topology_modification(unsigned int type)
   {
-    if(topologyObserver) {
+    if (topologyObserver) {
       topologyObserver->set_topology_modification(type);
     }
   }
 
   unsigned int Region::get_topology_modification() const
   {
-    if(topologyObserver) {
+    if (topologyObserver) {
       return topologyObserver->get_topology_modification();
     }
 
     return TOPOLOGY_SAME;
   }
 
-  bool Region::load_group_mesh(const std::string &child_group_name)
+  bool Region::load_internal_change_set_mesh(const std::string &set_name)
   {
-    // Check name for '/' which is not allowed since it is the
-    // separator character in a full group path
-    if (child_group_name.find('/') != std::string::npos) {
-      std::ostringstream errmsg;
-      fmt::print(errmsg, "ERROR: Invalid group name '{}' contains a '/' which is not allowed.\n",
-                 child_group_name);
-      IOSS_ERROR(errmsg);
-    }
-
     DatabaseIO *iodatabase = get_database();
 
     if (!iodatabase->is_input())
       return false;
 
-    if (!iodatabase->open_root_group())
+    if (!iodatabase->open_internal_change_set(set_name))
       return false;
 
-    if (!iodatabase->open_group(child_group_name))
-      return false;
+    if (topologyObserver) {
+      topologyObserver->initialize_region();
+    }
+    else {
+      reset_region();
+    }
 
-    reset_region();
     iodatabase->release_memory();
 
     Region::set_state(STATE_CLOSED);
@@ -3005,20 +2995,23 @@ namespace Ioss {
     return true;
   }
 
-  bool Region::load_group_mesh(const int child_group_index)
+  bool Region::load_internal_change_set_mesh(const int child_group_index)
   {
     DatabaseIO *iodatabase = get_database();
 
     if (!iodatabase->is_input())
       return false;
 
-    if (!iodatabase->open_root_group())
+    if (!iodatabase->open_internal_change_set(child_group_index))
       return false;
 
-    if (!iodatabase->open_child_group(child_group_index))
-      return false;
+    if (topologyObserver) {
+      topologyObserver->initialize_region();
+    }
+    else {
+      reset_region();
+    }
 
-    reset_region();
     iodatabase->release_memory();
 
     Region::set_state(STATE_CLOSED);
@@ -3040,19 +3033,59 @@ namespace Ioss {
 
   void Region::update_dynamic_topology()
   {
-    auto topology_observer = get_mesh_modification_observer();
-
-    bool has_output_observer = topology_observer && !get_database()->is_input();
-    if (has_output_observer && topology_observer->is_topology_modified()) {
-      if(topology_observer->get_control_option() != FileControlOption::CONTROL_NONE) {
+    bool has_output_observer = topologyObserver && !get_database()->is_input();
+    if (has_output_observer && topologyObserver->needs_new_output_file()) {
+      if (topologyObserver->get_control_option() != FileControlOption::CONTROL_NONE) {
         int steps = get_property("state_count").get_int();
         start_new_output_database_entry(steps);
 
-        topology_observer->define_model();
-        topology_observer->write_model();
-        topology_observer->define_transient();
+        topologyObserver->define_model();
+        topologyObserver->write_model();
+        topologyObserver->define_transient();
       }
       topologyObserver->reset_topology_modification();
     }
   }
+
+  std::string Region::get_internal_change_set_name() const
+  {
+    return get_database()->get_internal_change_set_name();
+  }
+
+  std::tuple<std::string, int, double> Region::locate_db_state(double targetTime) const
+  {
+    auto                       *cregion = const_cast<Region *>(this);
+    DynamicTopologyStateLocator locator(cregion);
+
+    return locator.locate_db_state(targetTime);
+  }
+
+  std::tuple<std::string, int, double> Region::get_db_max_time() const
+  {
+    IOSS_FUNC_ENTER(m_);
+    auto db = get_database();
+    if (!db->is_input() && db->usage() != WRITE_RESULTS && db->usage() != WRITE_RESTART) {
+      return std::make_tuple(get_internal_change_set_name(), currentState, stateTimes[0]);
+    }
+
+    auto                       *cregion = const_cast<Region *>(this);
+    DynamicTopologyStateLocator locator(cregion);
+
+    return locator.get_db_max_time();
+  }
+
+  std::tuple<std::string, int, double> Region::get_db_min_time() const
+  {
+    IOSS_FUNC_ENTER(m_);
+    auto db = get_database();
+    if (!db->is_input() && db->usage() != WRITE_RESULTS && db->usage() != WRITE_RESTART) {
+      return std::make_tuple(get_internal_change_set_name(), currentState, stateTimes[0]);
+    }
+
+    auto                       *cregion = const_cast<Region *>(this);
+    DynamicTopologyStateLocator locator(cregion);
+
+    return locator.get_db_min_time();
+  }
+
 } // namespace Ioss

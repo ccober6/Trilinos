@@ -13,10 +13,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //@HEADER
-#ifndef __KOKKOSBATCHED_TRSM_DECL_HPP__
-#define __KOKKOSBATCHED_TRSM_DECL_HPP__
+#ifndef KOKKOSBATCHED_TRSM_DECL_HPP
+#define KOKKOSBATCHED_TRSM_DECL_HPP
 
 /// \author Kyungjoo Kim (kyukim@sandia.gov)
+/// \author Yuuichi Asahi (yuuichi.asahi@cea.fr)
 
 #include "KokkosBatched_Util.hpp"
 #include "KokkosBatched_Vector.hpp"

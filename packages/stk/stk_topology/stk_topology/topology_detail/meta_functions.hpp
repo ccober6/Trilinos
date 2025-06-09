@@ -41,6 +41,7 @@
 
 namespace stk::topology_detail {
 
+#ifndef STK_HIDE_DEPRECATED_CODE // Delete after Feb 2025
 namespace impl {
 // Temporary function used to identify the new SHELL_[TRI|QUAD]_ALL_FACE_SIDES
 // Will be removed once a proper conversion is available
@@ -55,6 +56,22 @@ constexpr bool is_temporary_shell_with_all_face_sides() {
           Topology::value == topology::SHELL_TRI_6_ALL_FACE_SIDES);
 }
 }
+
+//------------------------------------------------------------------------------
+
+template <typename Topology, unsigned ShellSideOrdinal>
+STK_DEPRECATED
+STK_INLINE_FUNCTION
+constexpr topology::topology_t shell_side_topology_()
+{
+  if constexpr (Topology::is_shell && Topology::dimension == 3 && ShellSideOrdinal < Topology::num_edges)
+  {
+    if constexpr (!impl::is_temporary_shell_with_all_face_sides<Topology>())
+      return Topology::shell_side_topology_vector[ShellSideOrdinal];
+  }
+  return topology::INVALID_TOPOLOGY;
+}
+#endif
 
 //------------------------------------------------------------------------------
 template <typename Topology, unsigned EdgeOrdinal>
@@ -140,18 +157,25 @@ constexpr topology::rank_t side_rank_()
   return Topology::side_rank;
 }
 
-//------------------------------------------------------------------------------
-
-template <typename Topology, unsigned ShellSideOrdinal>
+template <typename Topology>
 STK_INLINE_FUNCTION
-constexpr topology::topology_t shell_side_topology_()
-{
-  if constexpr (Topology::is_shell && Topology::dimension == 3 && ShellSideOrdinal < Topology::num_edges)
-  {
-    if constexpr (!impl::is_temporary_shell_with_all_face_sides<Topology>())
-      return Topology::shell_side_topology_vector[ShellSideOrdinal];
+constexpr unsigned num_side_ranks_() {
+  if constexpr (Topology::has_mixed_rank_sides) {
+    return 2u;
   }
-  return topology::INVALID_TOPOLOGY;
+  return (Topology::side_rank != topology::INVALID_RANK ? 1u : 0u);
+}
+
+template <typename Topology, typename SideRankOutputIterator>
+STK_INLINE_FUNCTION
+constexpr void side_ranks_( SideRankOutputIterator output_ranks )
+{
+  if constexpr (num_side_ranks_<Topology>() == 2) {
+    *output_ranks = topology::FACE_RANK; ++output_ranks;
+    *output_ranks = topology::EDGE_RANK;
+  } else if constexpr (num_side_ranks_<Topology>() == 1) {
+    *output_ranks = Topology::side_rank;
+  }
 }
 
 //------------------------------------------------------------------------------
@@ -167,7 +191,7 @@ struct edge_node_ordinals_impl_ {
 template <typename Topology, typename OrdinalOutputFunctor, unsigned EdgeOrdinal, unsigned NumNodes>
 struct edge_node_ordinals_impl_<Topology, OrdinalOutputFunctor, EdgeOrdinal, NumNodes, NumNodes> {
   STK_INLINE_FUNCTION
-  constexpr static int execute(OrdinalOutputFunctor fillOutput) {
+  constexpr static int execute(OrdinalOutputFunctor /*fillOutput*/) {
     return 0;
   }
 };
@@ -197,7 +221,7 @@ struct face_node_ordinals_impl_ {
 template <typename Topology, typename OrdinalOutputFunctor, unsigned FaceOrdinal, unsigned NumNodes>
 struct face_node_ordinals_impl_<Topology, OrdinalOutputFunctor, FaceOrdinal, NumNodes, NumNodes> {
   STK_INLINE_FUNCTION
-  constexpr static int execute(OrdinalOutputFunctor fillOutput) {
+  constexpr static int execute(OrdinalOutputFunctor /*fillOutput*/) {
     return 0;
   }
 };
@@ -227,7 +251,7 @@ struct permutation_node_ordinals_impl_ {
 template <typename Topology, typename OrdinalOutputFunctor, unsigned PermutationOrdinal, unsigned NumNodes>
 struct permutation_node_ordinals_impl_<Topology, OrdinalOutputFunctor, PermutationOrdinal, NumNodes, NumNodes> {
   STK_INLINE_FUNCTION
-  constexpr static int execute(OrdinalOutputFunctor fillOutput) {
+  constexpr static int execute(OrdinalOutputFunctor /*fillOutput*/) {
     return 0;
   }
 };

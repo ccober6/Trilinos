@@ -38,14 +38,14 @@ SET(SOURCES "")
 SET(HEADERS_IMPL "")
 SET(SOURCES_IMPL "")
 
-FILE(GLOB HEADERS *.hpp)
-FILE(GLOB SOURCES *.cpp)
+FILE(GLOB HEADERS CONFIGURE_DEPENDS *.hpp)
+FILE(GLOB SOURCES CONFIGURE_DEPENDS *.cpp)
 
-FILE(GLOB HEADERS_IMPL ${CMAKE_CURRENT_SOURCE_DIR}/../baseImpl/*.hpp)
-FILE(GLOB SOURCES_IMPL ${CMAKE_CURRENT_SOURCE_DIR}/../baseImpl/*.cpp)
+FILE(GLOB HEADERS_IMPL CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../baseImpl/*.hpp)
+FILE(GLOB SOURCES_IMPL CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../baseImpl/*.cpp)
 
-FILE(GLOB HEADERS_ELEMGRAPH ${CMAKE_CURRENT_SOURCE_DIR}/../baseImpl/elementGraph/*.hpp)
-FILE(GLOB SOURCES_ELEMGRAPH ${CMAKE_CURRENT_SOURCE_DIR}/../baseImpl/elementGraph/*.cpp)
+FILE(GLOB HEADERS_ELEMGRAPH CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../baseImpl/elementGraph/*.hpp)
+FILE(GLOB SOURCES_ELEMGRAPH CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../baseImpl/elementGraph/*.cpp)
 
 if(HAVE_STK_Trilinos)
   TRIBITS_ADD_LIBRARY(stk_mesh_base
@@ -61,14 +61,13 @@ else()
   target_link_libraries(stk_mesh_base stk_util_env)
   target_link_libraries(stk_mesh_base stk_util_parallel)
 
-  if(STK_BUILT_FOR_SIERRA)
-    find_package(SierraLapack REQUIRED)
-    target_link_libraries(stk_util_util PUBLIC SierraLapack::sierra_blas_lapack)
-  else()
-    find_package(BLAS REQUIRED)
+  find_package(BLAS REQUIRED)
+  if(TARGET BLAS::BLAS)
     target_link_libraries(stk_util_util PUBLIC BLAS::BLAS)
+  else()
+    target_link_libraries(stk_util_util PUBLIC ${BLAS_LIBRARIES})
   endif()
-    
+
 endif()
 
 target_include_directories(stk_mesh_base PUBLIC

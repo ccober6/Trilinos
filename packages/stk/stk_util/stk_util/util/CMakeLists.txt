@@ -35,8 +35,8 @@
 SET(HEADERS "")
 SET(SOURCES "")
 
-FILE(GLOB HEADERS *.hpp *.h)
-FILE(GLOB SOURCES *.cpp)
+FILE(GLOB HEADERS CONFIGURE_DEPENDS *.hpp *.h)
+FILE(GLOB SOURCES CONFIGURE_DEPENDS *.cpp)
 
 IF(HAVE_STK_Trilinos)
   TRIBITS_ADD_LIBRARY(stk_util_util
@@ -45,13 +45,11 @@ IF(HAVE_STK_Trilinos)
   )
 ELSE()
   add_library(stk_util_util ${SOURCES})
-
-  if(STK_BUILT_FOR_SIERRA)
-    find_package(SierraLapack REQUIRED)
-    target_link_libraries(stk_util_util PUBLIC SierraLapack::sierra_blas_lapack)
-  else()
-    find_package(BLAS REQUIRED)
+  find_package(BLAS REQUIRED)
+  if (TARGET BLAS::BLAS)
     target_link_libraries(stk_util_util PUBLIC BLAS::BLAS)
+  else()
+    target_link_libraries(stk_util_util PUBLIC ${BLAS_LIBRARIES})
   endif()
 
   target_link_libraries(stk_util_util PUBLIC Kokkos::kokkos)

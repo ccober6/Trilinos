@@ -135,11 +135,11 @@ class SPGEMMHandle {
 
       bufferSize = 0;
       buffer     = nullptr;
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_create_mat_descr(&descr_A));
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_create_mat_descr(&descr_B));
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_create_mat_descr(&descr_C));
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_create_mat_descr(&descr_D));
-      KOKKOS_ROCSPARSE_SAFE_CALL_IMPL(rocsparse_create_mat_info(&info_C));
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_create_mat_descr(&descr_A));
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_create_mat_descr(&descr_B));
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_create_mat_descr(&descr_C));
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_create_mat_descr(&descr_D));
+      KOKKOSSPARSE_IMPL_ROCSPARSE_SAFE_CALL(rocsparse_create_mat_info(&info_C));
       rocsparseHandle = kkControls.getRocsparseHandle();
     }
 
@@ -181,14 +181,14 @@ class SPGEMMHandle {
       buffer3 = buffer4 = buffer5 = nullptr;
 
       cusparseHandle = kkControls.getCusparseHandle();
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseSpGEMM_createDescr(&spgemmDescr));
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSpGEMM_createDescr(&spgemmDescr));
     }
 
     ~cuSparseSpgemmHandleType() {
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseDestroySpMat(descr_A));
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseDestroySpMat(descr_B));
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseDestroySpMat(descr_C));
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseSpGEMM_destroyDescr(spgemmDescr));
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroySpMat(descr_A));
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroySpMat(descr_B));
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroySpMat(descr_C));
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSpGEMM_destroyDescr(spgemmDescr));
       KOKKOS_IMPL_CUDA_SAFE_CALL(cudaFree(buffer3));
       KOKKOS_IMPL_CUDA_SAFE_CALL(cudaFree(buffer4));
       KOKKOS_IMPL_CUDA_SAFE_CALL(cudaFree(buffer5));
@@ -205,11 +205,11 @@ class SPGEMMHandle {
       // Get singleton cusparse handle from default controls
       cusparseHandle = kkControls.getCusparseHandle();
 
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseCreateMatDescr(&generalDescr));
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseSetMatType(generalDescr, CUSPARSE_MATRIX_TYPE_GENERAL));
-      KOKKOS_CUSPARSE_SAFE_CALL(cusparseSetMatIndexBase(generalDescr, CUSPARSE_INDEX_BASE_ZERO));
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseCreateMatDescr(&generalDescr));
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSetMatType(generalDescr, CUSPARSE_MATRIX_TYPE_GENERAL));
+      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSetMatIndexBase(generalDescr, CUSPARSE_INDEX_BASE_ZERO));
     }
-    ~cuSparseSpgemmHandleType() { KOKKOS_CUSPARSE_SAFE_CALL(cusparseDestroyMatDescr(generalDescr)); }
+    ~cuSparseSpgemmHandleType() { KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroyMatDescr(generalDescr)); }
   };
 #endif
 #endif
@@ -671,7 +671,7 @@ class SPGEMMHandle {
     // them in the handle
     suggested_vector_size_ = KokkosKernels::Impl::kk_get_suggested_vector_size(
         nr, nnz, KokkosKernels::Impl::kk_get_exec_space_type<ExecutionSpace>());
-    if (KokkosKernels::Impl::kk_is_gpu_exec_space<ExecutionSpace>())
+    if (KokkosKernels::Impl::is_gpu_exec_space_v<ExecutionSpace>)
       suggested_team_size_ = max_allowed_team_size / suggested_vector_size_;
     else
       suggested_team_size = max_allowed_team_size;

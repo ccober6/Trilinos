@@ -13,8 +13,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //@HEADER
-#ifndef __KOKKOSBATCHED_SVD_SERIAL_INTERNAL_HPP__
-#define __KOKKOSBATCHED_SVD_SERIAL_INTERNAL_HPP__
+#ifndef KOKKOSBATCHED_SVD_SERIAL_INTERNAL_HPP
+#define KOKKOSBATCHED_SVD_SERIAL_INTERNAL_HPP
 
 /// \author Brian Kelley (bmkelle@sandia.gov)
 
@@ -54,7 +54,7 @@ struct SerialSVDInternal {
     value_type a       = Kokkos::ArithTraits<value_type>::one();
     value_type b       = -a11 - a22;
     value_type c       = a11 * a22 - a21 * a21;
-    value_type sqrtDet = Kokkos::sqrt(b * b - 4 * a * c);
+    value_type sqrtDet = Kokkos::sqrt(Kokkos::max(Kokkos::ArithTraits<value_type>::zero(), b * b - 4 * a * c));
     e1                 = (-b + sqrtDet) / (2 * a);
     e2                 = (-b - sqrtDet) / (2 * a);
   }

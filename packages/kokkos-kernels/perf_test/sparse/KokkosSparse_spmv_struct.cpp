@@ -151,9 +151,9 @@ int main(int argc, char **argv) {
 
   Kokkos::initialize(argc, argv);
   {
-    typedef default_size_type size_type;
-    typedef default_lno_t lno_t;
-    typedef default_scalar Scalar;
+    using size_type = KokkosKernels::default_size_type;
+    using lno_t     = KokkosKernels::default_lno_t;
+    using Scalar    = KokkosKernels::default_scalar;
     typedef KokkosSparse::CrsMatrix<Scalar, lno_t, Kokkos::DefaultExecutionSpace, void, size_type> matrix_type;
     typedef typename Kokkos::View<Scalar **, Kokkos::LayoutLeft> mv_type;
     // typedef typename
@@ -244,7 +244,7 @@ int main(int argc, char **argv) {
 
     if (check_errors) {
       h_y_compare                                                  = Kokkos::create_mirror(y);
-      typename matrix_type::StaticCrsGraphType::HostMirror h_graph = Kokkos::create_mirror(A.graph);
+      typename matrix_type::StaticCrsGraphType::HostMirror h_graph = KokkosSparse::create_mirror(A.graph);
       typename matrix_type::values_type::HostMirror h_values       = Kokkos::create_mirror_view(A.values);
 
       // Error Check Gold Values

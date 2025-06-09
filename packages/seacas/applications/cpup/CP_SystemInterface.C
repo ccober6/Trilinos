@@ -1,5 +1,5 @@
 /*
- * Copyright(C) 1999-2024 National Technology & Engineering Solutions
+ * Copyright(C) 1999-2025 National Technology & Engineering Solutions
  * of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
  * NTESS, the U.S. Government retains certain rights in this software.
  *
@@ -123,19 +123,6 @@ void Cpup::SystemInterface::enroll_options()
       "\t\tThis tries to detect file corruption immediately instead of later. Mainly useful in "
       "large subcycle runs.",
       nullptr);
-
-  options_.enroll(
-      "zlib", GetLongOption::NoValue,
-      "Use the Zlib / libz compression method if compression is enabled (default) [exodus only].",
-      nullptr);
-
-  options_.enroll("szip", GetLongOption::NoValue,
-                  "Use SZip compression. [exodus only, enables netcdf-4]", nullptr);
-
-  options_.enroll("compress_data", GetLongOption::MandatoryValue,
-                  "The output database will be written using compression (netcdf-4 mode only).\n"
-                  "\t\tValue ranges from 0..9 for zlib/gzip or even values 4..32 for szip.",
-                  nullptr, nullptr, true);
 
   options_.enroll("append", GetLongOption::NoValue,
                   "Append to database instead of opening a new database.\n"
@@ -301,18 +288,7 @@ bool Cpup::SystemInterface::parse_options(int argc, char **argv)
 
   append_ = options_.retrieve("append") != nullptr;
 
-  if (options_.retrieve("szip") != nullptr) {
-    szip_ = true;
-    zlib_ = false;
-  }
-  zlib_ = (options_.retrieve("zlib") != nullptr);
-
-  if (szip_ && zlib_) {
-    fmt::print(stderr, "ERROR: Only one of 'szip' or 'zlib' can be specified.\n");
-  }
-
   append_ = options_.retrieve("append") != nullptr;
-  compressData_ = options_.get_option_value("compress_data", compressData_);
   //subcycle_        = options_.get_option_value("subcycle", subcycle_);
   cycle_           = options_.get_option_value("cycle", cycle_);
   subcycleJoin_    = options_.retrieve("join_subcycles") != nullptr;
@@ -498,7 +474,7 @@ void Cpup::SystemInterface::parse_step_option(const char *tokens)
 
         tmp_str[k] = '\0';
         if (strlen(tmp_str) > 0) {
-          val = strtol(tmp_str, nullptr, 0);
+          val = std::stoi(tmp_str);
         }
 
         if (tokens[j++] == '\0') {
@@ -514,7 +490,7 @@ void Cpup::SystemInterface::parse_step_option(const char *tokens)
     }
     else {
       // Does not contain a separator, min == max
-      stepMin_ = stepMax_ = strtol(tokens, nullptr, 0);
+      stepMin_ = stepMax_ = std::stoi(tokens);
     }
   }
 }

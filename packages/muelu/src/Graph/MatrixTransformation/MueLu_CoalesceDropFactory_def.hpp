@@ -348,6 +348,10 @@ void CoalesceDropFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level
 
     } else
       GetOStream(Runtime0) << "algorithm = \"" << algo << "\": threshold = " << threshold << ", blocksize = " << A->GetFixedBlockSize() << std::endl;
+
+    if (((algo == "classical") && (classicalAlgoStr.find("scaled") != std::string::npos)) || ((algo == "distance laplacian") && (distanceLaplacianAlgoStr.find("scaled") != std::string::npos)))
+      TEUCHOS_TEST_FOR_EXCEPTION(realThreshold > 1.0, Exceptions::RuntimeError, "For cut-drop algorithms, \"aggregation: drop tol\" = " << threshold << ", needs to be <= 1.0");
+
     Set<bool>(currentLevel, "Filtering", (threshold != STS::zero()));
 
     const typename STS::magnitudeType dirichletThreshold = STS::magnitude(as<SC>(pL.get<double>("aggregation: Dirichlet threshold")));
@@ -439,7 +443,7 @@ void CoalesceDropFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level
         using MT = typename STS::magnitudeType;
         RCP<Vector> ghostedDiag;
         ArrayRCP<const SC> ghostedDiagVals;
-        ArrayRCP<const MT> negMaxOffDiagonal;
+        ArrayRCP<const SC> negMaxOffDiagonal;
         // RS style needs the max negative off-diagonal, SA style needs the diagonal
         if (useSignedClassicalRS) {
           if (ghostedBlockNumber.is_null()) {
@@ -557,7 +561,7 @@ void CoalesceDropFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level
           using implATS          = Kokkos::ArithTraits<impl_scalar_type>;
 
           // move from host to device
-          auto ghostedDiagValsView = Kokkos::subview(ghostedDiag->getDeviceLocalView(Xpetra::Access::ReadOnly), Kokkos::ALL(), 0);
+          auto ghostedDiagValsView = Kokkos::subview(ghostedDiag->getLocalViewDevice(Xpetra::Access::ReadOnly), Kokkos::ALL(), 0);
           auto thresholdKokkos     = static_cast<impl_scalar_type>(threshold);
           auto realThresholdKokkos = implATS::magnitude(thresholdKokkos);
           auto columnsDevice       = Kokkos::create_mirror_view(ExecSpace(), columns);
@@ -576,7 +580,7 @@ void CoalesceDropFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level
           } else {
             boundaryColumnVector = boundaryNodesVector;
           }
-          auto boundaryColumn = boundaryColumnVector->getDeviceLocalView(Xpetra::Access::ReadOnly);
+          auto boundaryColumn = boundaryColumnVector->getLocalViewDevice(Xpetra::Access::ReadOnly);
           auto boundary       = Kokkos::subview(boundaryColumn, Kokkos::ALL(), 0);
 
           Kokkos::View<LO*, ExecSpace> rownnzView("rownnzView", A_device.numRows());
@@ -1188,7 +1192,7 @@ void CoalesceDropFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level
               // Deal with the situation where boundary conditions have only been enforced on rows, but not on columns.
               // We enforce dropping of these entries by assigning a very large number to the diagonal entries corresponding to BCs.
               if (!haveAddedToDiag)
-                localLaplDiagData[row] = STS::rmax();
+                localLaplDiagData[row] = STS::squareroot(STS::rmax());
             }
           }  // subtimer
           {
@@ -1251,6 +1255,7 @@ void CoalesceDropFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level
               isBoundary = pointBoundaryNodes[row];
             } else {
               // The amalgamated row is marked as Dirichlet iff all point rows are Dirichlet
+              isBoundary = true;
               for (LO j = 0; j < blkSize; j++) {
                 if (!pointBoundaryNodes[row * blkSize + j]) {
                   isBoundary = false;
@@ -1514,7 +1519,7 @@ void CoalesceDropFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level
       }
     }
 
-    if ((GetVerbLevel() & Statistics1) && !(A->GetFixedBlockSize() > 1 && threshold != STS::zero())) {
+    if (GetVerbLevel() & Statistics1) {
       RCP<const Teuchos::Comm<int>> comm = A->getRowMap()->getComm();
       GO numGlobalTotal, numGlobalDropped;
       MueLu_sumAll(comm, numTotal, numGlobalTotal);

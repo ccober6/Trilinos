@@ -145,7 +145,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, GetMatrixDiagonal, Scalar, L
 
   auto A        = MueLu_TestHelper_Factory::Build1DPoisson(100);
   auto diag     = Utils::GetMatrixDiagonal(*A);
-  auto diagView = diag->getHostLocalView(Xpetra::Access::ReadOnly);
+  auto diagView = diag->getLocalViewHost(Xpetra::Access::ReadOnly);
 
   TEST_EQUALITY(diagView.extent(0), A->getLocalNumRows());
 
@@ -166,7 +166,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, GetMatrixDiagonalInverse, Sc
 
   auto A        = MueLu_TestHelper_Factory::Build1DPoisson(100);
   auto diag     = Utils::GetMatrixDiagonalInverse(*A);
-  auto diagView = diag->getHostLocalView(Xpetra::Access::ReadOnly);
+  auto diagView = diag->getLocalViewHost(Xpetra::Access::ReadOnly);
 
   TEST_EQUALITY(diagView.extent(0), A->getLocalNumRows());
 
@@ -186,7 +186,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, GetMatrixOverlappedDiagonal,
 
   auto A        = MueLu_TestHelper_Factory::Build1DPoisson(100);
   auto diag     = Utils::GetMatrixOverlappedDiagonal(*A);
-  auto diagView = diag->getHostLocalView(Xpetra::Access::ReadOnly);
+  auto diagView = diag->getLocalViewHost(Xpetra::Access::ReadOnly);
 
   for (size_t idx = 0; idx < diagView.extent(0); ++idx) {
     TEST_EQUALITY(diagView(idx, 0), Scalar(2));
@@ -206,14 +206,14 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, FindNonZeros, Scalar, LocalO
   auto A          = MueLu_TestHelper_Factory::Build1DPoisson(100);
   auto map        = A->getMap();
   auto vector     = Xpetra::MultiVectorFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(map, 1);
-  auto vectorView = vector->getDeviceLocalView(Xpetra::Access::ReadOnly);
+  auto vectorView = vector->getLocalViewDevice(Xpetra::Access::ReadOnly);
 
   Kokkos::View<bool *, typename Node::device_type> nonZeros("", vectorView.extent(0));
   unsigned int result = 0;
 
   // Zero-ed out Vector
   {
-    Utils::FindNonZeros(vector->getDeviceLocalView(Xpetra::Access::ReadOnly), nonZeros);
+    Utils::FindNonZeros(vector->getLocalViewDevice(Xpetra::Access::ReadOnly), nonZeros);
 
     Kokkos::parallel_reduce(
         "", RangeType(0, nonZeros.extent(0)),
@@ -226,7 +226,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, FindNonZeros, Scalar, LocalO
   {
     vector->putScalar(TST::one());
 
-    Utils::FindNonZeros(vector->getDeviceLocalView(Xpetra::Access::ReadOnly), nonZeros);
+    Utils::FindNonZeros(vector->getLocalViewDevice(Xpetra::Access::ReadOnly), nonZeros);
 
     Kokkos::parallel_reduce(
         "", RangeType(0, nonZeros.extent(0)),
@@ -306,7 +306,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, ZeroDirichletRows, Scalar, L
     const auto zeroVal = Scalar(0.25);
     Utils::ZeroDirichletRows(vector, dcols, zeroVal);
 
-    auto vecView = vector->getHostLocalView(Xpetra::Access::ReadOnly);
+    auto vecView = vector->getLocalViewHost(Xpetra::Access::ReadOnly);
 
     for (size_t idx = 0; idx < vecView.extent(0); ++idx) {
       TEST_EQUALITY(vecView(localRowToZero, idx), zeroVal);
@@ -473,19 +473,19 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, TransformFunctions, Scalar, 
     TEST_EQUALITY(mv.getData(0).size(), tpetraMV.getData(0).size());
   };
 
-  auto tpetraMV = Utils::MV2TpetraMV(vector);
+  auto tpetraMV = toTpetra(vector);
   compareMV(*vector, *tpetraMV);
 
-  auto tpetraMV2 = Utils::MV2TpetraMV(*vector);
+  auto tpetraMV2 = toTpetra(*vector);
   compareMV(*vector, tpetraMV2);
 
-  auto nonConstTpetraMV = Utils::MV2NonConstTpetraMV(vector);
+  auto nonConstTpetraMV = toTpetra(vector);
   compareMV(*vector, *nonConstTpetraMV);
 
-  auto nonConstTpetraMV2 = Utils::MV2NonConstTpetraMV2(*vector);
+  auto nonConstTpetraMV2 = toTpetra(vector);
   compareMV(*vector, *nonConstTpetraMV2);
 
-  auto nonConstTpetraMV3 = Utils::MV2NonConstTpetraMV(*vector);
+  auto nonConstTpetraMV3 = toTpetra(*vector);
   compareMV(*vector, nonConstTpetraMV3);
 
   using TpetraMat        = Tpetra::RowMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
@@ -500,16 +500,16 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, TransformFunctions, Scalar, 
     TEST_EQUALITY(xpetraMat.getGlobalNumEntries(), tpetraMat.getGlobalNumEntries());
   };
 
-  auto tpetraCrsMat = Utils::Op2TpetraCrs(A);
+  auto tpetraCrsMat = toTpetra(A);
   compareMat(*A, *tpetraCrsMat);
 
-  auto nonConstTpetraCrs = Utils::Op2NonConstTpetraCrs(A);
+  auto nonConstTpetraCrs = toTpetra(A);
   compareMat(*A, *nonConstTpetraCrs);
 
-  auto tpetraCrs = Utils::Op2TpetraCrs(*A);
+  auto tpetraCrs = *toTpetra(A);
   compareMat(*A, tpetraCrs);
 
-  auto nonConstTpetraCrs2 = Utils::Op2NonConstTpetraCrs(*A);
+  auto nonConstTpetraCrs2 = *toTpetra(A);
   compareMat(*A, nonConstTpetraCrs2);
 
   auto crsMat = CrsMatrixFactory::Build(map);
@@ -529,7 +529,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Utilities_kokkos, TransformFunctions, Scalar, 
   auto nonConstTpetraRow = Utils::Op2NonConstTpetraRow(A);
   compareMat(*A, *nonConstTpetraRow);
 
-  auto tpetraMap = Utils::Map2TpetraMap(*map);
+  auto tpetraMap = toTpetra(map);
   TEST_INEQUALITY(tpetraMap, Teuchos::null);
   TEST_EQUALITY_CONST(tpetraMap->getGlobalNumElements(), map->getGlobalNumElements());
 

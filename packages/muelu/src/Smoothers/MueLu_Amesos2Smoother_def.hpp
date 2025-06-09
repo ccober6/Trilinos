@@ -44,7 +44,7 @@ Projection<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   Kokkos::View<Scalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Q("Q", Nullspace->getNumVectors(), Nullspace->getNumVectors());
   int LDQ;
   {
-    auto dots = tempMV->getHostLocalView(Xpetra::Access::ReadOnly);
+    auto dots = tempMV->getLocalViewHost(Xpetra::Access::ReadOnly);
     Kokkos::deep_copy(Q, dots);
     LDQ = Q.stride(1);
   }
@@ -75,7 +75,7 @@ void Projection<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   // Nullspace_ ^T * X
   Teuchos::RCP<Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node> > tempMV = Xpetra::MultiVectorFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(localMap_, X.getNumVectors());
   tempMV->multiply(Teuchos::CONJ_TRANS, Teuchos::NO_TRANS, ONE, *Nullspace_, X, ZERO);
-  auto dots      = tempMV->getHostLocalView(Xpetra::Access::ReadOnly);
+  auto dots      = tempMV->getLocalViewHost(Xpetra::Access::ReadOnly);
   bool doProject = true;
   for (size_t i = 0; i < X.getNumVectors(); i++) {
     for (size_t j = 0; j < Nullspace_->getNumVectors(); j++) {
@@ -110,10 +110,10 @@ Amesos2Smoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Amesos2Smoother(cons
   // TODO: It would be great is Amesos2 provides directly this kind of logic for us
   if (type_ == "" || Amesos2::query(type_) == false) {
     std::string oldtype = type_;
-#if defined(HAVE_AMESOS2_SUPERLU)
-    type_ = "Superlu";
-#elif defined(HAVE_AMESOS2_KLU2)
+#if defined(HAVE_AMESOS2_KLU2)
     type_ = "Klu";
+#elif defined(HAVE_AMESOS2_SUPERLU)
+    type_ = "Superlu";
 #elif defined(HAVE_AMESOS2_SUPERLUDIST)
     type_ = "Superludist";
 #elif defined(HAVE_AMESOS2_BASKER)
@@ -231,8 +231,8 @@ void Amesos2Smoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Setup(Level& cu
 
     // form normalization * nullspace * nullspace^T
     {
-      auto lclNullspace        = Nullspace->getDeviceLocalView(Xpetra::Access::ReadOnly);
-      auto lclGhostedNullspace = ghostedNullspace->getDeviceLocalView(Xpetra::Access::ReadOnly);
+      auto lclNullspace        = Nullspace->getLocalViewDevice(Xpetra::Access::ReadOnly);
+      auto lclGhostedNullspace = ghostedNullspace->getLocalViewDevice(Xpetra::Access::ReadOnly);
       Kokkos::parallel_for(
           "MueLu:Amesos2Smoother::fixNullspace_1", range_type(0, lclNumRows + 1),
           KOKKOS_LAMBDA(const size_t i) {
@@ -276,7 +276,7 @@ void Amesos2Smoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Setup(Level& cu
     }
 
     RCP<Matrix> newA       = rcp(new CrsMatrixWrap(rowMap, colMap, 0));
-    RCP<CrsMatrix> newAcrs = rcp_dynamic_cast<CrsMatrixWrap>(newA)->getCrsMatrix();
+    RCP<CrsMatrix> newAcrs = toCrsMatrix(newA);
     newAcrs->setAllValues(newRowPointers, newColIndices, newValues);
     newAcrs->expertStaticFillComplete(A->getDomainMap(), A->getRangeMap(),
                                       importer, A->getCrsGraph()->getExporter());
@@ -287,7 +287,7 @@ void Amesos2Smoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Setup(Level& cu
     factorA = A;
   }
 
-  RCP<Tpetra_CrsMatrix> tA = Utilities::Op2NonConstTpetraCrs(factorA);
+  RCP<const Tpetra_CrsMatrix> tA = toTpetra(factorA);
 
   prec_ = Amesos2::create<Tpetra_CrsMatrix, Tpetra_MultiVector>(type_, tA);
   TEUCHOS_TEST_FOR_EXCEPTION(prec_ == Teuchos::null, Exceptions::RuntimeError, "Amesos2::create returns Teuchos::null");
@@ -311,8 +311,8 @@ void Amesos2Smoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Apply(MultiVect
 
   RCP<Tpetra_MultiVector> tX, tB;
   if (!useTransformation_) {
-    tX = Utilities::MV2NonConstTpetraMV2(X);
-    tB = Utilities::MV2NonConstTpetraMV2(const_cast<MultiVector&>(B));
+    tX = toTpetra(Teuchos::rcpFromRef(X));
+    tB = toTpetra(Teuchos::rcpFromRef(const_cast<MultiVector&>(B)));
   } else {
     // Copy data of the original vectors into the transformed ones
     size_t numVectors = X.getNumVectors();
@@ -328,8 +328,8 @@ void Amesos2Smoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Apply(MultiVect
       B_data[i] = Bdata[i];
     }
 
-    tX = Utilities::MV2NonConstTpetraMV2(*X_);
-    tB = Utilities::MV2NonConstTpetraMV2(*B_);
+    tX = toTpetra(X_);
+    tB = toTpetra(B_);
   }
 
   prec_->setX(tX);

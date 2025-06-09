@@ -170,6 +170,7 @@ private:
 
 
   bool is_contiguous_;
+  bool use_gather_;
 
   typedef typename Kokkos::View<shylubasker_type**, Kokkos::LayoutLeft, 
                                 typename HostExecSpaceType::memory_space> host_solve_array_t;
@@ -182,8 +183,7 @@ private:
   mutable host_solve_array_t bValues_;
   int ldb_;
 
-    /*Handle for ShyLUBasker object*/
- 
+  /*Handle for ShyLUBasker object*/
 #if defined( HAVE_AMESOS2_KOKKOS ) && defined( KOKKOS_ENABLE_OPENMP )
   /*
   typedef typename node_type::device_type  kokkos_device;

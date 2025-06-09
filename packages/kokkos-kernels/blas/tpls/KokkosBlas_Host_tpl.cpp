@@ -125,9 +125,9 @@ void F77_BLAS_MANGLE(srot, SROT)(KK_INT const* N, float* X, KK_INT const* incx, 
 void F77_BLAS_MANGLE(drot, DROT)(KK_INT const* N, double* X, KK_INT const* incx, double* Y, KK_INT const* incy,
                                  double* c, double* s);
 void F77_BLAS_MANGLE(crot, CROT)(KK_INT const* N, std::complex<float>* X, KK_INT const* incx, std::complex<float>* Y,
-                                 KK_INT const* incy, float* c, float* s);
+                                 KK_INT const* incy, float* c, std::complex<float>* s);
 void F77_BLAS_MANGLE(zrot, ZROT)(KK_INT const* N, std::complex<double>* X, KK_INT const* incx, std::complex<double>* Y,
-                                 KK_INT const* incy, double* c, double* s);
+                                 KK_INT const* incy, double* c, std::complex<double>* s);
 
 ///
 /// rotg
@@ -683,7 +683,7 @@ void HostBlas<std::complex<float> >::axpy(KK_INT n, const std::complex<float> al
 }
 template <>
 void HostBlas<std::complex<float> >::rot(KK_INT const N, std::complex<float>* X, KK_INT const incx,
-                                         std::complex<float>* Y, KK_INT const incy, float* c, float* s) {
+                                         std::complex<float>* Y, KK_INT const incy, float* c, std::complex<float>* s) {
   F77_FUNC_CROT(&N, X, &incx, Y, &incy, c, s);
 }
 template <>
@@ -790,6 +790,18 @@ double HostBlas<std::complex<double> >::nrm2(KK_INT n, const std::complex<double
 }
 template <>
 double HostBlas<std::complex<double> >::asum(KK_INT n, const std::complex<double>* x, KK_INT x_inc) {
+  // see issue 2005
+  // On some platforms with OpenBLAS < 0.3.26, dzasum on vectors less than 16 entries is producing 0.
+  // this has been observed on some (not all) systems with:
+  // clang 14.0.6 / 15.0.7 AND OpenBLAS 0.3.23 AND Sapphire Rapids CPU
+  // unfortunately, it's not clear exactly what the trigger is
+  if (n > 0 && n < 16) {
+    double ret = 0.0;
+    for (int i = 0; i < n; ++i) {
+      ret += Kokkos::abs(x[i].real()) + Kokkos::abs(x[i].imag());
+    }
+    return ret;
+  }
   return F77_FUNC_DZASUM(&n, x, &x_inc);
 }
 template <>
@@ -812,7 +824,8 @@ void HostBlas<std::complex<double> >::axpy(KK_INT n, const std::complex<double> 
 }
 template <>
 void HostBlas<std::complex<double> >::rot(KK_INT const N, std::complex<double>* X, KK_INT const incx,
-                                          std::complex<double>* Y, KK_INT const incy, double* c, double* s) {
+                                          std::complex<double>* Y, KK_INT const incy, double* c,
+                                          std::complex<double>* s) {
   F77_FUNC_ZROT(&N, X, &incx, Y, &incy, c, s);
 }
 template <>

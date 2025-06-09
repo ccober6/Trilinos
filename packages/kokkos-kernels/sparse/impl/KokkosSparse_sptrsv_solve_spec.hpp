@@ -169,20 +169,33 @@ struct SPTRSV_SOLVE<ExecutionSpace, KernelHandle, RowMapType, EntriesType, Value
     }
     Kokkos::Profiling::pushRegion(sptrsv_handle_v[0]->is_lower_tri() ? "KokkosSparse_sptrsv[lower]"
                                                                      : "KokkosSparse_sptrsv[upper]");
+    const auto block_enabled = sptrsv_handle_v[0]->is_block_enabled();
     if (sptrsv_handle_v[0]->is_lower_tri()) {
       for (int i = 0; i < static_cast<int>(execspace_v.size()); i++) {
         if (sptrsv_handle_v[i]->is_symbolic_complete() == false) {
           Experimental::lower_tri_symbolic(execspace_v[i], *(sptrsv_handle_v[i]), row_map_v[i], entries_v[i]);
         }
       }
-      Sptrsv::template tri_solve_streams<true>(execspace_v, sptrsv_handle_v, row_map_v, entries_v, values_v, b_v, x_v);
+      if (block_enabled) {
+        Sptrsv::template tri_solve_streams<true, true>(execspace_v, sptrsv_handle_v, row_map_v, entries_v, values_v,
+                                                       b_v, x_v);
+      } else {
+        Sptrsv::template tri_solve_streams<true, false>(execspace_v, sptrsv_handle_v, row_map_v, entries_v, values_v,
+                                                        b_v, x_v);
+      }
     } else {
       for (int i = 0; i < static_cast<int>(execspace_v.size()); i++) {
         if (sptrsv_handle_v[i]->is_symbolic_complete() == false) {
           Experimental::upper_tri_symbolic(execspace_v[i], *(sptrsv_handle_v[i]), row_map_v[i], entries_v[i]);
         }
       }
-      Sptrsv::template tri_solve_streams<false>(execspace_v, sptrsv_handle_v, row_map_v, entries_v, values_v, b_v, x_v);
+      if (block_enabled) {
+        Sptrsv::template tri_solve_streams<false, true>(execspace_v, sptrsv_handle_v, row_map_v, entries_v, values_v,
+                                                        b_v, x_v);
+      } else {
+        Sptrsv::template tri_solve_streams<false, false>(execspace_v, sptrsv_handle_v, row_map_v, entries_v, values_v,
+                                                         b_v, x_v);
+      }
     }
     Kokkos::Profiling::popRegion();
   }
@@ -216,6 +229,8 @@ struct SPTRSV_SOLVE<ExecutionSpace, KernelHandle, RowMapType, EntriesType, Value
       Kokkos::View<SCALAR_TYPE *, LAYOUT_TYPE, Kokkos::Device<EXEC_SPACE_TYPE, MEM_SPACE_TYPE>,                       \
                    Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                                         \
       false, true>;
+
+#include <generated_specializations_hpp/KokkosSparse_sptrsv_solve_eti_spec_decl.hpp>
 
 #define KOKKOSSPARSE_SPTRSV_SOLVE_ETI_SPEC_INST(SCALAR_TYPE, ORDINAL_TYPE, OFFSET_TYPE, LAYOUT_TYPE, EXEC_SPACE_TYPE, \
                                                 MEM_SPACE_TYPE)                                                       \

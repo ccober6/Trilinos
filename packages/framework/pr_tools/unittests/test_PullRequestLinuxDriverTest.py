@@ -44,35 +44,25 @@ class Test_parse_args(unittest.TestCase):
         self.stderrRedirect = mock.patch('sys.stderr', new_callable=StringIO)
 
         self.m_argv = mock.patch.object(sys, 'argv', ['programName',
-                                                      '--source-repo-url',
-                                                      os.path.join(os.path.sep,
-                                                                   'dev',
-                                                                   'null',
-                                                                   'source_repo'),
-                                                      '--target-repo-url',
-                                                      os.path.join(os.path.sep,
-                                                                   'dev',
-                                                                   'null',
-                                                                   'target_repo'),
                                                       '--target-branch-name', 'real_trash',
                                                       '--pullrequest-build-name',
                                                       'Some_odd_compiler',
                                                       '--genconfig-build-name',
                                                       'Some_odd_compiler_and_options',
                                                       '--pullrequest-number', '4242',
-                                                      '--jenkins-job-number', '2424'])
+                                                      '--jenkins-job-number', '2424',
+                                                      '--source-dir=/some/source/dir',
+                                                      '--build-dir=/some/build/dir'])
 
-        self.default_options = Namespace(source_repo_url='/dev/null/source_repo',
-                                         target_repo_url='/dev/null/target_repo',
-                                         target_branch_name='real_trash',
+        self.default_options = Namespace(target_branch_name='real_trash',
                                          pullrequest_build_name='Some_odd_compiler',
                                          genconfig_build_name='Some_odd_compiler_and_options',
-                                         dashboard_build_name='UNKNOWN',
+                                         dashboard_build_name=None,
                                          pullrequest_number='4242',
                                          jenkins_job_number='2424',
-                                         source_dir='UNKNOWN',
-                                         build_dir='UNKNOWN',
-                                         ctest_driver='UNKNOWN',
+                                         source_dir='/some/source/dir',
+                                         build_dir='/some/build/dir',
+                                         ctest_driver='/some/source/dir/cmake/SimpleTesting/cmake/ctest-driver.cmake',
                                          ctest_drop_site='testing.sandia.gov',
                                          pullrequest_cdash_track='Pull Request',
                                          pullrequest_env_config_file='/dev/null/Trilinos_clone/pr_config/pullrequest.ini',
@@ -80,26 +70,27 @@ class Test_parse_args(unittest.TestCase):
                                          workspace_dir='/dev/null/Trilinos_clone',
                                          filename_packageenables='../packageEnables.cmake',
                                          filename_subprojects='../package_subproject_list.cmake',
+                                         skip_create_packageenables=False,
+                                         skip_run_tests=False,
                                          test_mode='standard',
                                          req_mem_per_core=3.0,
                                          max_cores_allowed=12,
                                          num_concurrent_tests=-1,
+                                         slots_per_gpu=2,
                                          ccache_enable=False,
                                          dry_run=False,
                                          use_explicit_cachefile=False,
                                          extra_configure_args="")
 
         self.default_stdout = dedent('''\
-                | - [R] source-repo-url             : /dev/null/source_repo
-                | - [R] target_repo_url             : /dev/null/target_repo
                 | - [R] target_branch_name          : real_trash
                 | - [R] pullrequest-build-name      : Some_odd_compiler
                 | - [R] genconfig-build-name        : Some_odd_compiler_and_options
                 | - [R] pullrequest-number          : 4242
                 | - [R] jenkins-job-number          : 2424
-                | - [R] source-dir                  : UNKNOWN
-                | - [R] build-dir                   : UNKNOWN
-                | - [R] ctest-driver                : UNKNOWN
+                | - [R] source-dir                  : /some/source/dir
+                | - [R] build-dir                   : /some/build/dir
+                | - [R] ctest-driver                : /some/source/dir/cmake/SimpleTesting/cmake/ctest-driver.cmake
                 | - [R] ctest-drop-site             : testing.sandia.gov
                 |
                 | - [O] dry-run                     : False
@@ -157,7 +148,6 @@ class Test_parse_args(unittest.TestCase):
         '''
         No inputs
         '''
-        import difflib
         with self.m_argv, self.stdoutRedirect as m_stdout:
             returned_default = PullRequestLinuxDriverTest.parse_args()
 

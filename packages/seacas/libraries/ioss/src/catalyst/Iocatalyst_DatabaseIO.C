@@ -104,7 +104,6 @@ namespace Iocatalyst {
     inline static const std::string NIGLOBAL           = "ni_global";
     inline static const std::string NJGLOBAL           = "nj_global";
     inline static const std::string NKGLOBAL           = "nk_global";
-    inline static const std::string NODEBLOCKONE       = "nodeblock_1";
     inline static const std::string IDS                = "ids";
     inline static const std::string INDEX              = "index";
     inline static const std::string OFFSET_I           = "offset_i";
@@ -355,6 +354,16 @@ namespace Iocatalyst {
         region->add_state(node[getTimePath()].as_float64());
       }
       return true;
+    }
+
+    std::vector<double> getTime()
+    {
+      std::vector<double> times;
+      auto               &node = this->DBNode;
+      if (node.has_path(getTimePath())) {
+        times.push_back(node[getTimePath()].as_float64());
+      }
+      return times;
     }
 
     int64_t putField(const std::string &containerName, const Ioss::GroupingEntity *entityGroup,
@@ -630,10 +639,15 @@ namespace Iocatalyst {
         return this->NodeMap;
       }
 
-      auto nbone_path = detail::NODEBLOCKS + detail::FS + detail::NODEBLOCKONE + detail::FS +
-                        detail::FIELDS + detail::FS + detail::IDS;
-      auto &&idsNode  = this->DBNode[nbone_path];
-      auto   node_ids = const_cast<void *>(idsNode[detail::VALUE].element_ptr(0));
+      if (this->DBNode[detail::NODEBLOCKS].number_of_children() == 0) {
+        std::ostringstream errmsg;
+        fmt::print(errmsg, "ERROR in {} no nodeblocks found, unable to create NodeMap\n", __func__);
+        IOSS_ERROR(errmsg);
+      }
+
+      auto &&idsNode = this->DBNode[detail::NODEBLOCKS][0][detail::FIELDS][detail::IDS];
+
+      auto node_ids = const_cast<void *>(idsNode[detail::VALUE].element_ptr(0));
       this->NodeMap.set_size(idsNode[detail::COUNT].as_int64());
       if (idsNode[detail::TYPE].as_int8() == Ioss::Field::BasicType::INT32) {
         this->NodeMap.set_map(reinterpret_cast<int32_t *>(node_ids),
@@ -1424,6 +1438,12 @@ namespace Iocatalyst {
 
     auto &impl = (*this->Impl.get());
     impl.readTime(region);
+  }
+
+  std::vector<double> DatabaseIO::get_db_step_times_nl()
+  {
+    auto &impl = (*this->Impl.get());
+    return impl.getTime();
   }
 
   void *DatabaseIO::get_catalyst_conduit_node()

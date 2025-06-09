@@ -1,4 +1,4 @@
-// Copyright(C) 1999-2024 National Technology & Engineering Solutions
+// Copyright(C) 1999-2025 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
@@ -12,8 +12,8 @@
 
 #include "ED_SystemInterface.h"
 #include "Tolerance.h"
-#include "exoII_read.h"
 #include "exo_block.h"
+#include "exo_read.h"
 #include "fmt/ostream.h"
 #include "iqsort.h"
 #include "smart_assert.h"
@@ -28,12 +28,12 @@ namespace {
                const std::vector<INT> &id, int dim, bool ignore_dups);
 
   template <typename INT>
-  void Compute_Node_Map(std::vector<INT> &node_map, ExoII_Read<INT> &file1, ExoII_Read<INT> &file2);
+  void Compute_Node_Map(std::vector<INT> &node_map, Exo_Read<INT> &file1, Exo_Read<INT> &file2);
 } // namespace
 
 template <typename INT>
-void Compute_Maps(std::vector<INT> &node_map, std::vector<INT> &elmt_map, ExoII_Read<INT> &file1,
-                  ExoII_Read<INT> &file2)
+void Compute_Maps(std::vector<INT> &node_map, std::vector<INT> &elmt_map, Exo_Read<INT> &file1,
+                  Exo_Read<INT> &file2)
 {
   SMART_ASSERT(file1.Open());
   SMART_ASSERT(file2.Open());
@@ -146,7 +146,7 @@ void Compute_Maps(std::vector<INT> &node_map, std::vector<INT> &elmt_map, ExoII_
       double mid_z = 0.0;
 
       for (size_t j = 0; j < num_nodes_per_elmt; ++j) {
-        SMART_ASSERT(conn1[j] >= 1 && conn1[j] <= (INT)num_nodes);
+        SMART_ASSERT(conn1[j] >= 1 && conn1[j] <= static_cast<INT>(num_nodes));
         mid_x += x1_f[conn1[j] - 1];
         if (dim > 1) {
           mid_y += y1_f[conn1[j] - 1];
@@ -313,7 +313,7 @@ void Compute_Maps(std::vector<INT> &node_map, std::vector<INT> &elmt_map, ExoII_
 
 template <typename INT>
 void Compute_Partial_Maps(std::vector<INT> &node_map, std::vector<INT> &elmt_map,
-                          ExoII_Read<INT> &file1, ExoII_Read<INT> &file2)
+                          Exo_Read<INT> &file1, Exo_Read<INT> &file2)
 {
   SMART_ASSERT(file1.Open());
   SMART_ASSERT(file2.Open());
@@ -439,7 +439,7 @@ void Compute_Partial_Maps(std::vector<INT> &node_map, std::vector<INT> &elmt_map
       double mid_z = 0.0;
 
       for (size_t j = 0; j < num_nodes_per_elmt; ++j) {
-        SMART_ASSERT(conn1[j] >= 1 && conn1[j] <= (INT)num_nodes1);
+        SMART_ASSERT(conn1[j] >= 1 && conn1[j] <= static_cast<INT>(num_nodes1));
         mid_x += x1_f[conn1[j] - 1];
         if (dim > 1) {
           mid_y += y1_f[conn1[j] - 1];
@@ -625,7 +625,7 @@ namespace {
 
     // See if there is any mapping happening...
     bool mapped = false;
-    for (INT i = 0; i < (INT)count; i++) {
+    for (INT i = 0; i < static_cast<INT>(count); i++) {
       if (i != map[i]) {
         mapped = true;
         break;
@@ -637,7 +637,7 @@ namespace {
 
 template <typename INT>
 void Compute_FileId_Maps(std::vector<INT> &node_map, std::vector<INT> &elmt_map,
-                         ExoII_Read<INT> &file1, ExoII_Read<INT> &file2)
+                         Exo_Read<INT> &file1, Exo_Read<INT> &file2)
 {
   // Compute map of nodes and elements in file1 to nodes and elements in file2
   // Use the internal exodus node and element number maps in file1 and file2 to
@@ -679,14 +679,14 @@ void Compute_FileId_Maps(std::vector<INT> &node_map, std::vector<INT> &elmt_map,
 
 template <typename INT>
 void Dump_Maps(const std::vector<INT> &node_map, const std::vector<INT> &elmt_map,
-               ExoII_Read<INT> &file1)
+               Exo_Read<INT> &file1)
 {
   size_t ijk;
   fmt::print("\n=== node number map (file1 -> file2) local ids\n");
   bool one_to_one = true;
   if (!node_map.empty()) {
     for (ijk = 0; ijk < file1.Num_Nodes(); ++ijk) {
-      if ((INT)ijk != node_map[ijk]) {
+      if (static_cast<INT>(ijk) != node_map[ijk]) {
         one_to_one = false;
         break;
       }
@@ -705,7 +705,7 @@ void Dump_Maps(const std::vector<INT> &node_map, const std::vector<INT> &elmt_ma
   one_to_one = true;
   if (!elmt_map.empty()) {
     for (ijk = 0; ijk < file1.Num_Elements(); ++ijk) {
-      if ((INT)ijk != elmt_map[ijk]) {
+      if (static_cast<INT>(ijk) != elmt_map[ijk]) {
         one_to_one = false;
         break;
       }
@@ -724,7 +724,7 @@ void Dump_Maps(const std::vector<INT> &node_map, const std::vector<INT> &elmt_ma
 
 namespace {
   template <typename INT>
-  void Compute_Node_Map(std::vector<INT> &node_map, ExoII_Read<INT> &file1, ExoII_Read<INT> &file2)
+  void Compute_Node_Map(std::vector<INT> &node_map, Exo_Read<INT> &file1, Exo_Read<INT> &file2)
   {
     // This function is called if and only if there are nodes that were
     // not matched in the Compute_Map function.  This is typically the
@@ -900,7 +900,7 @@ namespace {
 
         index = i;
       }
-    } while (++i < (int64_t)N && !interFace.coord_tol.Diff(x[id[i]], x0));
+    } while (++i < static_cast<int64_t>(N) && !interFace.coord_tol.Diff(x[id[i]], x0));
 
     interFace.coord_tol.type = save_tolerance_type;
     return index;
@@ -935,7 +935,7 @@ namespace {
   }
 } // namespace
 
-template <typename INT> double Find_Min_Coord_Sep(ExoII_Read<INT> &file)
+template <typename INT> double Find_Min_Coord_Sep(Exo_Read<INT> &file)
 {
   size_t num_nodes = file.Num_Nodes();
   if (num_nodes < 2) {
@@ -1083,7 +1083,7 @@ bool Compare_Maps_Internal(const std::vector<INT> &entity_map, bool partial_flag
 }
 
 template <typename INT>
-bool Compare_Maps(ExoII_Read<INT> &file1, ExoII_Read<INT> &file2, const std::vector<INT> &node_map,
+bool Compare_Maps(Exo_Read<INT> &file1, Exo_Read<INT> &file2, const std::vector<INT> &node_map,
                   const std::vector<INT> &elmt_map, bool partial_flag)
 {
   // Check whether the node and element number maps from both file1
@@ -1124,29 +1124,29 @@ bool Compare_Maps(ExoII_Read<INT> &file1, ExoII_Read<INT> &file2, const std::vec
 }
 
 template void Compute_Maps(std::vector<int> &node_map, std::vector<int> &elmt_map,
-                           ExoII_Read<int> &file1, ExoII_Read<int> &file2);
-template bool Compare_Maps(ExoII_Read<int> &file1, ExoII_Read<int> &file2,
+                           Exo_Read<int> &file1, Exo_Read<int> &file2);
+template bool Compare_Maps(Exo_Read<int> &file1, Exo_Read<int> &file2,
                            const std::vector<int> &node_map, const std::vector<int> &elmt_map,
                            bool partial_flag);
 
 template void   Compute_Partial_Maps(std::vector<int> &node_map, std::vector<int> &elmt_map,
-                                     ExoII_Read<int> &file1, ExoII_Read<int> &file2);
+                                     Exo_Read<int> &file1, Exo_Read<int> &file2);
 template void   Compute_FileId_Maps(std::vector<int> &node_map, std::vector<int> &elmt_map,
-                                    ExoII_Read<int> &file1, ExoII_Read<int> &file2);
+                                    Exo_Read<int> &file1, Exo_Read<int> &file2);
 template void   Dump_Maps(const std::vector<int> &node_map, const std::vector<int> &elmt_map,
-                          ExoII_Read<int> &file1);
-template double Find_Min_Coord_Sep(ExoII_Read<int> &file);
+                          Exo_Read<int> &file1);
+template double Find_Min_Coord_Sep(Exo_Read<int> &file);
 
 template void Compute_Maps(std::vector<int64_t> &node_map, std::vector<int64_t> &elmt_map,
-                           ExoII_Read<int64_t> &file1, ExoII_Read<int64_t> &file2);
-template bool Compare_Maps(ExoII_Read<int64_t> &file1, ExoII_Read<int64_t> &file2,
+                           Exo_Read<int64_t> &file1, Exo_Read<int64_t> &file2);
+template bool Compare_Maps(Exo_Read<int64_t> &file1, Exo_Read<int64_t> &file2,
                            const std::vector<int64_t> &node_map,
                            const std::vector<int64_t> &elmt_map, bool partial_flag);
 
 template void Compute_Partial_Maps(std::vector<int64_t> &node_map, std::vector<int64_t> &elmt_map,
-                                   ExoII_Read<int64_t> &file1, ExoII_Read<int64_t> &file2);
+                                   Exo_Read<int64_t> &file1, Exo_Read<int64_t> &file2);
 template void Compute_FileId_Maps(std::vector<int64_t> &node_map, std::vector<int64_t> &elmt_map,
-                                  ExoII_Read<int64_t> &file1, ExoII_Read<int64_t> &file2);
+                                  Exo_Read<int64_t> &file1, Exo_Read<int64_t> &file2);
 template void Dump_Maps(const std::vector<int64_t> &node_map, const std::vector<int64_t> &elmt_map,
-                        ExoII_Read<int64_t> &file1);
-template double Find_Min_Coord_Sep(ExoII_Read<int64_t> &file);
+                        Exo_Read<int64_t> &file1);
+template double Find_Min_Coord_Sep(Exo_Read<int64_t> &file);

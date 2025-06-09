@@ -21,15 +21,15 @@
 /// local (no MPI) sparse matrix stored in compressed row sparse
 /// ("Crs") format.
 
-#ifndef KOKKOS_SPARSE_CRSMATRIX_HPP_
-#define KOKKOS_SPARSE_CRSMATRIX_HPP_
+#ifndef KOKKOSSPARSE_CRSMATRIX_HPP_
+#define KOKKOSSPARSE_CRSMATRIX_HPP_
 
 #include "Kokkos_Core.hpp"
-#include "Kokkos_StaticCrsGraph.hpp"
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
 #include "KokkosSparse_findRelOffset.hpp"
+#include "KokkosSparse_StaticCrsGraph.hpp"
 #include "KokkosKernels_default_types.hpp"
 #include "KokkosKernels_Macros.hpp"
 
@@ -315,7 +315,7 @@ struct SparseRowViewConst {
 /// storage for sparse matrices, as described, for example, in Saad
 /// (2nd ed.).
 template <class ScalarType, class OrdinalType, class Device, class MemoryTraits = void,
-          class SizeType = default_size_type>
+          class SizeType = KokkosKernels::default_size_type>
 class CrsMatrix {
   static_assert(std::is_signed<OrdinalType>::value, "CrsMatrix requires that OrdinalType is a signed integer type.");
 
@@ -344,10 +344,10 @@ class CrsMatrix {
   //! Type of a host-memory mirror of the sparse matrix.
   typedef CrsMatrix<ScalarType, OrdinalType, host_mirror_space, MemoryTraits, SizeType> HostMirror;
   //! Type of the graph structure of the sparse matrix.
-  typedef Kokkos::StaticCrsGraph<ordinal_type, default_layout, device_type, memory_traits, size_type>
+  typedef StaticCrsGraph<ordinal_type, KokkosKernels::default_layout, device_type, memory_traits, size_type>
       StaticCrsGraphType;
   //! Type of the graph structure of the sparse matrix - consistent with Kokkos.
-  typedef Kokkos::StaticCrsGraph<ordinal_type, default_layout, device_type, memory_traits, size_type>
+  typedef StaticCrsGraph<ordinal_type, KokkosKernels::default_layout, device_type, memory_traits, size_type>
       staticcrsgraph_type;
   //! Type of column indices in the sparse matrix.
   typedef typename staticcrsgraph_type::entries_type index_type;
@@ -436,13 +436,12 @@ class CrsMatrix {
 
   /// \brief Construct with a graph that will be shared.
   ///
-  /// Allocate the values array for subsquent fill.
+  /// Allocate the values array for subsequent fill.
   template <typename InOrdinal, typename InLayout, typename InDevice, typename InMemTraits, typename InSizeType>
   [[deprecated(
       "Use the constructor that accepts ncols as input "
       "instead.")]] CrsMatrix(const std::string& label,
-                              const Kokkos::StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>&
-                                  graph_)
+                              const StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>& graph_)
       : graph(graph_.entries, graph_.row_map),
         values(label, graph_.entries.extent(0)),
         numCols_(maximum_entry(graph_) + 1) {}
@@ -457,7 +456,7 @@ class CrsMatrix {
   /// \param ncols  [in] The number of columns.
   template <typename InOrdinal, typename InLayout, typename InDevice, typename InMemTraits, typename InSizeType>
   CrsMatrix(const std::string& label,
-            const Kokkos::StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>& graph_,
+            const StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>& graph_,
             const OrdinalType& ncols)
       : graph(graph_.entries, graph_.row_map), values(label, graph_.entries.extent(0)), numCols_(ncols) {}
 
@@ -471,11 +470,11 @@ class CrsMatrix {
   /// \param graph_ The graph for storing the rowmap and col ids.
   template <typename InOrdinal, typename InLayout, typename InDevice, typename InMemTraits, typename InSizeType>
   CrsMatrix(const std::string&, const OrdinalType& ncols, const values_type& vals,
-            const Kokkos::StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>& graph_)
+            const StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>& graph_)
       : graph(graph_.entries, graph_.row_map), values(vals), numCols_(ncols) {}
 
   /// \brief Constructor that copies raw arrays of host data in
-  ///   3-array CRS (compresed row storage) format.
+  ///   3-array CRS (compressed row storage) format.
   ///
   /// On input, the entries must be sorted by row. \c rowmap determines where
   /// each row begins and ends. For each entry k (0 <= k < annz), \c cols[k]
@@ -611,7 +610,7 @@ class CrsMatrix {
       const ordinal_type offset = findRelOffset(&(row_view.colidx(0)), length, cols[i], hint, is_sorted);
       if (offset != length) {
         if (force_atomic) {
-          Kokkos::atomic_assign(&(row_view.value(offset)), vals[i]);
+          Kokkos::atomic_store(&(row_view.value(offset)), vals[i]);
         } else {
           row_view.value(offset) = vals[i];
         }
@@ -787,4 +786,4 @@ template <typename T>
 inline constexpr bool is_crs_matrix_v = is_crs_matrix<T>::value;
 
 }  // namespace KokkosSparse
-#endif
+#endif  // KOKKOSSPARSE_CRSMATRIX_HPP_

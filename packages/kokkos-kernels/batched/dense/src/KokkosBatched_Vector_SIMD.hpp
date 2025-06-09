@@ -13,8 +13,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //@HEADER
-#ifndef __KOKKOSBATCHED_VECTOR_SIMD_HPP__
-#define __KOKKOSBATCHED_VECTOR_SIMD_HPP__
+#ifndef KOKKOSBATCHED_VECTOR_SIMD_HPP
+#define KOKKOSBATCHED_VECTOR_SIMD_HPP
 
 /// \author Kyungjoo Kim (kyukim@sandia.gov)
 
@@ -22,7 +22,7 @@
 #include <KokkosBatched_Vector.hpp>
 #include "KokkosKernels_Macros.hpp"
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || defined(__SYCL_DEVICE_ONLY__)
 #undef __KOKKOSBATCHED_ENABLE_AVX__
 #else
 // compiler bug with AVX in some architectures

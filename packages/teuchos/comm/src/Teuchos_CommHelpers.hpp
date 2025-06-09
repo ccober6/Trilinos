@@ -254,6 +254,27 @@ scatter (const Packet sendBuf[],
      "See Bug 6375 and Bug 6336.");
 }
 
+template<typename Ordinal, typename Packet>
+void
+scatterv (const Packet sendBuf[],
+         const Ordinal sendCounts[],
+         const Ordinal displs[],
+         Packet recvBuf[],
+         const Ordinal recvCount,
+         const Ordinal root,
+         const Comm<Ordinal>& comm)
+{
+  // See Bug 6375; Tpetra does not actually need any specializations
+  // other than Ordinal = int and Packet = int.  We may add them later
+  // if there is interest.
+  TEUCHOS_TEST_FOR_EXCEPTION
+    (true, std::logic_error, "Teuchos::scatterv<" <<
+     TypeNameTraits<Ordinal>::name () << "," << TypeNameTraits<Packet>::name ()
+     << ">: Generic version is not yet implemented.  This function currently "
+     "only has an implementtion for Ordinal = int and Packet = int.  "
+     "See Bug 6375 and Bug 6336.");
+}
+
 /// \brief Wrapper for MPI_Reduce; reduction to one process, using a
 ///   built-in reduction operator selected by enum.
 /// \relates Comm
@@ -1574,6 +1595,16 @@ isend<int, double> (const ArrayRCP<const double>& sendBuffer,
                     const int tag,
                     const Comm<int>& comm);
 
+template<>
+TEUCHOSCOMM_LIB_DLL_EXPORT void
+gatherv<int, double> (const double sendBuf[],
+                      const int sendCount,
+                      double recvBuf[],
+                      const int recvCounts[],
+                      const int displs[],
+                      const int root,
+                      const Comm<int>& comm);
+
 // Specialization for Ordinal=int and Packet=float.
 template<>
 TEUCHOSCOMM_LIB_DLL_EXPORT void
@@ -1612,6 +1643,16 @@ isend<int, float> (const ArrayRCP<const float>& sendBuffer,
                    const int destRank,
                    const int tag,
                    const Comm<int>& comm);
+
+template<>
+TEUCHOSCOMM_LIB_DLL_EXPORT void
+gatherv<int, float> (const float sendBuf[],
+                     const int sendCount,
+                     float recvBuf[],
+                     const int recvCounts[],
+                     const int displs[],
+                     const int root,
+                     const Comm<int>& comm);
 
 // Specialization for Ordinal=int and Packet=long long.
 template<>
@@ -1863,6 +1904,24 @@ scatter (const int sendBuf[],
          const int recvCount,
          const int root,
          const Comm<int>& comm);
+template<>
+TEUCHOSCOMM_LIB_DLL_EXPORT void
+scatterv (const double sendBuf[],
+          const int sendCounts[],
+          const int displs[],
+          double recvBuf[],
+          const int recvCount,
+          const int root,
+          const Comm<int>& comm);
+template<>
+TEUCHOSCOMM_LIB_DLL_EXPORT void
+scatterv (const float sendBuf[],
+          const int sendCounts[],
+          const int displs[],
+          float recvBuf[],
+          const int recvCount,
+          const int root,
+          const Comm<int>& comm);
 template<>
 TEUCHOSCOMM_LIB_DLL_EXPORT void
 reduce<int, int> (const int sendBuf[],

@@ -42,11 +42,11 @@ enum : int {
 }
 
 template <typename device_t>
-void testSortCRS(default_lno_t numRows, default_lno_t numCols, default_size_type nnz, bool doValues,
-                 bool doStructInterface, int howExecSpecified) {
-  using scalar_t   = default_scalar;
-  using lno_t      = default_lno_t;
-  using size_type  = default_size_type;
+void testSortCRS(KokkosKernels::default_lno_t numRows, KokkosKernels::default_lno_t numCols,
+                 KokkosKernels::default_size_type nnz, bool doValues, bool doStructInterface, int howExecSpecified) {
+  using scalar_t   = KokkosKernels::default_scalar;
+  using lno_t      = KokkosKernels::default_lno_t;
+  using size_type  = KokkosKernels::default_size_type;
   using exec_space = typename device_t::execution_space;
   using crsMat_t   = KokkosSparse::CrsMatrix<scalar_t, lno_t, device_t, void, size_type>;
   // Create a random matrix on device
@@ -135,9 +135,9 @@ void testSortCRS(default_lno_t numRows, default_lno_t numCols, default_size_type
 template <typename device_t>
 void testSortCRSUnmanaged(bool doValues, bool doStructInterface) {
   // This test is about bug #960.
-  using scalar_t   = default_scalar;
-  using lno_t      = default_lno_t;
-  using size_type  = default_size_type;
+  using scalar_t   = KokkosKernels::default_scalar;
+  using lno_t      = KokkosKernels::default_lno_t;
+  using size_type  = KokkosKernels::default_size_type;
   using exec_space = typename device_t::execution_space;
   using crsMat_t =
       KokkosSparse::CrsMatrix<scalar_t, lno_t, device_t, Kokkos::MemoryTraits<Kokkos::Unmanaged>, size_type>;
@@ -175,9 +175,9 @@ void testSortCRSUnmanaged(bool doValues, bool doStructInterface) {
 
 template <typename device_t>
 void testSortAndMerge(bool justGraph, int howExecSpecified, bool doStructInterface, bool inPlace, int testCase) {
-  using size_type  = default_size_type;
-  using lno_t      = default_lno_t;
-  using scalar_t   = default_scalar;
+  using size_type  = KokkosKernels::default_size_type;
+  using lno_t      = KokkosKernels::default_lno_t;
+  using scalar_t   = KokkosKernels::default_scalar;
   using exec_space = typename device_t::execution_space;
   using crsMat_t   = KokkosSparse::CrsMatrix<scalar_t, lno_t, device_t, void, size_type>;
   using graph_t    = typename crsMat_t::staticcrsgraph_type;
@@ -420,7 +420,7 @@ void testSortAndMerge(bool justGraph, int howExecSpecified, bool doStructInterfa
   EXPECT_EQ(goldEntries.size(), outEntries.extent(0));
   if (!justGraph) {
     EXPECT_EQ(goldValues.size(), outValues.extent(0));
-    EXPECT_EQ(goldValues.size(), output.nnz());
+    EXPECT_EQ(goldValues.size(), size_t(output.nnz()));
   }
   for (size_t i = 0; i < goldRowmap.size(); i++) EXPECT_EQ(goldRowmap[i], outRowmap(i));
   for (size_t i = 0; i < goldEntries.size(); i++) {

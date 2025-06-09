@@ -1,4 +1,4 @@
-// Copyright(C) 1999-, 20232023,  National Technology & Engineering Solutions
+// Copyright(C) 1999-2025 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
@@ -24,6 +24,7 @@ public:
   double tolerance() const { return tolerance_; }
   bool   match_node_ids() const { return matchNodeIds_; }
   bool   match_node_xyz() const { return matchNodeXYZ_; }
+  bool   match_nodeset_nodes() const { return !nsetMatch_.empty(); }
   bool   match_elem_ids() const { return matchElemIds_; }
   bool   omit_nodesets() const { return omitNodesets_; }
   bool   omit_sidesets() const { return omitSidesets_; }
@@ -36,12 +37,17 @@ public:
   bool use_netcdf4() const { return useNetcdf4_; }
   bool ignore_element_ids() const { return ignoreElementIds_; }
 
+  int  quantize_nsd() const { return quantizeNSD_; }
+  bool quantize() const { return quantizeNSD_ > 0; }
   int  compression_level() const { return compressionLevel_; }
   bool zlib() const { return zlib_; }
   bool szip() const { return szip_; }
-  int  step_min() const { return stepMin_; }
-  int  step_max() const { return stepMax_; }
-  int  step_interval() const { return stepInterval_; }
+  bool zstd() const { return zstd_; }
+  bool bz2() const { return bz2_; }
+
+  int step_min() const { return stepMin_; }
+  int step_max() const { return stepMax_; }
+  int step_interval() const { return stepInterval_; }
 
   vector3d                offset() const { return offset_; }
   const std::vector<int> &information_record_parts() const { return infoRecordParts_; }
@@ -56,6 +62,7 @@ public:
   const Omissions &nset_omissions() const { return nsetOmissions_; }
   const Omissions &sset_omissions() const { return ssetOmissions_; }
   const Omissions &assembly_omissions() const { return assemblyOmissions_; }
+  const Omissions &nset_match() const { return nsetMatch_; }
 
   const std::string &block_prefix() const { return blockPrefix_; }
 
@@ -88,6 +95,12 @@ private:
   int  stepMax_{INT_MAX};
   int  stepInterval_{1};
   int  compressionLevel_{0};
+  int  quantizeNSD_{0};
+  bool zlib_{false};
+  bool szip_{false};
+  bool zstd_{false};
+  bool bz2_{false};
+
   bool omitNodesets_{false};
   bool omitSidesets_{false};
   bool omitAssemblies_{false};
@@ -98,8 +111,7 @@ private:
   bool ints64bit_{false};
   bool useNetcdf4_{false};
   bool ignoreElementIds_{false};
-  bool zlib_{true};
-  bool szip_{false};
+
   bool createAssemblies_{true};
 
   std::string blockPrefix_{"p"};
@@ -112,6 +124,8 @@ private:
   Omissions assemblyOmissions_;
   Omissions nsetOmissions_;
   Omissions ssetOmissions_;
+
+  Omissions nsetMatch_;
 
   std::vector<int> nodesetConvertParts_;
   std::vector<int> infoRecordParts_;

@@ -249,8 +249,6 @@ namespace BaskerNS
     BASKER_ASSERT(0==1, "init_int_thread");
 
     #ifdef BASKER_KOKKOS
-    typedef Kokkos::TeamPolicy<Exe_Space>     TeamPolicy;
-    typedef typename TeamPolicy::member_type  TeamMember;
     Kokkos::parallel_for(
                          TeamPolicy(Exe_Space::thread_pool_size(),1),
                          KOKKOS_LAMBDA(const TeamMember& thread)
@@ -289,8 +287,6 @@ namespace BaskerNS
     BASKER_ASSERT(0==1, "INIT_VALUE_ENTRY_THREADS");
 
     #ifdef BASKER_KOKKOS
-    typedef Kokkos::TeamPolicy<Exe_Space>     TeamPolicy;
-    typedef typename TeamPolicy::member_type  TeamMember;
     Kokkos::parallel_for(TeamPolicy(Exe_Space::thread_pool_size(),1),
                          KOKKOS_LAMBDA(const TeamMember& thread)
     #else
@@ -464,9 +460,9 @@ namespace BaskerNS
 
         for(Int row = 0; row < LL_size(b); row++)
         {
-          #ifdef BASKER_DEBUG_INIT
-          printf("L Factor Init: %d %d , kid: %d, nnz: %ld \n",
-              b, row, kid, LL(b)(row).nnz);
+          #ifdef BASKER_TIMER
+          printf("L Factor Init: L(%d %d) , kid: %d, nnz = %ld (%d x %d)\n",
+              b, row, kid, LL(b)(row).nnz, LL(b)(row).nrow,LL(b)(row).ncol);
           #endif
 
           #ifdef BASKER_TIMER

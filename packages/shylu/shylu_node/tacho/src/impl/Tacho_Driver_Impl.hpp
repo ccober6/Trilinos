@@ -24,9 +24,21 @@ template <typename VT, typename DT>
 Driver<VT, DT>::Driver()
     : _method(1), _order_connected_graph_separately(1), _m(0), _nnz(0), _ap(), _h_ap(), _aj(), _h_aj(), _perm(),
       _h_perm(), _peri(), _h_peri(), _m_graph(0), _nnz_graph(0), _h_ap_graph(), _h_aj_graph(), _h_perm_graph(),
-      _h_peri_graph(), _nsupernodes(0), _N(nullptr), _verbose(0), _small_problem_thres(1024), _serial_thres_size(-1),
+      _h_peri_graph(), _nnz_u(0), _nsupernodes(0), _N(nullptr), _verbose(0), _small_problem_thres(1024), _serial_thres_size(-1),
       _mb(-1), _nb(-1), _front_update_mode(-1), _levelset(0), _device_level_cut(0), _device_factor_thres(128),
-      _device_solve_thres(128), _variant(2), _nstreams(16), _max_num_superblocks(-1) {}
+      _device_solve_thres(128),
+      #if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP) || defined(KOKKOS_ENABLE_SYCL)
+      _variant(2),
+      #else
+      _variant(-1), // sequential by default
+      #endif
+      _nstreams(16), _pivot_tol(0.0),
+#if defined(KOKKOS_ENABLE_HIP)
+      _store_transpose(true),
+#else
+      _store_transpose(false),
+#endif
+      _max_num_superblocks(-1) {}
 
 ///
 /// duplicate the object
@@ -142,14 +154,15 @@ void Driver<VT, DT>::setLevelSetOptionDeviceFunctionThreshold(const ordinal_type
 }
 
 template <typename VT, typename DT> void Driver<VT, DT>::setLevelSetOptionAlgorithmVariant(const ordinal_type variant) {
-#if !defined(TACHO_HAVE_CUSPARSE) && !defined(KOKKOS_ENABLE_HIP)
-  if (variant == 3) {
-    TACHO_TEST_FOR_EXCEPTION(true, std::logic_error, "variant 3 requires CuSparse or rocSparce");
-  }
-#endif
+  #if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP) || defined(KOKKOS_ENABLE_SYCL)
   if (variant > 3 || variant < 0) {
    TACHO_TEST_FOR_EXCEPTION(true, std::logic_error, "levelset algorithm variants range from 0 to 3");
   }
+  #else
+  if (variant > 3 || variant < -1) {
+   TACHO_TEST_FOR_EXCEPTION(true, std::logic_error, "levelset algorithm variants range from -1 to 3 (-1 for serial)");
+  }
+  #endif
   _variant = variant;
 }
 
@@ -157,9 +170,27 @@ template <typename VT, typename DT> void Driver<VT, DT>::setLevelSetOptionNumStr
   _nstreams = nstreams;
 }
 
+template <typename VT, typename DT> void Driver<VT, DT>::setPivotTolerance(const mag_type pivot_tol) {
+  _pivot_tol = pivot_tol;
+}
+
+template <typename VT, typename DT> void Driver<VT, DT>::useNoPivotTolerance() {
+  _pivot_tol = 0.0;
+}
+
+template <typename VT, typename DT> void Driver<VT, DT>::useDefaultPivotTolerance() {
+  using arith_traits = ArithTraits<value_type>;
+  _pivot_tol = sqrt(arith_traits::epsilon());
+}
+
+template <typename VT, typename DT> void Driver<VT, DT>::storeExplicitTranspose(bool flag) {
+  _store_transpose = flag;
+}
+
 ///
 /// get interface
 ///
+template <typename VT, typename DT> ordinal_type Driver<VT, DT>::getNumNonZerosU() const { return _nnz_u; }
 template <typename VT, typename DT> ordinal_type Driver<VT, DT>::getNumSupernodes() const { return _nsupernodes; }
 
 template <typename VT, typename DT> typename Driver<VT, DT>::ordinal_type_array Driver<VT, DT>::getSupernodes() const {
@@ -179,11 +210,11 @@ typename Driver<VT, DT>::ordinal_type_array Driver<VT, DT>::getInversePermutatio
 // internal only
 template <typename VT, typename DT> int Driver<VT, DT>::analyze() {
   int r_val(0);
-  if (_m < _small_problem_thres) {
+  if (_m <= _small_problem_thres) {
     /// do nothing
     if (_verbose) {
-      printf("TachoSolver: Analyze\n");
-      printf("====================\n");
+      printf("TachoSolver: Analyze (Small Problem)\n");
+      printf("====================================\n");
       printf("  Linear system A\n");
       printf("             number of equations:                             %10d\n", _m);
       printf("\n");
@@ -242,6 +273,7 @@ template <typename VT, typename DT> int Driver<VT, DT>::analyze_linear_system() 
     symbolic_tools_type S(_m, _h_ap, _h_aj, _h_perm, _h_peri);
     S.symbolicFactorize(_verbose);
 
+    _nnz_u = S.NumNonzerosU();
     _nsupernodes = S.NumSupernodes();
     _stree_level = S.SupernodesTreeLevel();
     _stree_roots = S.SupernodesTreeRoots();
@@ -287,6 +319,7 @@ template <typename VT, typename DT> int Driver<VT, DT>::analyze_condensed_graph(
     S.symbolicFactorize(_verbose);
     S.evaporateSymbolicFactors(_h_aw_graph, _verbose);
 
+    _nnz_u = S.NumNonzerosU();
     _nsupernodes = S.NumSupernodes();
     _stree_level = S.SupernodesTreeLevel();
     _stree_roots = S.SupernodesTreeRoots();
@@ -330,7 +363,7 @@ template <typename VT, typename DT> int Driver<VT, DT>::initialize() {
   ///
   /// initialize numeric tools
   ///
-  if (_m < _small_problem_thres) {
+  if (_m <= _small_problem_thres) {
     /// do nothing
   } else {
     ///
@@ -339,8 +372,8 @@ template <typename VT, typename DT> int Driver<VT, DT>::initialize() {
     NumericToolsFactory<VT, DT> factory;
     factory.setBaseMember(_method, _m, _ap, _aj, _perm, _peri, _nsupernodes, _supernodes, _gid_super_panel_ptr,
                           _gid_super_panel_colidx, _sid_super_panel_ptr, _sid_super_panel_colidx,
-                          _blk_super_panel_colidx, _stree_parent, _stree_ptr, _stree_children, _stree_level,
-                          _stree_roots, _verbose);
+                          _blk_super_panel_colidx, _stree_parent, _stree_ptr, _stree_children, _stree_level, _stree_roots,
+                          _verbose);
 
     factory.setLevelSetMember(_variant, _device_level_cut, _device_factor_thres, _device_solve_thres, _nstreams);
 
@@ -370,10 +403,10 @@ template <typename VT, typename DT> int Driver<VT, DT>::factorize(const value_ty
     }
   }
 
-  if (_m < _small_problem_thres) {
+  if (_m <= _small_problem_thres) {
     factorize_small_host(ax);
   } else {
-    _N->factorize(ax, _verbose);
+    _N->factorize(ax, _store_transpose, _pivot_tol, _verbose);
   }
   return 0;
 }
@@ -463,7 +496,7 @@ int Driver<VT, DT>::solve(const value_type_matrix &x, const value_type_matrix &b
     }
   }
 
-  if (_m < _small_problem_thres) {
+  if (_m <= _small_problem_thres) {
     solve_small_host(x, b, t);
   } else {
     TACHO_TEST_FOR_EXCEPTION(t.extent(0) < x.extent(0) || t.extent(1) < x.extent(1), std::logic_error,
@@ -541,7 +574,7 @@ double Driver<VT, DT>::computeRelativeResidual(const value_type_array &ax, const
   CrsMatrixBase<value_type, device_type> A;
   A.setExternalMatrix(_m, _m, _nnz, _ap, _aj, ax);
 
-  return Tacho::computeRelativeResidual(A, x, b);
+  return Tacho::computeRelativeResidual(A, x, b, _verbose);
 }
 
 template <typename VT, typename DT>
@@ -553,7 +586,7 @@ void Driver<VT, DT>::computeSpMV(const value_type_array &ax, const value_type_ma
 }
 
 template <typename VT, typename DT> int Driver<VT, DT>::exportFactorsToCrsMatrix(crs_matrix_type &A) {
-  if (_m < _small_problem_thres) {
+  if (_m <= _small_problem_thres) {
     typedef ArithTraits<value_type> ats;
     const typename ats::mag_type zero(0);
 
@@ -631,6 +664,7 @@ template <typename VT, typename DT> int Driver<VT, DT>::release() {
     _h_perm_graph = ordinal_type_array_host();
     _h_peri_graph = ordinal_type_array_host();
 
+    _nnz_u = 0;
     _nsupernodes = 0;
     _supernodes = ordinal_type_array();
 

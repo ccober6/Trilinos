@@ -134,12 +134,12 @@ struct SpilukTest {
     const scalar_t MONE = scalar_t(-1);
 
     // Create a reference view e set to all 1's
-    ValuesType e_one("e_one", nrows * block_size);
+    ValuesType e_one("e_one", static_cast<size_t>(nrows) * block_size);
     Kokkos::deep_copy(e_one, ONE);
 
     // Create two views for spmv results
-    ValuesType bb("bb", nrows * block_size);
-    ValuesType bb_tmp("bb_tmp", nrows * block_size);
+    ValuesType bb("bb", static_cast<size_t>(nrows) * block_size);
+    ValuesType bb_tmp("bb_tmp", static_cast<size_t>(nrows) * block_size);
 
     // Compute norm2(L*U*e_one - A*e_one)/norm2(A*e_one)
     KokkosSparse::spmv("N", ONE, A, e_one, ZERO, bb);
@@ -238,17 +238,17 @@ struct SpilukTest {
     RowMapType U_row_map("U_row_map", nrows + 1);
     EntriesType U_entries("U_entries", spiluk_handle->get_nnzU());
 
-    spiluk_symbolic(&kh, fill_lev, row_map, entries, L_row_map, L_entries, U_row_map, U_entries);
+    KokkosSparse::spiluk_symbolic(&kh, fill_lev, row_map, entries, L_row_map, L_entries, U_row_map, U_entries);
 
     Kokkos::fence();
 
     Kokkos::resize(L_entries, spiluk_handle->get_nnzL());
     Kokkos::resize(U_entries, spiluk_handle->get_nnzU());
-    ValuesType L_values("L_values", spiluk_handle->get_nnzL() * block_items);
-    ValuesType U_values("U_values", spiluk_handle->get_nnzU() * block_items);
+    ValuesType L_values("L_values", spiluk_handle->get_nnzL() * static_cast<size_t>(block_items));
+    ValuesType U_values("U_values", spiluk_handle->get_nnzU() * static_cast<size_t>(block_items));
 
-    spiluk_numeric(&kh, fill_lev, row_map, entries, values, L_row_map, L_entries, L_values, U_row_map, U_entries,
-                   U_values);
+    KokkosSparse::spiluk_numeric(&kh, fill_lev, row_map, entries, values, L_row_map, L_entries, L_values, U_row_map,
+                                 U_entries, U_values);
 
     Kokkos::fence();
 
@@ -327,7 +327,7 @@ struct SpilukTest {
     const size_type nnz        = values.extent(0);
     const lno_t fill_lev       = 2;
     const size_type block_size = nrows % 2 == 0 ? 2 : 3;
-    ASSERT_EQ(nrows % block_size, 0);
+    ASSERT_EQ(nrows % block_size, size_type(0));
 
     KernelHandle kh;
 
@@ -493,8 +493,8 @@ struct SpilukTest {
       U_entries_v[i] = EntriesType("U_entries", spiluk_handle->get_nnzU());
 
       // Symbolic phase
-      spiluk_symbolic(kh_ptr_v[i], fill_lev, A_row_map_v[i], A_entries_v[i], L_row_map_v[i], L_entries_v[i],
-                      U_row_map_v[i], U_entries_v[i], nstreams);
+      KokkosSparse::spiluk_symbolic(kh_ptr_v[i], fill_lev, A_row_map_v[i], A_entries_v[i], L_row_map_v[i],
+                                    L_entries_v[i], U_row_map_v[i], U_entries_v[i], nstreams);
 
       Kokkos::fence();
 
@@ -560,7 +560,7 @@ struct SpilukTest {
     const size_type nrows       = Afix.size();
     const size_type block_size  = nrows % 2 == 0 ? 2 : 3;
     const size_type block_items = block_size * block_size;
-    ASSERT_EQ(nrows % block_size, 0);
+    ASSERT_EQ(nrows % block_size, size_type(0));
 
     // Convert to BSR
     Crs crs("crs for block spiluk test", nrows, nrows, values.extent(0), values, row_map, entries);
@@ -579,7 +579,7 @@ struct SpilukTest {
 
     RowMapType_hostmirror hrow_map("hrow_map", bnrows + 1);
     EntriesType_hostmirror hentries("hentries", bnnz);
-    ValuesType_hostmirror hvalues("hvalues", bnnz * block_items);
+    ValuesType_hostmirror hvalues("hvalues", static_cast<size_t>(bnnz) * block_items);
 
     Kokkos::deep_copy(hrow_map, brow_map);
     Kokkos::deep_copy(hentries, bentries);
@@ -591,7 +591,7 @@ struct SpilukTest {
       // Allocate A as input
       A_row_map_v[i] = RowMapType("A_row_map", bnrows + 1);
       A_entries_v[i] = EntriesType("A_entries", bnnz);
-      A_values_v[i]  = ValuesType("A_values", bnnz * block_items);
+      A_values_v[i]  = ValuesType("A_values", static_cast<size_t>(bnnz) * block_items);
 
       // Copy from host to device
       Kokkos::deep_copy(A_row_map_v[i], hrow_map);
@@ -612,15 +612,15 @@ struct SpilukTest {
       U_entries_v[i] = EntriesType("U_entries", spiluk_handle->get_nnzU());
 
       // Symbolic phase
-      spiluk_symbolic(kh_ptr_v[i], fill_lev, A_row_map_v[i], A_entries_v[i], L_row_map_v[i], L_entries_v[i],
-                      U_row_map_v[i], U_entries_v[i], nstreams);
+      KokkosSparse::spiluk_symbolic(kh_ptr_v[i], fill_lev, A_row_map_v[i], A_entries_v[i], L_row_map_v[i],
+                                    L_entries_v[i], U_row_map_v[i], U_entries_v[i], nstreams);
 
       Kokkos::fence();
 
       Kokkos::resize(L_entries_v[i], spiluk_handle->get_nnzL());
       Kokkos::resize(U_entries_v[i], spiluk_handle->get_nnzU());
-      L_values_v[i] = ValuesType("L_values", spiluk_handle->get_nnzL() * block_items);
-      U_values_v[i] = ValuesType("U_values", spiluk_handle->get_nnzU() * block_items);
+      L_values_v[i] = ValuesType("L_values", spiluk_handle->get_nnzL() * static_cast<size_t>(block_items));
+      U_values_v[i] = ValuesType("U_values", spiluk_handle->get_nnzU() * static_cast<size_t>(block_items));
     }  // Done handle creation and spiluk_symbolic on all streams
 
     // Numeric phase
