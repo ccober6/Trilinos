@@ -5,16 +5,16 @@
 // See packages/seacas/LICENSE for details
 #include "EJ_CodeTypes.h"
 #include "EJ_SystemInterface.h"
-#include "EJ_index_sort.h"  // for index_coord_sort
-#include "EJ_mapping.h"     // for eliminate_omitted_nodes
-#include "EJ_vector3d.h"    // for vector3d
-#include "Ioss_NodeBlock.h" // for NodeBlock
-#include "Ioss_Property.h"  // for Property
-#include "Ioss_Region.h"    // for Region, NodeBlockContainer
+#include "EJ_index_sort.h"
+#include "EJ_mapping.h"
+#include "EJ_vector3d.h"
+#include "Ioss_NodeBlock.h"
+#include "Ioss_Property.h"
+#include "Ioss_Region.h"
 #include "Ioss_SmartAssert.h"
-#include <algorithm> // for max, min
-#include <cfloat>    // for FLT_MAX
-#include <cstddef>   // for size_t
+#include <algorithm>
+#include <cfloat>
+#include <cstddef>
 #include <fmt/format.h>
 
 namespace {
@@ -47,7 +47,7 @@ namespace {
   }
 
   template <typename INT>
-  bool handle_omitted_blocks(RegionVector &part_mesh, std::vector<INT> &local_node_map)
+  bool handle_omitted_blocks(const RegionVector &part_mesh, std::vector<INT> &local_node_map)
   {
     bool has_omissions = false;
     for (auto &elem : part_mesh) {
@@ -98,8 +98,8 @@ namespace {
   }
 
   template <typename INT>
-  void match_nodes(RegionVector &part_mesh, double tolerance, std::vector<INT> &global_node_map,
-                   std::vector<INT> &local_node_map)
+  void match_nodes(const RegionVector &part_mesh, double tolerance,
+                   std::vector<INT> &global_node_map, std::vector<INT> &local_node_map)
   {
     size_t part_count = part_mesh.size();
     enum { X = 0, Y = 1, Z = 2 };
@@ -198,22 +198,22 @@ namespace {
 } // namespace
 
 template <typename INT>
-void match_node_xyz(RegionVector &part_mesh, double tolerance, std::vector<INT> &global_node_map,
-                    std::vector<INT> &local_node_map)
+void match_node_xyz(const RegionVector &part_mesh, double tolerance,
+                    std::vector<INT> &global_node_map, std::vector<INT> &local_node_map)
 {
   // See if any omitted element blocks...
   handle_omitted_blocks(part_mesh, local_node_map);
   match_nodes(part_mesh, tolerance, global_node_map, local_node_map);
 }
 
-template void match_node_xyz(RegionVector &part_mesh, double tolerance,
+template void match_node_xyz(const RegionVector &part_mesh, double tolerance,
                              std::vector<int> &global_node_map, std::vector<int> &local_node_map);
-template void match_node_xyz(RegionVector &part_mesh, double tolerance,
+template void match_node_xyz(const RegionVector &part_mesh, double tolerance,
                              std::vector<int64_t> &global_node_map,
                              std::vector<int64_t> &local_node_map);
 
 template <typename INT>
-void match_nodeset_nodes(RegionVector &part_mesh, double tolerance,
+void match_nodeset_nodes(const RegionVector &part_mesh, double tolerance,
                          std::vector<INT> &global_node_map, std::vector<INT> &local_node_map,
                          const SystemInterface &interFace)
 {
@@ -223,16 +223,16 @@ void match_nodeset_nodes(RegionVector &part_mesh, double tolerance,
   // Select all nodes that are in the listed nodeset(s)...
   // On return, `local_node_map` will have >=0 entries for all nodeset nodes.
   // entries = -1 for active, but non-nodeset, and -2 for omitted nodes.
-  select_nodeset_nodes(part_mesh, local_node_map, interFace.nset_match());
+  select_nodeset_nodes(part_mesh, local_node_map, interFace.nodeset_match());
 
   match_nodes(part_mesh, tolerance, global_node_map, local_node_map);
 }
 
-template void match_nodeset_nodes(RegionVector &part_mesh, double tolerance,
+template void match_nodeset_nodes(const RegionVector &part_mesh, double tolerance,
                                   std::vector<int>      &global_node_map,
                                   std::vector<int>      &local_node_map,
                                   const SystemInterface &interFace);
-template void match_nodeset_nodes(RegionVector &part_mesh, double tolerance,
+template void match_nodeset_nodes(const RegionVector &part_mesh, double tolerance,
                                   std::vector<int64_t>  &global_node_map,
                                   std::vector<int64_t>  &local_node_map,
                                   const SystemInterface &interFace);
@@ -320,15 +320,17 @@ namespace {
         }
       }
     }
-    fmt::print("\nNumber of nodes matched                   = {}\n", match);
-    fmt::print("Number of comparisons                     = {}\n", compare);
-    fmt::print("Tolerance used for matching               = {}\n", epsilon);
-    if (dismax > double(-FLT_MAX)) {
-      fmt::print("Maximum distance between matched nodes    = {}\n", dismax);
+    if (compare > 0) {
+      fmt::print("\nNumber of nodes matched                   = {}\n", match);
+      fmt::print("Number of comparisons                     = {}\n", compare);
+      fmt::print("Tolerance used for matching               = {}\n", epsilon);
+      if (dismax > double(-FLT_MAX)) {
+        fmt::print("Maximum distance between matched nodes    = {}\n", dismax);
+      }
+      if (g_dismin < double(FLT_MAX)) {
+        fmt::print("Minimum distance between nonmatched nodes = {}\n", g_dismin);
+      }
+      fmt::print("\n");
     }
-    if (g_dismin < double(FLT_MAX)) {
-      fmt::print("Minimum distance between nonmatched nodes = {}\n", g_dismin);
-    }
-    fmt::print("\n");
   }
 } // namespace

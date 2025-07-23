@@ -731,7 +731,7 @@ void send_back_to_non_owners(const stk::mesh::BulkData& mesh,
 }
 
 template <Operation OP>
-void parallel_op_including_ghosts_impl(const BulkData & mesh, const std::vector<const FieldBase *> & fields)
+void parallel_op_including_ghosts_impl(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool /*deterministic*/)
 {
   if ( fields.empty() ) { return; }
   mesh.confirm_host_mesh_is_synchronized_from_device();
@@ -807,19 +807,19 @@ void parallel_op_including_ghosts_impl(const BulkData & mesh, const std::vector<
   send_back_to_non_owners(mesh, fields, fieldRange, comm_info_vec, sparse);
 }
 
-void parallel_sum_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields)
+void parallel_sum_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool deterministic)
 {
-  parallel_op_including_ghosts_impl<Operation::SUM>(mesh, fields);
+  parallel_op_including_ghosts_impl<Operation::SUM>(mesh, fields, deterministic);
 }
 
-void parallel_max_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields)
+void parallel_max_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool deterministic)
 {
-  parallel_op_including_ghosts_impl<Operation::MAX>(mesh, fields);
+  parallel_op_including_ghosts_impl<Operation::MAX>(mesh, fields, deterministic);
 }
 
-void parallel_min_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields)
+void parallel_min_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool deterministic)
 {
-  parallel_op_including_ghosts_impl<Operation::MIN>(mesh, fields);
+  parallel_op_including_ghosts_impl<Operation::MIN>(mesh, fields, deterministic);
 }
 
 
