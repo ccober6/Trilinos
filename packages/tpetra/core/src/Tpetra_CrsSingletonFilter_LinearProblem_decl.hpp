@@ -162,6 +162,7 @@ namespace Tpetra {
     using NewConstType      = typename Transform<linear_problem_type, linear_problem_type>::NewConstType;
 
     using nonconst_local_inds_host_view_type = typename row_matrix_type::nonconst_local_inds_host_view_type;
+    using nonconst_global_inds_host_view_type = typename row_matrix_type::nonconst_global_inds_host_view_type;
     using nonconst_values_host_view_type     = typename row_matrix_type::nonconst_values_host_view_type;
     //@}
  
@@ -416,9 +417,13 @@ namespace Tpetra {
     // EXTRAS to REMOVE
     void PrintTpetraRowMatrix(const Teuchos::RCP<const row_matrix_type>& matrix);
     void PrintTpetraCrsMatrix(const Teuchos::RCP<const crs_matrix_type>& matrix);
+    void PrintTpetraRowMatrix_local(const Teuchos::RCP<const row_matrix_type>& matrix);
+    void PrintTpetraCrsMatrix_local(const Teuchos::RCP<const crs_matrix_type>& matrix);
     void printMap(const Teuchos::RCP<const map_type> & map) const;
 
-    bool outputRank_;
+    size_t outRank_;
+    size_t myRank_;
+    bool isOutputRank_;
   };
 
 } //namespace Tpetra
