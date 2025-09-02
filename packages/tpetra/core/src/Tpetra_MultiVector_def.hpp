@@ -1214,7 +1214,7 @@ namespace Tpetra {
             // Copy src_j into tgt_j
             // DEEP_COPY REVIEW - HOSTMIRROR-TO-HOSTMIRROR
             Kokkos::deep_copy (space, tgt_j, src_j);
-            space.fence();
+            space.fence("Tpetra::MultiVector::copyAndPermute-1");
           }
         }
       }
@@ -1243,7 +1243,7 @@ namespace Tpetra {
             // Copy src_j into tgt_j
             // DEEP_COPY REVIEW - DEVICE-TO-DEVICE
             Kokkos::deep_copy (space, tgt_j, src_j);
-            space.fence();
+            space.fence("Tpetra::MultiVector::copyAndPermute-2");
           }
         }
       }
@@ -2356,7 +2356,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
     // Adding a frnce here guarantees that we will have the lclDot
     // ahead of the MPI reduction.
     execution_space exec_space_instance = execution_space();
-    exec_space_instance.fence();
+    exec_space_instance.fence("Tpetra::MultiVector::dot");
 
     gblDotImpl (dotsOut, comm, this->isDistributed ());
   }
@@ -2626,7 +2626,7 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
       // Adding a fence here guarantees that we will have the lclSums
       // ahead of the MPI reduction.
       execution_space exec_space_instance = execution_space();
-      exec_space_instance.fence();
+      exec_space_instance.fence("Tpetra::MultiVector::mean");
 
       // If there are multiple MPI processes, the all-reduce reads
       // from lclSums, and writes to meansOut.  (We assume that MPI
@@ -4778,9 +4778,9 @@ void MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>::copyAndPermute(
     // DualView::modify to complain about "concurrent modification" of
     // host and device Views.
 
-    /// KJ: this is problematic. assign funtion is used to construct a subvector
-    ///     if the sync flag is reset here, it lose all our control over getLocalView interface
-    ///this->clear_sync_state();
+    // KJ: this is problematic. assign funtion is used to construct a subvector
+    //     if the sync flag is reset here, it lose all our control over getLocalView interface
+    //this->clear_sync_state();
 
     // If need sync to device, then host has most recent version.
     const bool src_last_updated_on_host = src.need_sync_device ();
