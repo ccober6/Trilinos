@@ -159,9 +159,6 @@ public:
     : FieldBase(meta, entityRank, fieldOrdinal, name, dataTraits, numberOfStates, thisState, host_layout, device_layout,
                 new FieldData<T, stk::ngp::HostMemSpace, HostLayout>(entityRank, fieldOrdinal, name, dataTraits))
   {
-    if constexpr (HostLayout != Layout::Right) {
-      std::cout << "WARNING: Host Fields with non-standard layout are not yet fully-supported by STK Mesh." << std::endl;
-    }
   }
 
   /** \brief  Query this field for a given field state. */
@@ -173,27 +170,31 @@ public:
 #endif
   }
 
-  virtual ~Field() = default;
+  virtual ~Field() override = default;
 
-  virtual std::ostream& print_data(std::ostream& out, void* data, unsigned size_per_entity) const override
+  virtual std::ostream& print_data(std::ostream& out, const MeshIndex& mi) const override
   {
-    const unsigned num_scalar_values = size_per_entity / sizeof(T);
-    T* casted_data = reinterpret_cast<T*>(data);
+    // Don't trigger any syncs or updates, since this can be called for debugging inside mesh modification
+    auto fieldData = data<ConstUnsynchronized>();
+    auto fieldValues = fieldData.entity_values(mi);
+
     auto previousPrecision = out.precision();
     constexpr auto thisPrecision = std::numeric_limits<T>::digits10;
 
     out << "{";
-    for (unsigned i = 0; i < num_scalar_values; ++i) {
-      if constexpr (sizeof(T) == 1) {
-        if constexpr (std::is_signed_v<T>) {
-          out << std::setprecision(thisPrecision) << static_cast<int>(casted_data[i]) << " ";
+    for (stk::mesh::CopyIdx copy : fieldValues.copies()) {
+      for (stk::mesh::ComponentIdx component : fieldValues.components()) {
+        if constexpr (sizeof(T) == 1) {  // std::cout of char types insist on printing character and not numerical value
+          if constexpr (std::is_signed_v<T>) {
+            out << std::setprecision(thisPrecision) << static_cast<int>(fieldValues(copy, component)) << " ";
+          }
+          else {
+            out << std::setprecision(thisPrecision) << static_cast<unsigned>(fieldValues(copy, component)) << " ";
+          }
         }
         else {
-          out << std::setprecision(thisPrecision) << static_cast<unsigned>(casted_data[i]) << " ";
+          out << std::setprecision(thisPrecision) << fieldValues(copy, component) << " ";
         }
-      }
-      else {
-        out << std::setprecision(thisPrecision) << casted_data[i] << " ";
       }
     }
     out << "}";

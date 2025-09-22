@@ -38,6 +38,7 @@
 #include "KokkosGraph_Distance2ColorHandle.hpp"
 #include "KokkosGraph_Distance2Color.hpp"
 #include "KokkosGraph_MIS2.hpp"
+#include "Kokkos_UnorderedMap.hpp"
 
 namespace MueLu {
 
@@ -191,7 +192,7 @@ void UncoupledAggregationFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(Level
 
   bool runOnHost;
   if (IsType<RCP<LWGraph>>(currentLevel, "Graph")) {
-    if ((aggregationBackend == "default") || (aggregationBackend == "non-Kokkos")) {
+    if ((aggregationBackend == "default") || (aggregationBackend == "host")) {
       graph      = Get<RCP<LWGraph>>(currentLevel, "Graph");
       aggregates = rcp(new Aggregates(*graph));
       comm       = graph->GetComm();
@@ -206,7 +207,7 @@ void UncoupledAggregationFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(Level
       runOnHost              = false;
     }
   } else if (IsType<RCP<LWGraph_kokkos>>(currentLevel, "Graph")) {
-    if ((aggregationBackend == "default") || (aggregationBackend == "Kokkos")) {
+    if ((aggregationBackend == "default") || (aggregationBackend == "kokkos")) {
       graph_kokkos = Get<RCP<LWGraph_kokkos>>(currentLevel, "Graph");
       aggregates   = rcp(new Aggregates(*graph_kokkos));
       comm         = graph_kokkos->GetComm();
@@ -337,18 +338,82 @@ void UncoupledAggregationFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(Level
       if (IsPrint(Statistics1)) GetOStream(Statistics1) << "  algorithm: MIS-2 aggregation" << std::endl;
       labels = KokkosGraph::graph_mis2_aggregate<device_t, rowmap_t, colinds_t>(aRowptrs, aColinds, numAggs);
     }
-    auto vertex2AggId = aggregates->GetVertex2AggId()->getLocalViewDevice(Xpetra::Access::ReadWrite);
-    auto procWinner   = aggregates->GetProcWinner()->getLocalViewDevice(Xpetra::Access::OverwriteAll);
-    int rank          = comm->getRank();
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<exec_space>(0, numRows),
-        KOKKOS_LAMBDA(lno_t i) {
-          procWinner(i, 0) = rank;
-          if (aggStat(i) == READY) {
-            aggStat(i)         = AGGREGATED;
-            vertex2AggId(i, 0) = labels(i);
+    {
+      {
+        // find aggregates that are not empty
+        Kokkos::UnorderedMap<LocalOrdinal, void, exec_space> used_labels(numAggs);
+        Kokkos::parallel_for(
+            "MueLu::UncoupledAggregationFactory::MIS2::nonempty_aggs",
+            Kokkos::RangePolicy<exec_space>(0, numRows),
+            KOKKOS_LAMBDA(lno_t i) {
+              if (aggStat(i) == READY)
+                used_labels.insert(labels(i));
+            });
+        Kokkos::fence();
+        if (used_labels.failed_insert()) {
+          // CAG: I used to see crashes due to this check. Now I cannot reproduce them anymore.
+          //      Leaving some debug code here in case it does pop up somewhere.
+          std::stringstream s;
+          s << "numAggs: " << numAggs << std::endl;
+          auto labels_h = Kokkos::create_mirror_view(labels);
+          Kokkos::deep_copy(labels_h, labels);
+          for (int kk = 0; kk < labels_h.extent_int(0); ++kk) {
+            s << labels_h(kk) << " ";
           }
-        });
+          s << std::endl;
+          std::cout << s.str();
+        }
+        TEUCHOS_ASSERT(!used_labels.failed_insert());
+
+        // compute aggIds for non-empty aggs
+        Kokkos::View<LO*, typename device_t::memory_space> new_labels("new_labels", numAggs);
+        Kokkos::parallel_scan(
+            "MueLu::UncoupledAggregationFactory::MIS2::set_new_labels",
+            Kokkos::RangePolicy<exec_space>(0, used_labels.capacity()),
+            KOKKOS_LAMBDA(lno_t i, lno_t & update, const bool is_final) {
+              if (used_labels.valid_at(i)) {
+                auto label = used_labels.key_at(i);
+                if (is_final) {
+                  new_labels(label) = update;
+                }
+                ++update;
+              }
+            },
+            numAggs);
+
+        // We no longer need the hashmap.
+        used_labels.clear();
+        used_labels.rehash(0);
+
+        // reassign aggIds
+        Kokkos::parallel_for(
+            "MueLu::UncoupledAggregationFactory::MIS2::reassign_labels",
+            Kokkos::RangePolicy<exec_space>(0, numRows),
+            KOKKOS_LAMBDA(lno_t i) {
+              labels(i) = new_labels(labels(i));
+            });
+      }
+
+      auto vertex2AggId = aggregates->GetVertex2AggId()->getLocalViewDevice(Xpetra::Access::ReadWrite);
+      auto procWinner   = aggregates->GetProcWinner()->getLocalViewDevice(Xpetra::Access::OverwriteAll);
+      int rank          = comm->getRank();
+      Kokkos::parallel_for(
+          Kokkos::RangePolicy<exec_space>(0, numRows),
+          KOKKOS_LAMBDA(lno_t i) {
+            if (aggStat(i) == READY) {
+#ifdef HAVE_MUELU_DEBUG
+              KOKKOS_ASSERT(labels(i) >= 0);
+#endif
+              procWinner(i, 0)   = rank;
+              aggStat(i)         = AGGREGATED;
+              vertex2AggId(i, 0) = labels(i);
+            } else {
+              procWinner(i, 0)   = MUELU_UNASSIGNED;
+              aggStat(i)         = IGNORED;
+              vertex2AggId(i, 0) = MUELU_UNAGGREGATED;
+            }
+          });
+    }
     numNonAggregatedNodes = 0;
     aggregates->SetNumAggregates(numAggs);
   } else {
@@ -369,6 +434,9 @@ void UncoupledAggregationFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(Level
 
       SubFactoryMonitor sfm2(*this, "Algo \"" + phase + "\"" + (numNonAggregatedNodes == 0 ? " [skipped since no nodes are left to aggregate]" : ""), currentLevel);
       int oldRank = algos_[a]->SetProcRankVerbose(this->GetProcRankVerbose());
+
+      algos_[a]->SetupPhase(pL, comm, numRows, numNonAggregatedNodes);
+
       if (numNonAggregatedNodes > 0) {
         if (runOnHost)
           algos_[a]->BuildAggregatesNonKokkos(pL, *graph, *aggregates, aggStatHost, numNonAggregatedNodes);

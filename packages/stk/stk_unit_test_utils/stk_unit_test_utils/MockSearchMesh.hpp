@@ -161,7 +161,7 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
         m_coordinateField(bulkData.mesh_meta_data().coordinate_field()),
         m_parts(sendParts),
         m_comm(comm),
-        m_parametricTolerance(parametricTolerance) 
+        m_parametricTolerance(parametricTolerance)
   {
     for (const stk::mesh::Part* part : sendParts) {
       STK_ThrowRequireMsg(
@@ -180,7 +180,6 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
     return stk::search::get_part_membership(m_bulk, k, m_parts);
   }
 
-  //BEGINSource_bounding_boxes
   void bounding_boxes(std::vector<BoundingBox>& boxes, [[maybe_unused]] bool /*includeGhosts*/=false) const override
   {
     Point min_corner, max_corner;
@@ -202,9 +201,7 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
     std::sort(boxes.begin(), boxes.end(),
         [](const BoundingBox& a, const BoundingBox& b) { return a.second.id() < b.second.id(); });
   }
-  //ENDSource_bounding_boxes
 
-  //BEGINSource_find_parametric_coords
   void find_parametric_coords(const EntityKey& k,
       const std::vector<double>& toCoords,
       std::vector<double>& parametricCoords,
@@ -219,25 +216,27 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
     stk::mesh::Entity const* nodes = m_bulk.begin_nodes(elem);
     const auto numNodes = m_bulk.num_nodes(elem);
     unsigned nDim = m_meta.spatial_dimension();
-
     std::vector<double> transposedElementCoords(nDim * numNodes);
 
-    for (auto ni = 0u; ni < numNodes; ++ni) {
-      stk::mesh::Entity node = nodes[ni];
+    stk::mesh::field_data_execute<double, stk::mesh::ReadOnly>(*m_coordinateField,
+      [&](auto& coordFieldData) {
+        for (auto ni = 0u; ni < numNodes; ++ni) {
+          stk::mesh::Entity node = nodes[ni];
 
-      const double* fromCoords = static_cast<double*>(stk::mesh::field_data(*m_coordinateField, node));
-      for (unsigned j = 0; j < nDim; ++j) {
-        const auto offSet = ni + j * numNodes;
-        transposedElementCoords[offSet] = fromCoords[j];
+          auto fromCoords = coordFieldData.entity_values(node);
+          for (stk::mesh::ComponentIdx j : fromCoords.components()) {
+            const auto offSet = ni + j * numNodes;
+            transposedElementCoords[offSet] = fromCoords(j);
+          }
+        }
       }
-    }
+    );
 
     parametricCoords.assign(3, std::numeric_limits<double>::max());
     parametricDistance = Hex8::is_in_element(transposedElementCoords.data(), toCoords.data(), parametricCoords.data());
 
     isWithinParametricTolerance = parametricDistance <= (1 + m_parametricTolerance);
   }
-  //ENDSource_find_parametric_coords
 
   bool modify_search_outside_parametric_tolerance(const EntityKey& /*k*/,
       const std::vector<double>& /*toCoords*/,
@@ -257,21 +256,23 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
         m_bulk.entity_rank(e) == stk::topology::ELEM_RANK, "Invalid entity rank for object: " << m_bulk.entity_rank(e));
 
     double minDistance = std::numeric_limits<double>::max();
-    const unsigned nDim = m_meta.spatial_dimension();
-
     const stk::mesh::Entity* const nodes = m_bulk.begin_nodes(e);
     const int num_nodes = m_bulk.num_nodes(e);
 
-    for (int i = 0; i < num_nodes; ++i) {
-      double d = 0.0;
-      double* node_coordinates = static_cast<double*>(stk::mesh::field_data(*m_coordinateField, nodes[i]));
+    stk::mesh::field_data_execute<double, stk::mesh::ReadOnly>(*m_coordinateField,
+      [&](auto& coordFieldData) {
+        for (int i = 0; i < num_nodes; ++i) {
+          double d = 0.0;
+          auto node_coordinates = coordFieldData.entity_values(nodes[i]);
 
-      for (unsigned j = 0; j < nDim; ++j) {
-        const double t = point[j] - node_coordinates[j];
-        d += t * t;
+          for (stk::mesh::ComponentIdx j : node_coordinates.components()) {
+            const double t = point[j] - node_coordinates(j);
+            d += t * t;
+          }
+          if (d < minDistance) minDistance = d;
+        }
       }
-      if (d < minDistance) minDistance = d;
-    }
+    );
 
     minDistance = std::sqrt(minDistance);
     return minDistance;
@@ -341,8 +342,8 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
   Hex8SendMesh(const Hex8SendMesh&) = delete;
   const Hex8SendMesh& operator()(const Hex8SendMesh&) = delete;
 
-  void fill_bounding_box(
-      stk::mesh::Entity elem, stk::search::Point<double>& min_corner, stk::search::Point<double>& max_corner) const
+  void fill_bounding_box(stk::mesh::Entity elem, stk::search::Point<double>& min_corner,
+                         stk::search::Point<double>& max_corner) const
   {
     const unsigned nDim = m_meta.spatial_dimension();
 
@@ -355,16 +356,22 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
 
     stk::mesh::Entity const* nodes = m_bulk.begin_nodes(elem);
     int numNodes = m_bulk.num_nodes(elem);
-    for (int ni = 0; ni < numNodes; ++ni) {
-      stk::mesh::Entity node = nodes[ni];
 
-      double* coords = static_cast<double*>(stk::mesh::field_data(*m_coordinateField, node));
+    stk::mesh::field_data_execute<double, stk::mesh::ReadOnly>(*m_coordinateField,
+      [&](auto& coordsFieldData) {
+        for (int ni = 0; ni < numNodes; ++ni) {
+          stk::mesh::Entity node = nodes[ni];
 
-      for (unsigned j = 0; j < nDim; ++j) {
-        min_corner[j] = std::min(min_corner[j], coords[j]);
-        max_corner[j] = std::max(max_corner[j], coords[j]);
+          auto coords = coordsFieldData.entity_values(node);
+
+          //for (unsigned j = 0; j < nDim; ++j) {
+          for (stk::mesh::ComponentIdx j : coords.components()) {
+            min_corner[j] = std::min(min_corner[j], coords(j));
+            max_corner[j] = std::max(max_corner[j], coords(j));
+          }
+        }
       }
-    }
+    );
   }
 };
 
@@ -489,21 +496,23 @@ class Hex8RecvMesh : public stk::search::DestinationMeshInterface<Hex8RecvMesh>
         m_bulk.entity_rank(e) == stk::topology::ELEM_RANK, "Invalid entity rank for object: " << m_bulk.entity_rank(e));
 
     double minDistance = std::numeric_limits<double>::max();
-    const unsigned nDim = m_meta.spatial_dimension();
-
     const stk::mesh::Entity* const nodes = m_bulk.begin_nodes(e);
     const int num_nodes = m_bulk.num_nodes(e);
 
-    for (int i = 0; i < num_nodes; ++i) {
-      double d = 0.0;
-      double* node_coordinates = static_cast<double*>(stk::mesh::field_data(*m_coordinateField, nodes[i]));
+    stk::mesh::field_data_execute<double, stk::mesh::ReadOnly>(*m_coordinateField,
+      [&](auto& coordsFieldData) {
+        for (int i = 0; i < num_nodes; ++i) {
+          double d = 0.0;
+          auto node_coordinates = coordsFieldData.entity_values(nodes[i]);
 
-      for (unsigned j = 0; j < nDim; ++j) {
-        const double t = point[j] - node_coordinates[j];
-        d += t * t;
+          for (stk::mesh::ComponentIdx j : node_coordinates.components()) {
+            const double t = point[j] - node_coordinates(j);
+            d += t * t;
+          }
+          if (d < minDistance) minDistance = d;
+        }
       }
-      if (d < minDistance) minDistance = d;
-    }
+    );
 
     minDistance = std::sqrt(minDistance);
     return minDistance;

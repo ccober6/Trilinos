@@ -101,6 +101,7 @@ namespace MueLu {
     if (name == "sa: rowsumabs replace single entry row with zero") { ss << "<Parameter name=\"sa: rowsumabs replace single entry row with zero\" type=\"bool\" value=" << value << "/>"; return ss.str(); }      
     if (name == "replicate: npdes") { ss << "<Parameter name=\"replicate: npdes\" type=\"int\" value=" << value << "/>"; return ss.str(); }      
     if (name == "combine: numBlks") { ss << "<Parameter name=\"combine: numBlks\" type=\"int\" value=" << value << "/>"; return ss.str(); }      
+    if (name == "combine: useMaxLevels") { ss << "<Parameter name=\"combine: useMaxLevels\" type=\"bool\" value=" << value << "/>"; return ss.str(); }      
     if (name == "pcoarsen: element") { ss << "<Parameter name=\"pcoarsen: element\" type=\"string\" value=" << value << "/>"; return ss.str(); }      
     if (name == "pcoarsen: schedule") { ss << "<Parameter name=\"pcoarsen: schedule\" type=\"string\" value=" << value << "/>"; return ss.str(); }      
     if (name == "pcoarsen: hi basis") { ss << "<Parameter name=\"pcoarsen: hi basis\" type=\"string\" value=" << value << "/>"; return ss.str(); }      
@@ -143,7 +144,7 @@ namespace MueLu {
   "<Parameter name=\"cycle type\" type=\"string\" value=\"V\"/>"
   "<Parameter name=\"W cycle start level\" type=\"int\" value=\"0\"/>"
   "<Parameter name=\"coarse grid correction scaling factor\" type=\"double\" value=\"1.0\"/>"
-  "<Parameter name=\"fuse prolongation and update\" type=\"bool\" value=\"false\"/>"
+  "<Parameter name=\"fuse prolongation and update\" type=\"bool\" value=\"true\"/>"
   "<Parameter name=\"number of vectors\" type=\"int\" value=\"1\"/>"
   "<Parameter name=\"problem: symmetric\" type=\"bool\" value=\"true\"/>"
   "<Parameter name=\"xml parameter file\" type=\"string\" value=\"\"/>"
@@ -280,6 +281,7 @@ namespace MueLu {
   "<Parameter name=\"sa: rowsumabs replace single entry row with zero\" type=\"bool\" value=\"true\"/>"
   "<Parameter name=\"replicate: npdes\" type=\"int\" value=\"1\"/>"
   "<Parameter name=\"combine: numBlks\" type=\"int\" value=\"1\"/>"
+  "<Parameter name=\"combine: useMaxLevels\" type=\"bool\" value=\"false\"/>"
   "<Parameter name=\"interp: build coarse coordinates\" type=\"bool\" value=\"true\"/>"
   "<ParameterList name=\"transfer: params\"/>"
   "<Parameter name=\"pcoarsen: element\" type=\"string\" value=\"\"/>"
@@ -288,6 +290,7 @@ namespace MueLu {
   "<Parameter name=\"pcoarsen: lo basis\" type=\"string\" value=\"\"/>"
   "<Parameter name=\"smoother: neighborhood type\" type=\"string\" value=\"\"/>"
   "<Parameter name=\"filtered matrix: use lumping\" type=\"bool\" value=\"true\"/>"
+  "<Parameter name=\"filtered matrix: lumping choice\" type=\"string\" value=\"diag lumping\"/>"
   "<Parameter name=\"filtered matrix: use spread lumping\" type=\"bool\" value=\"false\"/>"
   "<Parameter name=\"filtered matrix: spread lumping diag dom growth factor\" type=\"double\" value=\"1.1\"/>"
   "<Parameter name=\"filtered matrix: spread lumping diag dom cap\" type=\"double\" value=\"2.0\"/>"
@@ -328,6 +331,7 @@ namespace MueLu {
   "<Parameter name=\"repartition: use subcommunicators\" type=\"bool\" value=\"true\"/>"
   "<Parameter name=\"repartition: save importer\" type=\"bool\" value=\"false\"/>"
   "<Parameter name=\"repartition: put on single proc\" type=\"int\" value=\"0\"/>"
+  "<Parameter name=\"repartition: send type\" type=\"string\" value=\"\"/>"
   "<Parameter name=\"rap: relative diagonal floor\" type=\"Array(double)\" value=\"{}\"/>"
   "<Parameter name=\"rap: fix zero diagonals\" type=\"bool\" value=\"false\"/>"
   "<Parameter name=\"rap: fix zero diagonals threshold\" type=\"double\" value=\"0.\"/>"
@@ -835,6 +839,8 @@ namespace MueLu {
       
          ("not supported by ML","combine: numBlks")
       
+         ("not supported by ML","combine: useMaxLevels")
+      
          ("interp: build coarse coordinates","interp: build coarse coordinates")
       
          ("transfer: params","transfer: params")
@@ -850,6 +856,8 @@ namespace MueLu {
          ("smoother: neighborhood type","smoother: neighborhood type")
       
          ("filtered matrix: use lumping","filtered matrix: use lumping")
+      
+         ("filtered matrix: lumping choice","filtered matrix: lumping choice")
       
          ("filtered matrix: use spread lumping","filtered matrix: use spread lumping")
       
@@ -930,6 +938,8 @@ namespace MueLu {
          ("repartition: save importer","repartition: save importer")
       
          ("repartition: put on single proc","repartition: put on single proc")
+      
+         ("repartition: send type","repartition: send type")
       
          ("rap: relative diagonal floor","rap: relative diagonal floor")
       

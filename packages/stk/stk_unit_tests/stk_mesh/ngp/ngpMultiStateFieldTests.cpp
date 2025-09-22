@@ -159,10 +159,11 @@ public:
   {
     const stk::mesh::BucketVector& buckets = bulk.get_buckets(hostField.entity_rank(), hostField);
 
+    auto hostFieldData = hostField.template data<stk::mesh::ReadOnly>();
     for (const stk::mesh::Bucket* bucket : buckets) {
       for (const stk::mesh::Entity& entity : *bucket) {
-        const T& value = *stk::mesh::field_data(hostField, entity);
-        EXPECT_EQ(value, expectedValue);
+        auto value = hostFieldData.entity_values(entity);
+        EXPECT_EQ(value(0_comp), expectedValue);
       }
     }
   }
@@ -505,7 +506,11 @@ NGP_TEST_F(NgpMultiStateFieldTest, multistateField_rotateAllStates_withMeshModif
 
 // This is a meaningless test without separate device storage, because it explicitly exercises a fundamentally-broken
 // swap function that only partially rotates the data.  The HostMesh version of this function does nothing.
-#ifdef STK_USE_DEVICE_MESH
+// If in a unified-memory build, then leaving the other memory space unrotated and relying on syncs to fill in
+// the correct value will not work as expected.  It's not that the other memory space has an unrotated copy of
+// the data, but that the other memory space has a pointer back into the wrong state in the opposite memory
+// space.
+#if defined(STK_USE_DEVICE_MESH) && !defined(STK_UNIFIED_MEMORY)
 NGP_TEST_F(NgpMultiStateFieldTest, multistateField_useAwfulSwapFunction_withSyncsBackToHost)
 {
   if (get_parallel_size() != 1) GTEST_SKIP();
@@ -576,9 +581,15 @@ NGP_TEST_F(NgpMultiStateFieldTest, multistateField_updateUnmodifiedBucket_afterM
 
   // New node goes in new Bucket, leaving others alone
   get_bulk().modification_begin();
-  const stk::mesh::Entity newNode = get_bulk().declare_node(1000, stk::mesh::PartVector{&testPart});
-  *stk::mesh::field_data(fieldOld, newNode) = valueOld;
-  *stk::mesh::field_data(fieldNew, newNode) = valueNew;
+  {
+    const stk::mesh::Entity newNode = get_bulk().declare_node(1000, stk::mesh::PartVector{&testPart});
+    auto fieldOldData = fieldOld.data<stk::mesh::ReadWrite>();
+    auto fieldNewData = fieldNew.data<stk::mesh::ReadWrite>();
+    auto fieldOldValue = fieldOldData.entity_values(newNode);
+    auto fieldNewValue = fieldNewData.entity_values(newNode);
+    fieldOldValue(0_comp) = valueOld;
+    fieldNewValue(0_comp) = valueNew;
+  }
   get_bulk().modification_end();
 
   fieldNew.rotate_multistate_data();  // Don't rotate device data; DeviceFields are updated as part of rotating host pointers

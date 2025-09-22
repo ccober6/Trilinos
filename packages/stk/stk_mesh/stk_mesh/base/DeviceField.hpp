@@ -148,9 +148,15 @@ public:
 
   void sync_to_host(const ExecSpace& execSpace) override
   {
+    ProfilingBlock prof("DeviceField::sync_to_host() for " + m_hostField->name());
     if (m_hostField->need_sync_to_host()) {
       set_execution_space(execSpace);
-      m_deviceFieldData.sync_to_host(get_execution_space(), m_hostField->host_data_layout());
+      if (not m_hostField->has_unified_device_storage()) {
+        m_deviceFieldData.sync_to_host(get_execution_space(), m_hostField->host_data_layout());
+      }
+      else {
+        execSpace.fence();
+      }
       m_hostField->increment_num_syncs_to_host();
       m_hostField->clear_device_sync_state();
     }
@@ -168,12 +174,18 @@ public:
 
   void sync_to_device(const ExecSpace& execSpace) override
   {
+    ProfilingBlock prof("DeviceField::sync_to_device() for " + m_hostField->name());
     if (m_hostField->need_sync_to_device()) {
       set_execution_space(execSpace);
       if (m_deviceFieldData.needs_update()) {
         m_deviceFieldData.update(get_execution_space(), m_hostField->host_data_layout());
       }
-      m_deviceFieldData.sync_to_device(get_execution_space(), m_hostField->host_data_layout());
+      if (not m_hostField->has_unified_device_storage()) {
+        m_deviceFieldData.sync_to_device(get_execution_space(), m_hostField->host_data_layout());
+      }
+      else {
+        execSpace.fence();
+      }
       m_hostField->increment_num_syncs_to_device();
       m_hostField->clear_host_sync_state();
     }
@@ -211,16 +223,6 @@ public:
     }
     return 0;  // Keep Nvidia compiler happy about always having return value
   }
-
-#ifndef STK_HIDE_DEPRECATED_CODE // Delete after April 16, 2025
-  STK_DEPRECATED_MSG("The component stride is now a function of the Bucket you are accessing.  Please use one of the "
-                     "other overloads of get_component_stride() instead.")
-  KOKKOS_FUNCTION
-  unsigned get_component_stride() const
-  {
-    return 512;
-  }
-#endif
 
   KOKKOS_FUNCTION
   unsigned get_num_components_per_entity(const FastMeshIndex& entityIndex) const {

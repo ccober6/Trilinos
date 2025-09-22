@@ -35,7 +35,6 @@
 #include <MueLu_ExplicitInstantiation.hpp>
 #endif
 #include <MueLu_Level.hpp>
-#include <MueLu_MutuallyExclusiveTime.hpp>
 #include <MueLu_ParameterListInterpreter.hpp>
 #include <MueLu_Utilities.hpp>
 #include <MatrixLoad.hpp>
@@ -123,6 +122,8 @@ int main_(Teuchos::CommandLineProcessor &clp, Xpetra::UnderlyingLib &lib, int ar
   clp.setOption("solve-preconditioned", "no-solve-preconditioned", &solvePreconditioned, "use MueLu preconditioner in solve");
   int cacheSize = 0;
   clp.setOption("cachesize", &cacheSize, "cache size (in KB)");
+  bool performSacrifice = Node::is_gpu;
+  clp.setOption("sacrificial-solve", "no-sacrificial-solve", &performSacrifice, "Warm up the solver using a sacrificial solve");
 
   clp.recogniseAllOptions(true);
   switch (clp.parse(argc, argv)) {
@@ -206,7 +207,7 @@ int main_(Teuchos::CommandLineProcessor &clp, Xpetra::UnderlyingLib &lib, int ar
   // =========================================================================
   {
     comm->barrier();
-    SystemSolve(A, X, B, H, Prec, out, solveType, belosType, false, false, useML, cacheSize, 0, scaleResidualHist, solvePreconditioned, maxIts, tol, computeCondEst, enforceBoundaryConditionsOnInitialGuess);
+    SystemSolve(A, X, B, H, Prec, out, solveType, belosType, false, false, useML, cacheSize, 0, scaleResidualHist, solvePreconditioned, maxIts, tol, computeCondEst, enforceBoundaryConditionsOnInitialGuess, performSacrifice);
     comm->barrier();
   }
 

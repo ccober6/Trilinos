@@ -138,68 +138,58 @@ clone_meta_data_parts_and_fields(const stk::mesh::MetaData & in_meta, stk::mesh:
 void copy_field_data(const stk::mesh::BulkData & inMesh, stk::mesh::BulkData & outMesh,
                      const stk::mesh::FieldBase & inField, const stk::mesh::FieldBase & outField)
 {
-
   inField.synchronize<stk::mesh::ReadOnly>();
   outField.synchronize<stk::mesh::ReadWrite>();
 
   stk::mesh::EntityRank entityRank = outField.entity_rank();
   STK_ThrowRequire(inField.entity_rank() == entityRank);
 
-  const stk::mesh::MetaData & inMeta = inMesh.mesh_meta_data();
   const stk::mesh::MetaData & outMeta = outMesh.mesh_meta_data();
-
-  stk::mesh::Selector inFieldSelector = stk::mesh::selectField(inField) & !inMeta.aura_part();
-  const stk::mesh::BucketVector & inBuckets = inMesh.get_buckets(entityRank, inFieldSelector);
-
   stk::mesh::Selector outFieldSelector = stk::mesh::selectField(outField) & !outMeta.aura_part();
   const stk::mesh::BucketVector & outBuckets = outMesh.get_buckets(entityRank, outFieldSelector);
 
-  STK_ThrowRequire(inBuckets.size() == outBuckets.size());
+  auto copy_bytes = [&](auto& inEntityBytes, auto& outEntityBytes) {
+    STK_ThrowRequireMsg(inEntityBytes.num_bytes() == outEntityBytes.num_bytes(),
+                        "Mismatched field size for field " << inField.name() << " inLength = "
+                        << inEntityBytes.num_bytes() << " outLength = " << outEntityBytes.num_bytes() << "\n");
 
-    auto inFieldBytes = inField.const_bytes();
-    auto outFieldBytes = outField.bytes();
-
-    if (inField.host_data_layout() == stk::mesh::Layout::Right) {
-      for (size_t i = 0; i<inBuckets.size(); ++i) {
-        auto inBucketBytes = inFieldBytes.bucket_bytes_right(*inBuckets[i]);
-        auto outBucketBytes = outFieldBytes.bucket_bytes_right(*outBuckets[i]);
-
-        STK_ThrowRequireMsg(inBucketBytes.num_bytes() == outBucketBytes.num_bytes(),
-          "Mismatched field size for field " << inField.name() << " inLength = " << inBucketBytes.num_bytes() << " outLength = " << outBucketBytes.num_bytes() << "\n");
-
-        STK_ThrowRequireMsg(inBucketBytes.num_entities() == outBucketBytes.num_entities(),
-          "Mismatched bucket length for field " << inField.name() << " inLength = " << inBucketBytes.num_entities() << " outLength = " << outBucketBytes.num_entities() << "\n");
-
-        for (stk::mesh::EntityIdx entity : inBucketBytes.entities()) {
-          for (stk::mesh::ByteIdx idx : inBucketBytes.bytes()) {
-            outBucketBytes(entity,idx) = inBucketBytes(entity,idx);
-          }
-        }
-      } 
+    for (stk::mesh::ByteIdx byte : inEntityBytes.bytes()) {
+      outEntityBytes(byte) = inEntityBytes(byte);
     }
+  };
 
-    else if (inField.host_data_layout() == stk::mesh::Layout::Left) {
-      for (size_t i = 0; i<inBuckets.size(); ++i) {
-        auto inBucketBytes = inFieldBytes.bucket_bytes_left(*inBuckets[i]);
-        auto outBucketBytes = outFieldBytes.bucket_bytes_left(*outBuckets[i]);
+  auto inFieldBytes = inField.data_bytes<const std::byte>();
+  auto outFieldBytes = outField.data_bytes<std::byte>();
 
-        STK_ThrowRequireMsg(inBucketBytes.num_bytes() == outBucketBytes.num_bytes(),
-          "Mismatched field size for field " << inField.name() << " inLength = " << inBucketBytes.num_bytes() << " outLength = " << outBucketBytes.num_bytes() << "\n");
-
-        STK_ThrowRequireMsg(inBucketBytes.num_entities() == outBucketBytes.num_entities(),
-          "Mismatched bucket length for field " << inField.name() << " inLength = " << inBucketBytes.num_entities() << " outLength = " << outBucketBytes.num_entities() << "\n");
-
-        for (stk::mesh::EntityIdx entity : inBucketBytes.entities()) {
-          for (stk::mesh::ByteIdx idx : inBucketBytes.bytes()) {
-            outBucketBytes(entity,idx) = inBucketBytes(entity,idx);
-          }
-        }
-      } 
+  if (inField.host_data_layout() == stk::mesh::Layout::Right) {
+    for (stk::mesh::Bucket* outBucket : outBuckets) {
+      for (stk::mesh::Entity outEntity : *outBucket) {
+        const stk::mesh::EntityId outEntityId = outMesh.identifier(outEntity);
+        const stk::mesh::Entity inEntity = inMesh.get_entity(entityRank, outEntityId);
+        STK_ThrowRequireMsg(inMesh.is_valid(inEntity), "Mismatched meshes: " << outMesh.entity_key(outEntity)
+                            << " not found in input mesh.");
+        auto inEntityBytes = inFieldBytes.entity_bytes<stk::mesh::Layout::Right>(inEntity);
+        auto outEntityBytes = outFieldBytes.entity_bytes<stk::mesh::Layout::Right>(outEntity);
+        copy_bytes(inEntityBytes, outEntityBytes);
+      }
     }
-
-    else {
-      STK_ThrowErrorMsg("Unsupported host Field data layout: " << inField.host_data_layout());
+  }
+  else if (inField.host_data_layout() == stk::mesh::Layout::Left) {
+    for (stk::mesh::Bucket* outBucket : outBuckets) {
+      for (stk::mesh::Entity outEntity : *outBucket) {
+        const stk::mesh::EntityId outEntityId = outMesh.identifier(outEntity);
+        const stk::mesh::Entity inEntity = inMesh.get_entity(entityRank, outEntityId);
+        STK_ThrowRequireMsg(inMesh.is_valid(inEntity), "Mismatched meshes: " << outMesh.entity_key(outEntity)
+                            << " not found in input mesh.");
+        auto inEntityBytes = inFieldBytes.entity_bytes<stk::mesh::Layout::Left>(inEntity);
+        auto outEntityBytes = outFieldBytes.entity_bytes<stk::mesh::Layout::Left>(outEntity);
+        copy_bytes(inEntityBytes, outEntityBytes);
+      }
     }
+  }
+  else {
+    STK_ThrowErrorMsg("Unsupported host Field data layout: " << inField.host_data_layout());
+  }
 }
 
 void copy_field_data(const stk::mesh::BulkData & inMesh, stk::mesh::BulkData & outMesh)

@@ -12,7 +12,7 @@
 #include <ctime>
 #include <exodusII.h>
 #include <exodusII_int.h>
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <map>
 #include <sstream>
@@ -1183,7 +1183,7 @@ namespace Ioex {
         IOSS_ERROR(fmt::format(
             "ERROR: The variable named '{}' is of the wrong type. A region variable must be of type"
             " TRANSIENT or REDUCTION.\n"
-            "This is probably an internal error; please notify gdsjaar@sandia.gov",
+            "This is probably an internal error; please notify sierra-help@sandia.gov",
             field.get_name()));
       }
       return num_to_get;
@@ -1660,12 +1660,25 @@ namespace Ioex {
                                                       Ioex::VariableNameMap &variables)
   {
     int nvar = 0;
+
     {
       Ioss::SerializeIO serializeIO_(this);
 
       int ierr = ex_get_variable_param(get_file_pointer(), type, &nvar);
       if (ierr < 0) {
         Ioex::exodus_error(get_file_pointer(), __LINE__, __func__, __FILE__);
+      }
+    }
+
+    // Synchronize among all processors....
+    if (isParallel) {
+      std::vector<int> var_count{nvar, -nvar};
+      util().global_array_minmax(var_count, Ioss::ParallelUtils::DO_MAX);
+
+      if (var_count[0] != -var_count[1]) {
+        IOSS_ABORT(fmt::format("ERROR: Inconsistent number of {} fields ({} to {}) on file '{}'.\n",
+                               Ioss::Utils::entity_type_to_string(Ioex::map_exodus_type(type)),
+                               -var_count[1], var_count[0], get_filename()));
       }
     }
 
@@ -2491,7 +2504,7 @@ namespace Ioex {
                      "maximum name length ({1})\n         set for this database ({2}).\n"
                      "         You should either reduce the length of the variable name, or "
                      "set the 'MAXIMUM_NAME_LENGTH' property\n"
-                     "         to at least {0}.\n         Contact gdsjaar@sandia.gov for more "
+                     "         to at least {0}.\n         Contact sierra-help@sandia.gov for more "
                      "information.\n\n",
                      name_length, maximumNameLength, get_filename());
         }

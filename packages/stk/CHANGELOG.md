@@ -1,5 +1,21 @@
 # CHANGELOG
 
+5.25.7    (STK_VERSION 5250700) 9/15/2025
+  stk_util: add missing include of <cstdlib> in stk_util/util/AlignedAllocator.hpp
+            add missing include of <cstddef> in stk_util/parallel/CommBuffer.hpp
+            fix error in stk_expreval/Function.hpp, replacing DBL_MIN with
+            std::numeric_limits<double>::min()
+  stk_mesh: add optional (off by default) STK_UNIFIED_MEMORY which allows for using
+            the same memory allocation, host and device, for field data. This is
+            targeted at the ATS-4 platform.
+
+5.25.6-01 (STK_VERSION 5250601) 8/25/2025
+  stk_mesh: mostly minor refinements to the new Field Data API
+            most stk sub-modules now converted to new Field APIs
+            removed deprecated header stk_mesh/base/GetBuckets.hpp
+  stk_util: deleted unused stk_util/parallel/DebugTool.hpp
+            deleted unused stk_util/util/Pool.hpp
+
 5.25.6 (STK_VERSION 5250600) 7/14/2025
   stk_mesh: Fix Release/Debug hybrid build inconsistency in new
   Field data access.

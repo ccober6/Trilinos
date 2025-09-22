@@ -12,7 +12,7 @@
 #include <cassert>
 #include <ctime>
 #include <exodusII.h>
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <map>
 #include <sstream>
@@ -70,7 +70,7 @@ namespace {
   template <typename T>
   void write_attribute_names(int exoid, ex_entity_type type, const std::vector<T *> &entities);
 
-  char **get_name_array(size_t count, int size)
+  char **get_name_array(size_t count, size_t size)
   {
     auto *names = new char *[count];
     for (size_t i = 0; i < count; i++) {
@@ -80,9 +80,9 @@ namespace {
     return names;
   }
 
-  void delete_name_array(char **names, int count)
+  void delete_name_array(char **names, size_t count)
   {
-    for (int i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
       delete[] names[i];
     }
     delete[] names;
@@ -460,7 +460,7 @@ namespace Ioexnl {
             errmsg,
             "ERROR: The variable named '{}' is of the wrong type. A region variable must be of type"
             " TRANSIENT or REDUCTION.\n"
-            "This is probably an internal error; please notify gdsjaar@sandia.gov",
+            "This is probably an internal error; please notify sierra-help@sandia.gov",
             field.get_name());
         IOSS_ERROR(errmsg);
       }
