@@ -301,39 +301,6 @@ namespace Tpetra {
 //==============================================================================
 
   template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-  CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-  ~CrsSingletonFilter_LinearProblem()
-  {
-//    if (ReducedLHS_!=0) delete ReducedLHS_;
-//    if (ReducedRHS_!=0) delete ReducedRHS_;
-//    if (ReducedMatrixDomainMap_!=ReducedMatrixColMap_) delete ReducedMatrixDomainMap_;
-//    if (OrigReducedMatrixDomainMap_!=ReducedMatrixColMap_ &&
-//        OrigReducedMatrixDomainMap_!=0) delete OrigReducedMatrixDomainMap_;
-//    if (ReducedMatrixRangeMap_!=ReducedMatrixRowMap_) delete ReducedMatrixRangeMap_;
-//    if (ReducedMatrixRowMap_!=0) delete ReducedMatrixRowMap_;
-//    if (ReducedMatrixColMap_!=0) delete ReducedMatrixColMap_;
-//    if (Full2ReducedRHSImporter_!=0) delete Full2ReducedRHSImporter_;
-//    if (Full2ReducedLHSImporter_!=0) delete Full2ReducedLHSImporter_;
-//    if (RedistributeDomainExporter_!=0) delete RedistributeDomainExporter_;
-//    if (RowMapColors_!=0) delete RowMapColors_;
-//    if (ColMapColors_!=0) delete ColMapColors_;
-//  
-//    if (ColSingletonRowLIDs_ != 0) delete [] ColSingletonRowLIDs_;
-//    if (ColSingletonColLIDs_ != 0) delete [] ColSingletonColLIDs_;
-//    if (ColSingletonPivotLIDs_ != 0) delete [] ColSingletonPivotLIDs_;
-//    if (ColSingletonPivots_ != 0) delete [] ColSingletonPivots_;
-//    if (tempExportX_ != 0) delete tempExportX_;
-//    if (Indices_int_ != 0) delete [] Indices_int_;
-//  #ifndef EPETRA_NO_64BIT_GLOBAL_INDICES
-//    if (Indices_LL_ != 0) delete [] Indices_LL_;
-//  #endif
-//    if (tempX_ != 0) delete tempX_;
-//    if (tempB_ != 0) delete tempB_;
- }
-
-//==============================================================================
-
-  template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
   typename CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::NewType
   CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   operator()(const CrsSingletonFilter_LinearProblem::OriginalType & originalLinearProblem)
@@ -344,7 +311,6 @@ namespace Tpetra {
     isOutputRank_ = outRank_ == myRank_;
 
     analyze( originalLinearProblem );
-    //return originalLinearProblem;
     return construct();
   }
 
@@ -358,20 +324,20 @@ namespace Tpetra {
 
   FullMatrix_ = originalLinearProblem->getMatrix();
 
-  Analyze( FullMatrix_ );
+  Analyze( FullMatrix() );
 
-  if ( verbose_ && FullMatrix_->getComm()->getRank()==0 ) {
+  if ( verbose_ && FullMatrix()->getComm()->getRank()==0 ) {
     std::cout << "\nAnalyzed Singleton Problem:\n";
     std::cout << "---------------------------\n";
   }
   if ( SingletonsDetected() ) {
-    if ( verbose_ && FullMatrix_->getComm()->getRank()==0 ) {
+    if ( verbose_ && FullMatrix()->getComm()->getRank()==0 ) {
       std::cout << "Singletons Detected!" << std::endl;;
       std::cout << "Num Singletons:      " << NumSingletons() << std::endl;
     }
   }
   else {
-    if ( verbose_ && FullMatrix_->getComm()->getRank()==0 )
+    if ( verbose_ && FullMatrix()->getComm()->getRank()==0 )
         std::cout << "No Singletons Detected!" << std::endl;
   }
 /*
@@ -386,7 +352,7 @@ namespace Tpetra {
       std::cout << slist[i] << " ";
     std::cout << "\n";
 */
-  if ( verbose_ && FullMatrix_->getComm()->getRank()==0 )
+  if ( verbose_ && FullMatrix()->getComm()->getRank()==0 )
     std::cout << "---------------------------\n\n";
 
   return;
@@ -408,7 +374,7 @@ namespace Tpetra {
   
     this->newObj_ = ReducedProblem();
   
-    if( verbose_ && SingletonsDetected() && FullMatrix_->getComm()->getRank()==0 )
+    if( verbose_ && SingletonsDetected() && FullMatrix()->getComm()->getRank()==0 )
     {
       std::cout << "\nConstructedSingleton Problem:\n";
       std::cout << "---------------------------\n";
@@ -426,7 +392,7 @@ namespace Tpetra {
   void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   fwd()
   {
-    UpdateReducedProblem( FullProblem_ );
+    UpdateReducedProblem( FullProblem() );
   }
 
 //==============================================================================
@@ -485,8 +451,8 @@ namespace Tpetra {
     //Epetra_MapColoring & rowMapColors = *RowMapColors_;
     //Epetra_MapColoring & colMapColors = *ColMapColors_;
   
-    local_ordinal_type localNumRows = FullMatrix_->getLocalNumRows();
-    local_ordinal_type localNumCols = FullMatrix_->getLocalNumCols();
+    local_ordinal_type localNumRows = FullMatrix()->getLocalNumRows();
+    local_ordinal_type localNumCols = FullMatrix()->getLocalNumCols();
   
     // Set up for accessing full matrix.  Will do so row-by-row.
     InitFullMatrixAccess();
@@ -522,7 +488,7 @@ namespace Tpetra {
         } std::cout << std::endl;
         std::cout << "petra : Analyze() E      globalIndices = ";
         for (int ii = 0; ii < localIndices.size(); ++ii) {
-          std::cout << FullMatrix_->getColMap()->getGlobalElement(localIndices[ii]) << " ";
+          std::cout << FullMatrix()->getColMap()->getGlobalElement(localIndices[ii]) << " ";
         } std::cout << std::endl;
       }
       PRINT_NB("Analyze() F");
@@ -532,17 +498,17 @@ namespace Tpetra {
         PRINT_NB("Analyze() F    ColumnIndex = " << ColumnIndex);
 
         // Bounds check for ColumnIndex
-        if (ColumnIndex >= ColProfilesData.extent(0)) {
+        if (static_cast<size_t>(ColumnIndex) >= ColProfilesData.extent(0)) {
             std::cout << "Error: ColumnIndex out of bounds: " << ColumnIndex << std::endl;
             std::abort();
         }
 
-        PRINT_NB("Analyze() F    ColumnIndex = " << ColumnIndex << "   (global = " << FullMatrix_->getColMap()->getGlobalElement(ColumnIndex) << ")");
+        PRINT_NB("Analyze() F    ColumnIndex = " << ColumnIndex << "   (global = " << FullMatrix()->getColMap()->getGlobalElement(ColumnIndex) << ")");
         PRINT_NB("Analyze() F    ColProfiles[ColumnIndex] = " << ColProfilesData(ColumnIndex,0));
         ColProfilesData(ColumnIndex,0)++; // Increment column count
         PRINT_NB("Analyze() F    ColProfiles[ColumnIndex] = " << ColProfilesData(ColumnIndex,0));
 
-        if (ColumnIndex >= localRowIDofSingletonColData.extent(0)) {
+        if (static_cast<size_t>(ColumnIndex) >= localRowIDofSingletonColData.extent(0)) {
             std::cout << "Error: ColumnIndex out of bounds for localRowIDofSingletonColData: " << ColumnIndex << std::endl;
             std::abort();
         }
@@ -578,7 +544,7 @@ namespace Tpetra {
   
     // If importer is non-trivial, we need to perform a gather/scatter to accumulate results
 /// auto importer = FullMatrix_->getImporter();
-    auto importer = FullCrsMatrix_->getCrsGraph()->getImporter();
+    auto importer = FullCrsMatrix()->getCrsGraph()->getImporter();
     if (importer != Teuchos::null) {
       vector_type_int tmpVec(FullMatrixDomainMap()); // Use for gather/scatter of column vectors
       tmpVec.putScalar(0);
@@ -598,7 +564,7 @@ namespace Tpetra {
       local_ordinal_type ColumnIndex = localIndices[j];
 
       // Bounds check for ColumnIndex
-      if (ColumnIndex >= ColProfilesData.extent(0)) {
+      if (static_cast<size_t>(ColumnIndex) >= ColProfilesData.extent(0)) {
           std::cout << "Error: ColumnIndex out of bounds: " << ColumnIndex << std::endl;
           std::abort();
       }
@@ -613,7 +579,7 @@ namespace Tpetra {
       local_ordinal_type ColumnIndex = localIndices[j];
 
       // Bounds check for ColumnIndex
-      if (ColumnIndex >= ColHasRowWithSingletonData.extent(0)) {
+      if (static_cast<size_t>(ColumnIndex) >= ColHasRowWithSingletonData.extent(0)) {
           std::cout << "Error: ColumnIndex out of bounds for ColHasRowWithSingletonData: " << ColumnIndex << std::endl;
           std::abort();
       }
@@ -632,7 +598,7 @@ namespace Tpetra {
     PRINT_NB("Analyze() J");
     //PRINT("Analyze() J    ColHasRowWithSingleton MaxValue = " << ColHasRowWithSingleton.normInf());
 
-    vector_type_int RowHasColWithSingleton(FullMatrix_->getRowMap()); // Use to check for errors
+    vector_type_int RowHasColWithSingleton(FullMatrix()->getRowMap()); // Use to check for errors
     RowHasColWithSingleton.putScalar(0);
     auto RowHasColWithSingletonData = RowHasColWithSingleton.getLocalViewHost(Tpetra::Access::ReadWrite);
   
@@ -728,7 +694,7 @@ namespace Tpetra {
   
     const Teuchos::Ptr<local_ordinal_type> gRowsPtr(&globalNumSingletonRows_);
     const Teuchos::Ptr<local_ordinal_type> gColsPtr(&globalNumSingletonCols_);
-    auto rowComm = FullMatrix_->getRowMap()->getComm();
+    auto rowComm = FullMatrix()->getRowMap()->getComm();
     Teuchos::reduceAll<local_ordinal_type,local_ordinal_type>(*rowComm, Teuchos::REDUCE_SUM, localNumSingletonRows_, gRowsPtr);
     Teuchos::reduceAll<local_ordinal_type,local_ordinal_type>(*rowComm, Teuchos::REDUCE_SUM, localNumSingletonCols_, gColsPtr);
 
@@ -798,7 +764,7 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
   
     FullProblem_ = Problem;
     FullMatrix_ = Teuchos::rcp_dynamic_cast<row_matrix_type>(Problem->getMatrix());
-    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(FullMatrix_ == Teuchos::null,
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(FullMatrix() == Teuchos::null,
       std::runtime_error, "Need a RowMatrix.");
     TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(Problem->getRHS() == Teuchos::null,
       std::runtime_error, "Need a RHS.");
@@ -822,13 +788,13 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
       if (isOutputRank_) printMultiVectorInt("ConstructReducedProblem() B    colMapColors = ", ColMapColors_);
 
       PRINT("ConstructReducedProblem() B    ReducedMatrixRowMap_");
-      printMap(ReducedMatrixRowMap_);
+      printMap(ReducedMatrixRowMap());
       PRINT("ConstructReducedProblem() B    ReducedMatrixColMap_");
-      printMap(ReducedMatrixColMap_);
+      printMap(ReducedMatrixColMap());
 
       // Create domain and range map colorings by exporting map coloring of column and row maps
   
-      auto importer = FullCrsMatrix_->getCrsGraph()->getImporter();
+      auto importer = FullCrsMatrix()->getCrsGraph()->getImporter();
       if (importer != Teuchos::null) {
         PRINT("ConstructReducedProblem() B    !NULL");
         Teuchos::RCP<vector_type_int> DomainMapColors = Teuchos::rcp(new vector_type_int(FullMatrixDomainMap()));
@@ -837,12 +803,12 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
         OrigReducedMatrixDomainMap_ = GenerateReducedMap(FullMatrixDomainMap(), DomainMapColors, 0);
       } else {
         PRINT("ConstructReducedProblem() B    NULL");
-        OrigReducedMatrixDomainMap_ = ReducedMatrixColMap_;
+        OrigReducedMatrixDomainMap_ = ReducedMatrixColMap();
       }
       PRINT("ConstructReducedProblem() B    OrigReducedMatrixDomainMap_");
       printMap(OrigReducedMatrixDomainMap_);
   
-      auto exporter = FullCrsMatrix_->getCrsGraph()->getImporter();
+      auto exporter = FullCrsMatrix()->getCrsGraph()->getImporter();
       if (FullMatrixIsCrsMatrix_) {
         if (exporter != Teuchos::null) { // Non-trivial exporter
           Teuchos::RCP<vector_type_int>RangeMapColors = Teuchos::rcp(new vector_type_int(FullMatrixRangeMap()));
@@ -850,12 +816,12 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
           ReducedMatrixRangeMap_ = GenerateReducedMap(FullMatrixRangeMap(), RangeMapColors, 0);
         }
         else
-          ReducedMatrixRangeMap_ = ReducedMatrixRowMap_;
+          ReducedMatrixRangeMap_ = ReducedMatrixRowMap();
       }
       else
-        ReducedMatrixRangeMap_ = ReducedMatrixRowMap_;
+        ReducedMatrixRangeMap_ = ReducedMatrixRowMap();
       PRINT("ConstructReducedProblem() B    ReducedMatrixRangeMap_");
-      printMap(ReducedMatrixRangeMap_);
+      printMap(ReducedMatrixRangeMap());
 
 
       PRINT("ConstructReducedProblem() C    SymmetricElimination_ = " << SymmetricElimination_);
@@ -863,7 +829,7 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
       // Check to see if the reduced system domain and range maps are the same.
       // If not, we need to remap entries of the LHS multivector so that they are distributed
       // conformally with the rows of the reduced matrix and the RHS multivector
-      SymmetricElimination_ = ReducedMatrixRangeMap_->isSameAs(*OrigReducedMatrixDomainMap_);
+      SymmetricElimination_ = ReducedMatrixRangeMap()->isSameAs(*OrigReducedMatrixDomainMap_);
       if (!SymmetricElimination_) {
         TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(SymmetricElimination_!=0,
           std::runtime_error, "Symmetric Elimination has not been tested or transitioned from Epetra!");
@@ -906,10 +872,10 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
 
 
       // Construct Reduced Matrix
-      LocalOrdinal maxNumEntries = FullCrsMatrix_->getLocalMaxNumRowEntries();
+      LocalOrdinal maxNumEntries = FullCrsMatrix()->getLocalMaxNumRowEntries();
       ReducedMatrix_ = Teuchos::rcp(new crs_matrix_type(ReducedMatrixRowMap(), ReducedMatrixColMap(), maxNumEntries));
 
-      if (isOutputRank_) PrintTpetraCrsMatrix(ReducedMatrix_);
+      if (isOutputRank_) PrintTpetraCrsMatrix(ReducedMatrix());
 
       // Create storage for temporary X values due to explicit elimination of rows
       tempExportX_ = Teuchos::rcp(new multivector_type(FullMatrixColMap(), NumVectors));
@@ -1012,7 +978,6 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
               //size_t MaxNumEntries = ReducedMatrix()->getGlobalNumCols(); // Global number of columns
               size_t MaxNumEntries = 20;
               //std::cout << "i, MaxNumEntries = " << i << ", " << MaxNumEntries << std::endl;
-              size_t NumEntries; // Number of entries in the current row
               //nonconst_local_inds_host_view_type indices("indices", MaxNumEntries);
               //nonconst_values_host_view_type values("values", MaxNumEntries);
               //ReducedMatrix()->getLocalRowCopy(i, indices, values, NumEntries);
@@ -1025,17 +990,17 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
           
               // Print indices
               std::cout << "Indices: ";
-              for (size_t i = 0; i < NumEntries; ++i) {
-                  //GlobalOrdinal globalIndex = ReducedMatrixRowMap()->getGlobalElement(indices(i));
+              for (size_t ii = 0; ii < NumEntries; ++ii) {
+                  //GlobalOrdinal globalIndex = ReducedMatrixRowMap()->getGlobalElement(indices(ii));
                   //std::cout << globalIndex << " ";
-                  std::cout << indices(i) << " ";
+                  std::cout << indices(ii) << " ";
               }
               std::cout << std::endl;
           
               // Print values
               std::cout << "Values: ";
-              for (size_t i = 0; i < NumEntries; ++i) {
-                  std::cout << values(i) << " ";
+              for (size_t ii = 0; ii < NumEntries; ++ii) {
+                  std::cout << values(ii) << " ";
               }
               std::cout << std::endl;
           }
@@ -1237,7 +1202,7 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
 
 //    // Finally construct Reduced Linear Problem
       ReducedProblem_ = Teuchos::rcp(new Tpetra::LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>(
-        ReducedMatrix_, ReducedLHS_, ReducedRHS_));
+        ReducedMatrix(), ReducedLHS_, ReducedRHS_));
    }
    else {
   
@@ -1248,7 +1213,7 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
    }
 
     PRINT("ConstructReducedProblem() Z");
-    //if (isOutputRank_) PrintTpetraCrsMatrix(ReducedMatrix_);
+    //if (isOutputRank_) PrintTpetraCrsMatrix(ReducedMatrix());
 
  
     double fn = (double) FullMatrix()->getGlobalNumRows();
@@ -1281,7 +1246,7 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
       "Must have a reduced problem.");
     TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(Problem == Teuchos::null,
       std::runtime_error, "Problem is Teuchos::null.");
-    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(FullMatrix_ == Teuchos::null,
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(FullMatrix() == Teuchos::null,
       std::runtime_error, "Need a RowMatrix.");
     TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(Problem->getRHS() == Teuchos::null,
       std::runtime_error, "Need a RHS.");
@@ -1394,7 +1359,7 @@ GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
   //  //Inject known X values into tempX for purpose of computing tempB = FullMatrix*tempX
   //  // Also inject into full X since we already know the solution
 
-      auto importer = FullCrsMatrix_->getCrsGraph()->getImporter();
+      auto importer = FullCrsMatrix()->getCrsGraph()->getImporter();
       if (importer != Teuchos::null) {
         tempX_->doExport(*tempExportX_, *importer, Tpetra::ADD);
         FullLHS->doExport(*tempExportX_, *importer, Tpetra::ADD);
@@ -1539,10 +1504,10 @@ CrsSingletonFilter_LinearProblem::InitFullMatrixAccess() {
 
   // Cast to CrsMatrix, if possible.  Can save some work.
   FullCrsMatrix_ = Teuchos::rcp_dynamic_cast<crs_matrix_type>(FullMatrix());
-  if (FullCrsMatrix_ == Teuchos::null) PRINT("InitFullMatrixAccess() C    FullCrsMatrix_ is null.");
+  if (FullCrsMatrix() == Teuchos::null) PRINT("InitFullMatrixAccess() C    FullCrsMatrix_ is null.");
 //  if (isOutputRank_) PrintTpetraCrsMatrix(FullCrsMatrix_);
   Tpetra::getDefaultComm()->barrier();
-  FullMatrixIsCrsMatrix_ = (FullCrsMatrix_ != Teuchos::null); // Pointer is non-null if cast worked
+  FullMatrixIsCrsMatrix_ = (FullCrsMatrix() != Teuchos::null); // Pointer is non-null if cast worked
   PRINT("InitFullMatrixAccess() D    FullMatrixIsCrsMatrix_ = " << FullMatrixIsCrsMatrix_);
   Indices_ = Teuchos::arcp(new global_ordinal_type[localMaxNumRowEntries_],0,localMaxNumRowEntries_,true);
   for (auto i = 0; i < Indices_.size(); ++i) {
@@ -1567,7 +1532,7 @@ GetRow(local_ordinal_type localRow, size_t & NumIndices,
   PRINT_NB("GetRow() A      NumIndices = " << NumIndices);
 
   // Must get the values, but we ignore them.
-  size_t maxNumEntries = FullCrsMatrix_->getLocalMaxNumRowEntries();
+  size_t maxNumEntries = FullCrsMatrix()->getLocalMaxNumRowEntries();
   nonconst_local_inds_host_view_type Indices("indices", maxNumEntries);
   nonconst_values_host_view_type Values("values", maxNumEntries);
   PRINT_NB("GetRow() B      NumIndices = " << NumIndices);
@@ -1577,14 +1542,14 @@ GetRow(local_ordinal_type localRow, size_t & NumIndices,
     //FullCrsMatrix_->getLocalRowCopy(localRow, localIndices, Values, NumIndices);
     PRINT_NB("GetRow() C      NumIndices = " << NumIndices);
     PRINT_NB("GetRow() C      localRow = " << localRow);
-    FullCrsMatrix_->getLocalRowCopy(localRow, Indices, Values, NumIndices);
+    FullCrsMatrix()->getLocalRowCopy(localRow, Indices, Values, NumIndices);
   }
   else { // Copy of current row (we must get the values, but we ignore them)
     // EPETRA_CHK_ERR(FullMatrix()->ExtractMyRowCopy(localRow, localMaxNumRowEntries_, NumIndices, Values_.Values(), Indices_int_));
     //FullMatrix_->getLocalRowCopy(localRow, localIndices, Values, NumIndices);
     PRINT_NB("GetRow() D      NumIndices = " << NumIndices);
     PRINT_NB("GetRow() D      localRow = " << localRow);
-    FullMatrix_->getLocalRowCopy(localRow, Indices, Values, NumIndices);
+    FullMatrix()->getLocalRowCopy(localRow, Indices, Values, NumIndices);
   }
   // If LocalRow does not belong to the calling process, then the method sets 
   // NumIndices to Teuchos::OrdinalTraits<size_t>::invalid(), and does not
@@ -1608,10 +1573,10 @@ GetRow(LocalOrdinal Row, size_t &NumIndices, Teuchos::ArrayView<const Scalar> &V
     typename Tpetra::RowMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_inds_host_view_type localIndices;
     typename Tpetra::RowMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::values_host_view_type rowValues;
 
-    PRINT_NB("GetRow(,,,) A   Row, NumIndices = " << Row << ", " << NumIndices);
+    PRINT_NB("GetRow(,,,) A   Row = " << Row);
 
     if (FullMatrixIsCrsMatrix_) { // View of current row
-        FullCrsMatrix_->getLocalRowView(Row, localIndices, rowValues);
+        FullCrsMatrix()->getLocalRowView(Row, localIndices, rowValues);
 
         NumIndices = localIndices.size();
         Values = Teuchos::ArrayView<const Scalar>(rowValues.data(), rowValues.size());
@@ -1754,7 +1719,7 @@ CreatePostSolveArrays(vector_type_LO localRowIDofSingletonCol,
   // Register singleton columns (that were not already counted as singleton rows)
   // Check to see if any columns disappeared because all associated rows were eliminated
   int NumMyColSingletonstmp = 0;
-  local_ordinal_type localNumCols = FullMatrix_->getLocalNumCols();
+  local_ordinal_type localNumCols = FullMatrix()->getLocalNumCols();
   PRINT_NB("CreatePostSolveArrays() A    NumMyCols = " << localNumCols);
   auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadWrite);
   auto ColProfilesData = ColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);

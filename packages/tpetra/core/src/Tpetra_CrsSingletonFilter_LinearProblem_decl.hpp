@@ -171,7 +171,7 @@ namespace Tpetra {
     CrsSingletonFilter_LinearProblem( bool verbose = false );
  
     /// \brief Destructor
-    virtual ~CrsSingletonFilter_LinearProblem();
+    virtual ~CrsSingletonFilter_LinearProblem() = default;
     //@}
   
     ///
@@ -369,9 +369,6 @@ namespace Tpetra {
     Teuchos::ArrayRCP<local_ordinal_type> ColSingletonPivotLIDs_;
     Teuchos::ArrayRCP<scalar_type> ColSingletonPivots_;
     
-    //int AbsoluteThreshold_;
-    //double RelativeThreshold_;
-  
     local_ordinal_type localNumSingletonRows_;  ///< Number of singleton rows.
     local_ordinal_type localNumSingletonCols_;  ///< Number of singleton columns not eliminated by singleton rows.
     local_ordinal_type globalNumSingletonRows_;
