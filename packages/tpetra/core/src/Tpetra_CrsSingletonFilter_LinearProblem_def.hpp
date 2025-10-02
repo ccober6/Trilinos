@@ -334,7 +334,7 @@ CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   }
 
   // Create the reduced map using the collected indices
-  Teuchos::RCP<const map_type> reducedMap = createNonContigMap<LocalOrdinal, GlobalOrdinal>(
+  Teuchos::RCP<const map_type> reducedMap = createNonContigMapWithNode<LocalOrdinal, GlobalOrdinal, Node>(
       Teuchos::ArrayView<const GlobalOrdinal>(myReducedGlobalIndices.data(), myReducedGlobalIndices.size()),
       originalMap->getComm());
 
@@ -754,7 +754,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-    CrsSingletonFilter_LinearProblem::InitFullMatrixAccess() {
+    InitFullMatrixAccess() {
   localMaxNumRowEntries_ = FullMatrix()->getLocalMaxNumRowEntries();
 
   // Cast to CrsMatrix, if possible.  Can save some work.

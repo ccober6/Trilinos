@@ -263,7 +263,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   /// \brief! Returns RCP to Tpetra::RowMatrix from full problem.
   Teuchos::RCP<row_matrix_type> FullMatrix() const { return (FullMatrix_); }
 
-  /// \brief Returns RCP to Tpetra::CrsMatrix from reduced problem.
+ /// \brief Returns RCP to Tpetra::CrsMatrix from reduced problem.
   Teuchos::RCP<crs_matrix_type> ReducedMatrix() const { return ReducedMatrix_; }
 
   //! Returns RCP to Tpetra::Map describing the reduced system row distribution.
@@ -370,12 +370,6 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   //! Copy constructor (defined as private so it is unavailable to user).
   CrsSingletonFilter_LinearProblem(const Teuchos::RCP<CrsSingletonFilter_LinearProblem>& /* Problem */) {}
 
-  // EXTRAS to REMOVE
-  void PrintTpetraRowMatrix(const Teuchos::RCP<const row_matrix_type>& matrix);
-  void PrintTpetraCrsMatrix(const Teuchos::RCP<const crs_matrix_type>& matrix);
-  void PrintTpetraRowMatrix_local(const Teuchos::RCP<const row_matrix_type>& matrix);
-  void PrintTpetraCrsMatrix_local(const Teuchos::RCP<const crs_matrix_type>& matrix);
-  void printMap(const Teuchos::RCP<const map_type>& map) const;
 };
 
 }  // namespace Tpetra
