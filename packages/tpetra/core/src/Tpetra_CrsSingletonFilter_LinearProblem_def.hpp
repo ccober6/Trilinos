@@ -166,44 +166,45 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   // nonconst_local_inds_host_view_type localIndices;
   Teuchos::Array<local_ordinal_type> localIndices;
   localNumSingletonRows_ = 0;
+  {
+    auto ColProfilesData              = ColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
+    auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadWrite);
+    auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewHost(Tpetra::Access::ReadWrite);
+    auto RowMapColors_Data            = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
+    auto ColMapColors_Data            = ColMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
 
-  auto ColProfilesData              = ColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
-  auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadWrite);
-  auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewHost(Tpetra::Access::ReadWrite);
-  auto RowMapColors_Data            = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
-  auto ColMapColors_Data            = ColMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
+    for (int i = 0; i < localNumRows; i++) {
+      // Get ith row
+      GetRow(i, NumIndices, localIndices);
+      for (size_t j = 0; j < NumIndices; j++) {
+        local_ordinal_type ColumnIndex = localIndices[j];
 
-  for (int i = 0; i < localNumRows; i++) {
-    // Get ith row
-    GetRow(i, NumIndices, localIndices);
-    for (size_t j = 0; j < NumIndices; j++) {
-      local_ordinal_type ColumnIndex = localIndices[j];
+        // Bounds check for ColumnIndex
+        if (static_cast<size_t>(ColumnIndex) >= ColProfilesData.extent(0)) {
+          std::cout << "Error: ColumnIndex out of bounds: " << ColumnIndex << std::endl;
+          std::abort();
+        }
 
-      // Bounds check for ColumnIndex
-      if (static_cast<size_t>(ColumnIndex) >= ColProfilesData.extent(0)) {
-        std::cout << "Error: ColumnIndex out of bounds: " << ColumnIndex << std::endl;
-        std::abort();
+        ColProfilesData(ColumnIndex, 0)++;  // Increment column count
+
+        if (static_cast<size_t>(ColumnIndex) >= localRowIDofSingletonColData.extent(0)) {
+          std::cout << "Error: ColumnIndex out of bounds for localRowIDofSingletonColData: "
+                    << ColumnIndex << std::endl;
+          std::abort();
+        }
+
+        // Record local row ID for current column
+        // will use to identify row to eliminate if column is a singleton
+        localRowIDofSingletonColData(ColumnIndex, 0) = i;
       }
-
-      ColProfilesData(ColumnIndex, 0)++;  // Increment column count
-
-      if (static_cast<size_t>(ColumnIndex) >= localRowIDofSingletonColData.extent(0)) {
-        std::cout << "Error: ColumnIndex out of bounds for localRowIDofSingletonColData: "
-                  << ColumnIndex << std::endl;
-        std::abort();
+      // If row has single entry, color it and associated column with color=1
+      if (NumIndices == 1) {
+        int j2 = localIndices[0];
+        ColHasRowWithSingletonData(j2, 0)++;
+        RowMapColors_Data(i, 0)  = 1;
+        ColMapColors_Data(j2, 0) = 1;
+        localNumSingletonRows_++;
       }
-
-      // Record local row ID for current column
-      // will use to identify row to eliminate if column is a singleton
-      localRowIDofSingletonColData(ColumnIndex, 0) = i;
-    }
-    // If row has single entry, color it and associated column with color=1
-    if (NumIndices == 1) {
-      int j2 = localIndices[0];
-      ColHasRowWithSingletonData(j2, 0)++;
-      RowMapColors_Data(i, 0)  = 1;
-      ColMapColors_Data(j2, 0) = 1;
-      localNumSingletonRows_++;
     }
   }
 
@@ -217,9 +218,8 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   // Make a copy of ColProfiles for later use when detecting columns that disappear locally
   vector_type_int NewColProfiles(ColProfiles.getMap());
   NewColProfiles.update(1.0, ColProfiles, 0.0);
-  auto NewColProfilesData = NewColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
 
-  // If importer is non-trivial, we need to perform a gather/scatter to accumulate results
+    // If importer is non-trivial, we need to perform a gather/scatter to accumulate results
   auto importer = FullCrsMatrix()->getCrsGraph()->getImporter();
   if (importer != Teuchos::null) {
     vector_type_int tmpVec(FullMatrixDomainMap());  // Use for gather/scatter of column vectors
@@ -236,7 +236,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     local_ordinal_type ColumnIndex = localIndices[j];
 
     // Bounds check for ColumnIndex
-    if (static_cast<size_t>(ColumnIndex) >= ColProfilesData.extent(0)) {
+    if (static_cast<size_t>(ColumnIndex) >= ColProfiles.getLocalLength()) {
       std::cout << "Error: ColumnIndex out of bounds: " << ColumnIndex << std::endl;
       std::abort();
     }
@@ -245,7 +245,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     local_ordinal_type ColumnIndex = localIndices[j];
 
     // Bounds check for ColumnIndex
-    if (static_cast<size_t>(ColumnIndex) >= ColHasRowWithSingletonData.extent(0)) {
+    if (static_cast<size_t>(ColumnIndex) >= ColHasRowWithSingleton.getLocalLength()) {
       std::cout << "Error: ColumnIndex out of bounds for ColHasRowWithSingletonData: "
                 << ColumnIndex << std::endl;
       std::abort();
@@ -262,32 +262,42 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 
   vector_type_int RowHasColWithSingleton(FullMatrix()->getRowMap());  // Use to check for errors
   RowHasColWithSingleton.putScalar(0);
-  auto RowHasColWithSingletonData = RowHasColWithSingleton.getLocalViewHost(Tpetra::Access::ReadWrite);
+  {
+    auto ColProfilesData              = ColProfiles.getLocalViewHost(Tpetra::Access::ReadOnly);
+    auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadOnly);
+    auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewHost(Tpetra::Access::ReadOnly);
 
-  localNumSingletonCols_ = 0;
-  // Count singleton columns (that were not already counted as singleton rows)
-  for (local_ordinal_type j = 0; j < localNumCols; j++) {
-    local_ordinal_type i2 = localRowIDofSingletonColData(j, 0);
-    // Check if column is a singleton
-    if (ColProfilesData(j, 0) == 1) {
-      // Check to see if this column already eliminated by the row check above
-      if (RowMapColors_Data(i2, 0) != 1) {
-        RowHasColWithSingletonData(i2, 0)++;  // Increment col singleton counter for ith row
-        RowMapColors_Data(i2, 0) = 2;         // Use 2 for now, to distinguish between row eliminated directly or via column singletons
-        ColMapColors_Data(j, 0)  = 1;
-        localNumSingletonCols_++;
-        // If we delete a row, we need to keep track of associated column entries that were also deleted
-        // in case all entries in a column are eventually deleted, in which case the column should
-        // also be deleted.
-        GetRow(i2, NumIndices, localIndices);
-        for (size_t jj = 0; jj < NumIndices; jj++) {
-          NewColProfilesData(localIndices[jj], 0)--;
+    auto RowMapColors_Data            = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
+    auto ColMapColors_Data            = ColMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
+
+    auto NewColProfilesData           = NewColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
+    auto RowHasColWithSingletonData   = RowHasColWithSingleton.getLocalViewHost(Tpetra::Access::ReadWrite);
+
+    localNumSingletonCols_ = 0;
+    // Count singleton columns (that were not already counted as singleton rows)
+    for (local_ordinal_type j = 0; j < localNumCols; j++) {
+      local_ordinal_type i2 = localRowIDofSingletonColData(j, 0);
+      // Check if column is a singleton
+      if (ColProfilesData(j, 0) == 1) {
+        // Check to see if this column already eliminated by the row check above
+        if (RowMapColors_Data(i2, 0) != 1) {
+          RowHasColWithSingletonData(i2, 0)++;  // Increment col singleton counter for ith row
+          RowMapColors_Data(i2, 0) = 2;         // Use 2 for now, to distinguish between row eliminated directly or via column singletons
+          ColMapColors_Data(j, 0)  = 1;
+          localNumSingletonCols_++;
+          // If we delete a row, we need to keep track of associated column entries that were also deleted
+          // in case all entries in a column are eventually deleted, in which case the column should
+          // also be deleted.
+          GetRow(i2, NumIndices, localIndices);
+          for (size_t jj = 0; jj < NumIndices; jj++) {
+            NewColProfilesData(localIndices[jj], 0)--;
+          }
+        }
+        // Check if some other processor eliminated this column
+        else if (ColHasRowWithSingletonData(j, 0) == 1 && RowMapColors_Data(i2, 0) != 1) {
+          ColMapColors_Data(j, 0) = 1;
         }
       }
-    }
-    // Check if some other processor eliminated this column
-    else if (ColHasRowWithSingletonData(j, 0) == 1 && RowMapColors_Data(i2, 0) != 1) {
-      ColMapColors_Data(j, 0) = 1;
     }
   }
 
@@ -296,9 +306,11 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 
   // Generate arrays that keep track of column singleton row, col and pivot info needed for post-solve phase
   CreatePostSolveArrays(localRowIDofSingletonCol, ColProfiles, NewColProfiles, ColHasRowWithSingleton);
-
-  for (local_ordinal_type i = 0; i < localNumRows; i++) {
-    if (RowMapColors_Data(i, 0) == 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
+  {
+    auto RowMapColors_Data = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
+    for (local_ordinal_type i = 0; i < localNumRows; i++) {
+      if (RowMapColors_Data(i, 0) == 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
+    }
   }
 
   const Teuchos::Ptr<local_ordinal_type> gRowsPtr(&globalNumSingletonRows_);
