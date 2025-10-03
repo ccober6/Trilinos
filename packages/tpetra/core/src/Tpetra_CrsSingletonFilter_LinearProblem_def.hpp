@@ -161,12 +161,82 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   InitFullMatrixAccess();
 
   // Scan matrix for singleton rows, build up column profiles
-  size_t NumIndices = 1;
-  // int * localIndices;
-  // nonconst_local_inds_host_view_type localIndices;
-  Teuchos::Array<local_ordinal_type> localIndices;
   localNumSingletonRows_ = 0;
+  using execution_space = typename crs_matrix_type::execution_space;
+  using range_policy = Kokkos::RangePolicy<execution_space>;
   {
+#if 1
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(!FullMatrixIsCrsMatrix_, std::runtime_error,
+      "Error: FullMatrix is not CrsMatrix");
+
+    auto ColProfilesData              = ColProfiles.getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto RowMapColors_Data            = RowMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto ColMapColors_Data            = ColMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+
+    Kokkos::View<int*, execution_space, Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::Atomic>>
+        ColProfilesAtomic(ColProfilesData.data(), ColProfilesData.extent(0));
+    Kokkos::View<int*, execution_space, Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::Atomic>>
+        ColHasRowWithSingletonAtomic(ColHasRowWithSingletonData.data(), ColHasRowWithSingletonData.extent(0));
+    Kokkos::View<int*, execution_space, Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::Atomic>>
+        ColMapColors_Atomic(ColMapColors_Data.data(), ColMapColors_Data.extent(0));
+    Kokkos::View<int*, execution_space> error_code("singleton-bound-check", 2);
+
+    auto lclRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
+    auto lclColInd = FullCrsMatrix_->getLocalIndicesDevice();
+
+    Kokkos::parallel_reduce(
+      "find-singleton-row", range_policy(0, localNumRows),
+      KOKKOS_LAMBDA(const size_t i, local_ordinal_type &lclNumSingletonRows) {
+        // Get ith row
+        for (size_t k = lclRowPtr(i); k < lclRowPtr(i+1); k++) {
+          local_ordinal_type ColumnIndex = lclColInd(k);
+
+          // Bounds check for ColumnIndex
+          if (static_cast<size_t>(ColumnIndex) >= ColProfilesData.extent(0)) {
+            Kokkos::atomic_exchange(&error_code(0), ColumnIndex+1);
+          } else {
+            ColProfilesAtomic(ColumnIndex)++;  // Increment column count
+          }
+
+          // Bounds check for ColumnIndex
+          if (static_cast<size_t>(ColumnIndex) >= localRowIDofSingletonColData.extent(0)) {
+            Kokkos::atomic_exchange(&error_code(1), ColumnIndex+1);
+          } else {
+            // Record local row ID for current column
+            // will use to identify row to eliminate if column is a singleton
+            // It will store the last local row index where this column has non-zero entry
+            //  (it may not be singleton row?)
+            Kokkos::atomic_max(&localRowIDofSingletonColData(ColumnIndex, 0), i);
+          }
+        }
+        // If row has single entry, color it and associated column with color=1
+        if (lclRowPtr(i+1) == lclRowPtr(i) + 1) {
+          local_ordinal_type ColumnIndex = lclColInd(lclRowPtr(i));
+          RowMapColors_Data(i, 0) = 1;
+
+          // this column will be eliminated by this singleton row
+          ColHasRowWithSingletonAtomic(ColumnIndex) ++;
+          ColMapColors_Atomic(ColumnIndex) = 1;
+          lclNumSingletonRows ++;
+        }
+      }, localNumSingletonRows_);
+
+   // Check error code for bound check
+   // NOTE: Should I broadcast the error-code?
+   auto h_error = Kokkos::create_mirror_view(error_code);
+   Kokkos::deep_copy(h_error, error_code);
+   TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) > 0, std::runtime_error,
+      "Error: ColumnIndex out of bounds: "+std::to_string(h_error(0)));
+   TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(1) > 0, std::runtime_error,
+      "Error: ColumnIndex out of bounds for localRowIDofSingletonColData "
+      +std::to_string(h_error(1)));
+#else
+    size_t NumIndices = 1;
+    // int * localIndices;
+    // nonconst_local_inds_host_view_type localIndices;
+    Teuchos::Array<local_ordinal_type> localIndices;
     auto ColProfilesData              = ColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
     auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadWrite);
     auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewHost(Tpetra::Access::ReadWrite);
@@ -206,6 +276,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         localNumSingletonRows_++;
       }
     }
+#endif
   }
 
   // 1) The vector ColProfiles has column nonzero counts for each processor's contribution
@@ -235,14 +306,93 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   // ColProfiles now contains the nonzero column entry count for all columns that have
   // an entry on this processor.
   // ColHasRowWithSingleton now contains a count of singleton rows associated with the corresponding
-  // local column.  Next we check to make sure no column is associated with more than one singleton row.
+  // local column.
 
+
+  // Next we check to make sure no column is associated with more than one singleton row.
+  // If multiple singleton rows have nonzero entries at the same column, the matrix is singular?
+  // [0 0 0 0 0 x 0 0]
+  // [0 0 0 0 0 x 0 0]
   TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(ColHasRowWithSingleton.normInf() > 1, std::runtime_error,
                                         "At least one column is associated with two singleton rows, can't handle it.");
 
+  localNumSingletonCols_ = 0;
   vector_type_int RowHasColWithSingleton(FullMatrix()->getRowMap());  // Use to check for errors
   RowHasColWithSingleton.putScalar(0);
   {
+#if 1
+    auto ColProfilesData              = ColProfiles.getLocalViewDevice(Tpetra::Access::ReadOnly);
+    auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewDevice(Tpetra::Access::ReadOnly);
+    auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewDevice(Tpetra::Access::ReadOnly);
+
+    auto RowMapColors_Data            = RowMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto ColMapColors_Data            = ColMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+
+    auto NewColProfilesData           = NewColProfiles.getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto RowHasColWithSingletonData   = RowHasColWithSingleton.getLocalViewDevice(Tpetra::Access::ReadWrite);
+
+    auto lclRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
+    auto lclColInd = FullCrsMatrix_->getLocalIndicesDevice();
+
+    // Count singleton columns (that were not already counted as singleton rows)
+    Kokkos::parallel_reduce(
+      "find-singleton-column", range_policy(0, localNumCols),
+      KOKKOS_LAMBDA(const size_t j, local_ordinal_type &lclNumSingletonCols) {
+        // Check if column is a singleton
+        if (ColProfilesData(j, 0) == 1) {
+          // i = id of "last" local row with non-zero in this col
+          // since this is singletone column , "i" is the row id of the single nonzero entry in this column
+          local_ordinal_type i = localRowIDofSingletonColData(j, 0);
+          // RowMapColors(i,0) : 0 = ith row was not singleton, 1 = was singleton, 2 = was not singleton, but processed
+          // Multiple singleton columns cannot have nonzero entry in the same row, i
+          //  which also means the matrix is singular
+          // So, rowMapColors(i,) should be checked by one singleton column (note 1, also see check 2)
+          //  not atomic needed
+
+          // Check to see if this column already eliminated by the row check above
+          if (RowMapColors_Data(i, 0) != 1) { // that row is not singleton, and hence this col has not been removed
+            RowMapColors_Data(i, 0) = 2;
+            ColMapColors_Data(j, 0) = 1;
+            lclNumSingletonCols ++;
+
+            // Increment col singleton counter for ith row (Only one j should update (i) because of "note 1")
+            RowHasColWithSingletonData(i, 0) ++;
+
+            // If we delete a row, we need to keep track of associated column entries that were also deleted
+            // in case all entries in a column are eventually deleted, in which case the column should
+            // also be deleted.
+            // Only one j should execute this loop for a specific "i" (because of "note 1")
+            for (size_t k = lclRowPtr(i); k < lclRowPtr(i+1); k++) {
+              NewColProfilesData(lclColInd(k), 0) --;
+            }
+          }
+        }
+      }, localNumSingletonCols_);
+    Kokkos::parallel_for(
+      "find-non-singleton-column", range_policy(0, localNumCols),
+      KOKKOS_LAMBDA(const size_t j) {
+        // Check if column is *NOT* a singleton
+        if (ColProfilesData(j, 0) != 1) {
+          // Since this is not singletone col,
+          //  "i" is the "last" local row with non-zero in this col and may not corresponds to the singleton row?
+          local_ordinal_type i = localRowIDofSingletonColData(j, 0);
+
+          // Check if some other processor has "previously" eliminated this column
+          // (note: multiple singleton columns cannot have nonzero in the same column, colhasrowwithsingleton(j) is 0 or 1)
+          //  This column has "one" row, which is singleton
+          //   that singleton row has the single nonzero entry at jth col
+          if (ColHasRowWithSingletonData(j, 0) == 1 && RowMapColors_Data(i, 0) != 1 && RowMapColors_Data(i, 0)-j < 2) {
+            // TODO: check the second and third conditions
+            ColMapColors_Data(j, 0) = 1;
+          }
+        }
+      });
+#else
+    size_t NumIndices = 1;
+    // int * localIndices;
+    // nonconst_local_inds_host_view_type localIndices;
+    Teuchos::Array<local_ordinal_type> localIndices;
+
     auto ColProfilesData              = ColProfiles.getLocalViewHost(Tpetra::Access::ReadOnly);
     auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadOnly);
     auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewHost(Tpetra::Access::ReadOnly);
@@ -253,7 +403,6 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     auto NewColProfilesData           = NewColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
     auto RowHasColWithSingletonData   = RowHasColWithSingleton.getLocalViewHost(Tpetra::Access::ReadWrite);
 
-    localNumSingletonCols_ = 0;
     // Count singleton columns (that were not already counted as singleton rows)
     for (local_ordinal_type j = 0; j < localNumCols; j++) {
       local_ordinal_type i2 = localRowIDofSingletonColData(j, 0);
@@ -273,14 +422,16 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
             NewColProfilesData(localIndices[jj], 0)--;
           }
         }
-        // Check if some other processor eliminated this column
-        else if (ColHasRowWithSingletonData(j, 0) == 1 && RowMapColors_Data(i2, 0) != 1) {
-          ColMapColors_Data(j, 0) = 1;
-        }
+      }
+      // Check if some other processor eliminated this column
+      else if (ColHasRowWithSingletonData(j, 0) == 1 && RowMapColors_Data(i2, 0) != 1) {
+        ColMapColors_Data(j, 0) = 1;
       }
     }
+#endif
   }
 
+  // Next we check to make sure no row is associated with more than one singleton col (check 2)
   TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(RowHasColWithSingleton.normInf() > 1, std::runtime_error,
                                         "At least one row is associated with two singleton columns, can't handle it.");
 
@@ -289,7 +440,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   {
     auto RowMapColors_Data = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
     for (local_ordinal_type i = 0; i < localNumRows; i++) {
-      if (RowMapColors_Data(i, 0) == 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
+      if (RowMapColors_Data(i, 0) >= 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
     }
   }
 
