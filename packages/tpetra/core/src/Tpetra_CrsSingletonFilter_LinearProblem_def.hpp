@@ -232,26 +232,6 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     ColHasRowWithSingleton.doImport(tmpVec, *importer, INSERT);
   }
 
-  for (size_t j = 0; j < NumIndices; j++) {
-    local_ordinal_type ColumnIndex = localIndices[j];
-
-    // Bounds check for ColumnIndex
-    if (static_cast<size_t>(ColumnIndex) >= ColProfiles.getLocalLength()) {
-      std::cout << "Error: ColumnIndex out of bounds: " << ColumnIndex << std::endl;
-      std::abort();
-    }
-  }
-  for (size_t j = 0; j < NumIndices; j++) {
-    local_ordinal_type ColumnIndex = localIndices[j];
-
-    // Bounds check for ColumnIndex
-    if (static_cast<size_t>(ColumnIndex) >= ColHasRowWithSingleton.getLocalLength()) {
-      std::cout << "Error: ColumnIndex out of bounds for ColHasRowWithSingletonData: "
-                << ColumnIndex << std::endl;
-      std::abort();
-    }
-  }
-
   // ColProfiles now contains the nonzero column entry count for all columns that have
   // an entry on this processor.
   // ColHasRowWithSingleton now contains a count of singleton rows associated with the corresponding
