@@ -182,12 +182,13 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     Kokkos::View<int*, execution_space, Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::Atomic>>
         ColMapColors_Atomic(ColMapColors_Data.data(), ColMapColors_Data.extent(0));
     Kokkos::View<int*, execution_space> error_code("singleton-bound-check", 2);
+    Kokkos::deep_copy(error_code, 0);
 
     auto lclRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
     auto lclColInd = FullCrsMatrix_->getLocalIndicesDevice();
 
     Kokkos::parallel_reduce(
-      "find-singleton-row", range_policy(0, localNumRows),
+      "CrsSingletonFilter_LinearProblem:Analyze(find-singleton-row)", range_policy(0, localNumRows),
       KOKKOS_LAMBDA(const size_t i, local_ordinal_type &lclNumSingletonRows) {
         // Get ith row
         for (size_t k = lclRowPtr(i); k < lclRowPtr(i+1); k++) {
@@ -223,15 +224,15 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         }
       }, localNumSingletonRows_);
 
-   // Check error code for bound check
-   // NOTE: Should I broadcast the error-code?
-   auto h_error = Kokkos::create_mirror_view(error_code);
-   Kokkos::deep_copy(h_error, error_code);
-   TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) > 0, std::runtime_error,
+    // Check error code for bound check
+    // NOTE: Should I broadcast the error-code?
+    auto h_error = Kokkos::create_mirror_view(error_code);
+    Kokkos::deep_copy(h_error, error_code);
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) > 0, std::runtime_error,
       "Error: ColumnIndex out of bounds: "+std::to_string(h_error(0)));
-   TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(1) > 0, std::runtime_error,
-      "Error: ColumnIndex out of bounds for localRowIDofSingletonColData "
-      +std::to_string(h_error(1)));
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(1) > 0, std::runtime_error,
+       "Error: ColumnIndex out of bounds for localRowIDofSingletonColData "
+       +std::to_string(h_error(1)));
 #else
     size_t NumIndices = 1;
     // int * localIndices;
@@ -336,7 +337,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 
     // Count singleton columns (that were not already counted as singleton rows)
     Kokkos::parallel_reduce(
-      "find-singleton-column", range_policy(0, localNumCols),
+      "CrsSingletonFilter_LinearProblem:Analyze(find-singleton-column)", range_policy(0, localNumCols),
       KOKKOS_LAMBDA(const size_t j, local_ordinal_type &lclNumSingletonCols) {
         // Check if column is a singleton
         if (ColProfilesData(j, 0) == 1) {
@@ -369,7 +370,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         }
       }, localNumSingletonCols_);
     Kokkos::parallel_for(
-      "find-non-singleton-column", range_policy(0, localNumCols),
+      "CrsSingletonFilter_LinearProblem:Analyze(find-non-singleton-column)", range_policy(0, localNumCols),
       KOKKOS_LAMBDA(const size_t j) {
         // Check if column is *NOT* a singleton
         if (ColProfilesData(j, 0) != 1) {
@@ -381,7 +382,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
           // (note: multiple singleton columns cannot have nonzero in the same column, colhasrowwithsingleton(j) is 0 or 1)
           //  This column has "one" row, which is singleton
           //   that singleton row has the single nonzero entry at jth col
-          if (ColHasRowWithSingletonData(j, 0) == 1 && RowMapColors_Data(i, 0) != 1 && RowMapColors_Data(i, 0)-j < 2) {
+          if (ColHasRowWithSingletonData(j, 0) == 1 && (RowMapColors_Data(i, 0) != 1 && RowMapColors_Data(i, 0)-j < 2)) {
             // TODO: check the second and third conditions
             ColMapColors_Data(j, 0) = 1;
           }
@@ -438,10 +439,19 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   // Generate arrays that keep track of column singleton row, col and pivot info needed for post-solve phase
   CreatePostSolveArrays(localRowIDofSingletonCol, ColProfiles, NewColProfiles, ColHasRowWithSingleton);
   {
+#if 1
+    auto RowMapColors_Data = RowMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+    Kokkos::parallel_for(
+      "CrsSingletonFilter_LinearProblem:Analyze(convert-rowmap-color)", range_policy(0, localNumRows),
+      KOKKOS_LAMBDA(const size_t i) {
+        if (RowMapColors_Data(i, 0) >= 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
+      });
+#else
     auto RowMapColors_Data = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
     for (local_ordinal_type i = 0; i < localNumRows; i++) {
       if (RowMapColors_Data(i, 0) >= 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
     }
+#endif
   }
 
   const Teuchos::Ptr<local_ordinal_type> gRowsPtr(&globalNumSingletonRows_);
@@ -569,6 +579,72 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     LocalOrdinal localNumRows        = FullMatrix()->getLocalNumRows();
     LocalOrdinal ColSingletonCounter = 0;
 
+#if 1
+    // The ReducedMatrix has the row and column indices already removed so cannot "insert" them.
+    // Need to filter them to only insert remaining.
+    // Filter indices and values
+    {
+      for (LocalOrdinal i = 0; i < localNumRows; i++) {
+        GlobalOrdinal curGRID = FullMatrixRowMap()->getGlobalElement(i);
+        if (ReducedMatrixRowMap()->isNodeGlobalElement(curGRID)) {  // Check if this row should go into reduced matrix
+          GetRowGCIDs(i, NumEntries, Values, Indices);              // Get current row (Indices are global)
+
+          Teuchos::Array<GlobalOrdinal> filteredIndices;
+          Teuchos::Array<Scalar> filteredValues;
+
+          for (typename Teuchos::Array<GlobalOrdinal>::size_type j = 0; j < Indices.size(); ++j) {
+            if (ReducedMatrixColMap()->isNodeGlobalElement(Indices[j])) {
+              filteredIndices.push_back(Indices[j]);
+              filteredValues.push_back(Values[j]);
+            }
+          }
+
+          // Insert filtered values into the matrix
+          if (!filteredIndices.empty()) {
+            ReducedMatrix()->insertGlobalValues(curGRID, filteredIndices(), filteredValues());
+          }
+        }
+      }
+    }
+    // Now convert to local indexing.  We have constructed things so that the domain and range of the
+    // matrix will have the same map.  If the reduced matrix domain and range maps were not the same, the
+    // differences were addressed in the ConstructRedistributeExporter() method
+    ReducedMatrix()->fillComplete(ReducedMatrixDomainMap(), ReducedMatrixRangeMap());
+
+    {
+      auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
+
+      auto lclFullColMap = FullMatrixColMap()->getLocalMap();
+      auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
+      auto lclFullRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
+      auto lclFullColInd = FullCrsMatrix_->getLocalIndicesDevice();
+      auto lclFullValues = FullCrsMatrix_->getLocalValuesDevice(Tpetra::Access::ReadOnly);
+
+      auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto localExportX = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+
+      //Need to be parallel-for !!
+      using execution_space = typename vector_type_int::execution_space;
+      using range_policy = Kokkos::RangePolicy<execution_space>;
+      const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
+      Kokkos::View<int*, execution_space> error_code("singleton-bound-check", 2);
+      Kokkos::deep_copy(error_code, 0);
+
+      ConstructReducedProblemFunctor functor(NumVectors, localNumSingletonCols_, error_code,
+                                             lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                                             lclFullRowPtr, lclFullColInd, lclFullValues, localExportX, localRHS,
+                                             ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);      
+      Kokkos::parallel_for(
+        "CrsSingletonFilter_LinearProblem:ConstructReducedProblem", range_policy(0, localNumRows),
+        functor);
+      auto h_error = Kokkos::create_mirror_view(error_code);
+      Kokkos::deep_copy(h_error, error_code);
+      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 1, std::runtime_error,
+                                            "Encountered zero row, unable to continue.");  // Should improve this comparison to zero.
+      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 2, std::runtime_error,
+                                            "Encountered zero column, unable to continue.");  // Should improve this comparison to zero.
+    }
+#else
     for (LocalOrdinal i = 0; i < localNumRows; i++) {
       GlobalOrdinal curGRID = FullMatrixRowMap()->getGlobalElement(i);
       if (ReducedMatrixRowMap()->isNodeGlobalElement(curGRID)) {  // Check if this row should go into reduced matrix
@@ -626,6 +702,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     // matrix will have the same map.  If the reduced matrix domain and range maps were not the same, the
     // differences were addressed in the ConstructRedistributeExporter() method
     ReducedMatrix()->fillComplete(ReducedMatrixDomainMap(), ReducedMatrixRangeMap());
+#endif
 
     // 1) The vector ColProfiles has column nonzero counts for each processor's contribution
     // Construct Reduced LHS (Puts any initial guess values into reduced system)
@@ -702,15 +779,74 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     Teuchos::RCP<multivector_type> FullRHS = FullProblem()->getRHS();
     Teuchos::RCP<multivector_type> FullLHS = FullProblem()->getLHS();
 
-    int NumVectors = FullLHS->getNumVectors();
+    local_ordinal_type NumVectors = FullLHS->getNumVectors();
     tempExportX_->putScalar(0.0);
 
     size_t NumEntries = 0;
     Teuchos::ArrayView<const Scalar> Values;
     Teuchos::Array<GlobalOrdinal> Indices;
-    LocalOrdinal localNumRows        = FullMatrix()->getLocalNumRows();
+    LocalOrdinal localNumRows = FullMatrix()->getLocalNumRows();
     LocalOrdinal ColSingletonCounter = 0;
 
+    //Need to be parallel-for
+#if 1
+    {
+      auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
+
+      auto lclFullColMap = FullMatrixColMap()->getLocalMap();
+      auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
+      auto lclFullRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
+      auto lclFullColInd = FullCrsMatrix_->getLocalIndicesDevice();
+      auto lclFullValues = FullCrsMatrix_->getLocalValuesDevice(Tpetra::Access::ReadOnly);
+
+      auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto localExportX = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+
+      //Need to be parallel-for !!
+      using execution_space = typename vector_type_int::execution_space;
+      using range_policy = Kokkos::RangePolicy<execution_space>;
+      const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
+      Kokkos::View<int*, execution_space> error_code("singleton-bound-check", 2);
+      Kokkos::deep_copy(error_code, 0);
+
+      ConstructReducedProblemFunctor functor(NumVectors, localNumSingletonCols_, error_code,
+                                             lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                                             lclFullRowPtr, lclFullColInd, lclFullValues, localExportX, localRHS,
+                                             ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);      
+      Kokkos::parallel_reduce(
+        "CrsSingletonFilter_LinearProblem:ConstructReducedProblem", range_policy(0, localNumRows),
+        functor, ColSingletonCounter);
+      auto h_error = Kokkos::create_mirror_view(error_code);
+      Kokkos::deep_copy(h_error, error_code);
+      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 1, std::runtime_error,
+                                            "Encountered zero row, unable to continue.");  // Should improve this comparison to zero.
+      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 2, std::runtime_error,
+                                            "Encountered zero column, unable to continue.");  // Should improve this comparison to zero.
+    }
+
+    for (LocalOrdinal i = 0; i < localNumRows; i++) {
+      GlobalOrdinal curGRID = FullMatrixRowMap()->getGlobalElement(i);
+      if (ReducedMatrixRowMap()->isNodeGlobalElement(curGRID)) {  // Check if this row should go into reduced matrix
+        GetRowGCIDs(i, NumEntries, Values, Indices);
+
+        // Filter indices and values
+        Teuchos::Array<GlobalOrdinal> filteredIndices;
+        Teuchos::Array<Scalar> filteredValues;
+
+        for (typename Teuchos::Array<GlobalOrdinal>::size_type j = 0; j < Indices.size(); ++j) {
+          if (ReducedMatrixColMap()->isNodeGlobalElement(Indices[j])) {
+            filteredIndices.push_back(Indices[j]);
+            filteredValues.push_back(Values[j]);
+          }
+        }
+
+        // Insert filtered values into the matrix
+        if (!filteredIndices.empty()) {
+          ReducedMatrix()->replaceGlobalValues(curGRID, filteredIndices(), filteredValues());
+        }
+      }
+    }
+#else
     for (LocalOrdinal i = 0; i < localNumRows; i++) {
       GlobalOrdinal curGRID = FullMatrixRowMap()->getGlobalElement(i);
       if (ReducedMatrixRowMap()->isNodeGlobalElement(curGRID)) {  // Check if this row should go into reduced matrix
@@ -758,6 +894,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         }
       }
     }
+#endif
 
     TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(!(ColSingletonCounter == localNumSingletonCols_),
                                           std::runtime_error, "Sanity Check.");
@@ -1010,14 +1147,42 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   if (localNumSingletonCols_ == 0) return;  // Nothing to do
 
   // We will need these arrays for the post-solve phase
-  ColSingletonRowLIDs_   = Teuchos::arcp(new local_ordinal_type[localNumSingletonCols_], 0, localNumSingletonCols_, true);
-  ColSingletonColLIDs_   = Teuchos::arcp(new local_ordinal_type[localNumSingletonCols_], 0, localNumSingletonCols_, true);
-  ColSingletonPivotLIDs_ = Teuchos::arcp(new local_ordinal_type[localNumSingletonCols_], 0, localNumSingletonCols_, true);
-  ColSingletonPivots_    = Teuchos::arcp(new scalar_type[localNumSingletonCols_], 0, localNumSingletonCols_, true);
+  Kokkos::resize(ColSingletonRowLIDs_,   localNumSingletonCols_);
+  Kokkos::resize(ColSingletonColLIDs_,   localNumSingletonCols_);
+  Kokkos::resize(ColSingletonPivotLIDs_, localNumSingletonCols_);
+  Kokkos::resize(ColSingletonPivots_,    localNumSingletonCols_);
 
+  int NumMyColSingletonstmp = 0;
+#if 1
+  using execution_space = typename vector_type_int::execution_space;
+  using range_policy = Kokkos::RangePolicy<execution_space>;
+  {
+    // Register singleton columns (that were not already counted as singleton rows)
+    // Check to see if any columns disappeared because all associated rows were eliminated
+    local_ordinal_type localNumCols   = FullMatrix()->getLocalNumCols();
+    auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto ColProfilesData              = ColProfiles.getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto RowMapColors_Data            = RowMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto NewColProfilesData           = NewColProfiles.getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewDevice(Tpetra::Access::ReadWrite);
+    auto ColMapColors_Data            = ColMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+
+    CreatePostSolveArraysFunctor functor(localRowIDofSingletonColData,
+                                         ColSingletonRowLIDs_, ColSingletonColLIDs_,
+                                         NewColProfilesData, ColProfilesData, ColHasRowWithSingletonData,
+                                         ColMapColors_Data, RowMapColors_Data);
+    Kokkos::parallel_reduce(
+      "CrsSingletonFilter_LinearProblem:CreatePostSolveArrays", range_policy(0, localNumCols),
+      functor, NumMyColSingletonstmp);
+  }
+
+  TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(NumMyColSingletonstmp != localNumSingletonCols_,
+                                        std::runtime_error, "Sanity check.");
+
+  Kokkos::Experimental::sort_by_key(execution_space(), ColSingletonRowLIDs_, ColSingletonColLIDs_);
+#else
   // Register singleton columns (that were not already counted as singleton rows)
   // Check to see if any columns disappeared because all associated rows were eliminated
-  int NumMyColSingletonstmp         = 0;
   local_ordinal_type localNumCols   = FullMatrix()->getLocalNumCols();
   auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadWrite);
   auto ColProfilesData              = ColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
@@ -1044,6 +1209,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
                                         std::runtime_error, "Sanity check.");
 
   Tpetra::sort2(ColSingletonRowLIDs_.begin(), ColSingletonRowLIDs_.end(), ColSingletonColLIDs_.begin());
+#endif
 
   return;
 }
