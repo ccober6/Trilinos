@@ -151,7 +151,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
 
   //@{ \name Constructors/Destructor.
   /// \brief Constructor.
-  CrsSingletonFilter_LinearProblem(bool verbose = false);
+  CrsSingletonFilter_LinearProblem(bool verbose = false, bool run_on_host = false);
 
   /// \brief Destructor
   virtual ~CrsSingletonFilter_LinearProblem() = default;
@@ -370,6 +370,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   Teuchos::RCP<vector_type_int> ColMapColors_;
   bool FullMatrixIsCrsMatrix_;
 
+  bool run_on_host_;
   bool verbose_;
 
  private:

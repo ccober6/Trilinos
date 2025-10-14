@@ -662,9 +662,11 @@ Teuchos::RCP<Tpetra::MultiVector<Scalar, LO, GO, Node>> createMultiVector() {
     LHS_Original = Reader_t::readDenseFile("SF1_LHS_Original.mm", Comm, A_Original_Map);
     RHS_Original = Reader_t::readDenseFile("SF1_RHS_Original.mm", Comm, A_Original_Map);
 
+    bool verbose = true;
+    bool run_on_host = false;
     RCP<MultiVector_t> x = rcp(new MultiVector_t(A_Original_Map, LHS_Original->getNumVectors() ));
     RCP<LinearProblem_t> preSingletonProblem = rcp(new LinearProblem_t( A_Original, x, RHS_Original ));
-    CrsSingletonFiltering_t SingletonTransform(true);
+    CrsSingletonFiltering_t SingletonTransform(verbose, run_on_host);
     RCP<LinearProblem_t> postSingletonProblem = SingletonTransform( preSingletonProblem );
 
     SingletonTransform.fwd();
