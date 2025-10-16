@@ -144,6 +144,16 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   using nonconst_global_inds_host_view_type = typename row_matrix_type::nonconst_global_inds_host_view_type;
   using nonconst_values_host_view_type      = typename row_matrix_type::nonconst_values_host_view_type;
 
+  using local_map_type = typename map_type::local_map_type;
+
+  using local_ptr_view_type = typename crs_matrix_type::row_ptrs_device_view_type;
+  using local_ind_view_type = typename crs_matrix_type::local_inds_device_view_type;
+  using local_val_view_type = typename crs_matrix_type::local_matrix_device_type::values_type;
+  using const_local_val_view_type = typename local_val_view_type::const_type;
+
+  using local_multivector_type = typename multivector_type::dual_view_type::t_dev;
+  using const_local_multivector_type = typename local_multivector_type::const_type;
+
   using device_type = typename Node::device_type;
   using vector_view_type_int = Kokkos::View<local_ordinal_type*, device_type>;
   using vector_view_type_scalar = Kokkos::View<scalar_type*, device_type>;
@@ -420,9 +430,57 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
    }
  };
 
+ template<class Map_type, class LocalPtr_type, class LocalInd_type, class LocalVal_type, class NonConstLocalVal_type>
+ struct ConstructReducedProblemFunctor {
+
+   Map_type lclFullColMap;
+   Map_type lclFullRowMap;
+   Map_type lclReducedRowMap;
+
+   LocalPtr_type lclFullRowPtr;
+   LocalInd_type lclFullColInd;
+   LocalVal_type lclFullValues;
+
+   LocalPtr_type lclReducedRowPtr;
+   LocalInd_type lclReducedColInd;
+   NonConstLocalVal_type lclReducedValues;
+
+   // Constructor
+   ConstructReducedProblemFunctor(Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
+                                  LocalPtr_type lclFullRowPtr_, LocalInd_type lclFullColInd_, LocalVal_type lclFullValues_,
+                                  LocalPtr_type lclReducedRowPtr_, LocalInd_type lclReducedColInd_, NonConstLocalVal_type lclReducedValues_) :
+   lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_),
+   lclFullRowPtr(lclFullRowPtr_), lclFullColInd(lclFullColInd_), lclFullValues(lclFullValues_),
+   lclReducedRowPtr(lclReducedRowPtr_), lclReducedColInd(lclReducedColInd_), lclReducedValues(lclReducedValues_)
+   {}
+
+   KOKKOS_INLINE_FUNCTION
+   void operator()(const local_ordinal_type i) const {
+     const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
+     GlobalOrdinal glbRowID = lclFullRowMap.getGlobalElement(i);
+     LocalOrdinal  lclRowID = lclReducedRowMap.getLocalElement(glbRowID);
+
+     if (lclRowID != INVALID) {
+       for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
+         GlobalOrdinal glbColID = lclFullColMap.getGlobalElement(lclFullColInd[j]);
+         LocalOrdinal  lclColID = lclReducedRowMap.getLocalElement(glbColID);
+         if (lclRowID != INVALID) {
+           for (size_t k = lclReducedRowPtr(lclRowID); k < lclReducedRowPtr(lclRowID+1); k++) {
+             if (lclReducedColInd[k] == lclColID) {
+               lclReducedValues[k] = lclFullValues[j];
+             }
+           }
+         }
+       }
+     }
+   }
+ };
+
+ // Functor to solve singleton problem
  template<class Map_type, class LocalPtr_type, class LocalInd_type, class LocalVal_type, class LocalX_type, class LocalB_type,
           class View_type_int, class View_type_scalar, class Err_type>
- struct ConstructReducedProblemFunctor {
+ struct SolveSingletonProblemFunctor {
+
    local_ordinal_type NumVectors;
    local_ordinal_type localNumSingletonCols;
 
@@ -444,12 +502,12 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
    View_type_scalar ColSingletonPivots;
 
    // Constructor
-   ConstructReducedProblemFunctor(local_ordinal_type NumVectors_, local_ordinal_type localNumSingletonCols_, Err_type error_code_,
-                                  Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
-                                  LocalPtr_type lclFullRowPtr_, LocalInd_type lclFullColInd_, LocalVal_type lclFullValues_,
-                                  LocalX_type localExportX_, LocalB_type localRHS_,
-                                  View_type_int colSingletonColLIDs_, View_type_int colSingletonRowLIDs_,
-                                  View_type_int colSingletonPivotLIDs_, View_type_scalar colSingletonPivots_) :
+   SolveSingletonProblemFunctor(local_ordinal_type NumVectors_, local_ordinal_type localNumSingletonCols_, Err_type error_code_,
+                                Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
+                                LocalPtr_type lclFullRowPtr_, LocalInd_type lclFullColInd_, LocalVal_type lclFullValues_,
+                                LocalX_type localExportX_, LocalB_type localRHS_,
+                                View_type_int colSingletonColLIDs_, View_type_int colSingletonRowLIDs_,
+                                View_type_int colSingletonPivotLIDs_, View_type_scalar colSingletonPivots_) :
    NumVectors(NumVectors_), localNumSingletonCols(localNumSingletonCols_), error_code(error_code_),
    lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_),
    lclFullRowPtr(lclFullRowPtr_), lclFullColInd(lclFullColInd_), lclFullValues(lclFullValues_),

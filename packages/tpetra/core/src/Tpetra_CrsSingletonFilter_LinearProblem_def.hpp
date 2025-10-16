@@ -555,7 +555,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     // Create pointer to Full RHS, LHS
     Teuchos::RCP<multivector_type> FullRHS = FullProblem()->getRHS();
     Teuchos::RCP<multivector_type> FullLHS = FullProblem()->getLHS();
-    int NumVectors                         = FullLHS->getNumVectors();
+    local_ordinal_type NumVectors          = FullLHS->getNumVectors();
 
     // Create importers
     Full2ReducedLHSImporter_ = Teuchos::rcp(new import_type(FullMatrixDomainMap(), ReducedMatrixDomainMap()));
@@ -638,8 +638,9 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       // The ReducedMatrix has the row and column indices already removed so cannot "insert" them.
       // Need to filter them to only insert remaining.
       // Filter indices and values
-      // Port to device ??
+      // * Only the maps have been setup, and hence the rowptr, colind, nzvals need to be still allocated.
       {
+
         for (LocalOrdinal i = 0; i < localNumRows; i++) {
           GlobalOrdinal curGRID = FullMatrixRowMap()->getGlobalElement(i);
           if (ReducedMatrixRowMap()->isNodeGlobalElement(curGRID)) {  // Check if this row should go into reduced matrix
@@ -668,6 +669,13 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       ReducedMatrix()->fillComplete(ReducedMatrixDomainMap(), ReducedMatrixRangeMap());
 
       {
+        using execution_space = typename vector_type_int::execution_space;
+        using error_code_type = typename Kokkos::View<int*, execution_space>;
+        using functor_type = SolveSingletonProblemFunctor<local_map_type, local_ptr_view_type, local_ind_view_type, const_local_val_view_type,
+                                                          local_multivector_type, const_local_multivector_type,
+                                                          vector_view_type_int, vector_view_type_scalar, error_code_type>;
+        using range_policy = Kokkos::RangePolicy<execution_space>;
+
         auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
 
         auto lclFullColMap = FullMatrixColMap()->getLocalMap();
@@ -676,21 +684,19 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         auto lclFullColInd = FullCrsMatrix_->getLocalIndicesDevice();
         auto lclFullValues = FullCrsMatrix_->getLocalValuesDevice(Tpetra::Access::ReadOnly);
 
-        auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
         auto localExportX = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+        auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
 
-        using execution_space = typename vector_type_int::execution_space;
-        using range_policy = Kokkos::RangePolicy<execution_space>;
-        const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
-        Kokkos::View<int*, execution_space> error_code("singleton-bound-check", 2);
+        error_code_type error_code("singleton-bound-check", 2);
         Kokkos::deep_copy(error_code, 0);
 
-        ConstructReducedProblemFunctor functor(NumVectors, localNumSingletonCols_, error_code,
-                                               lclFullColMap, lclFullRowMap, lclReducedRowMap,
-                                               lclFullRowPtr, lclFullColInd, lclFullValues, localExportX, localRHS,
-                                               ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);      
+        // launch functor
+        functor_type functor(NumVectors, localNumSingletonCols_, error_code,
+                             lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                             lclFullRowPtr, lclFullColInd, lclFullValues, localExportX, localRHS,
+                             ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);
         Kokkos::parallel_for(
-          "CrsSingletonFilter_LinearProblem:ConstructReducedProblem", range_policy(0, localNumRows),
+          "CrsSingletonFilter_LinearProblem:SolveSingletonProblem", range_policy(0, localNumRows),
           functor);
         auto h_error = Kokkos::create_mirror_view(error_code);
         Kokkos::deep_copy(h_error, error_code);
@@ -838,6 +844,13 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     } else {
       // Not part of the reduced matrix
       {
+        using execution_space = typename vector_type_int::execution_space;
+        using error_code_type = typename Kokkos::View<int*, execution_space>;
+        using functor_type = SolveSingletonProblemFunctor<local_map_type, local_ptr_view_type, local_ind_view_type, const_local_val_view_type,
+                                                          local_multivector_type, const_local_multivector_type,
+                                                          vector_view_type_int, vector_view_type_scalar, error_code_type>;
+        using range_policy = Kokkos::RangePolicy<execution_space>;
+
         auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
 
         auto lclFullColMap = FullMatrixColMap()->getLocalMap();
@@ -849,18 +862,15 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
         auto localExportX = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
 
-        using execution_space = typename vector_type_int::execution_space;
-        using range_policy = Kokkos::RangePolicy<execution_space>;
-        const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
-        Kokkos::View<int*, execution_space> error_code("singleton-bound-check", 2);
+        error_code_type error_code("singleton-bound-check", 2);
         Kokkos::deep_copy(error_code, 0);
 
-        ConstructReducedProblemFunctor functor(NumVectors, localNumSingletonCols_, error_code,
-                                               lclFullColMap, lclFullRowMap, lclReducedRowMap,
-                                               lclFullRowPtr, lclFullColInd, lclFullValues, localExportX, localRHS,
-                                               ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);      
+        functor_type functor(NumVectors, localNumSingletonCols_, error_code,
+                             lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                             lclFullRowPtr, lclFullColInd, lclFullValues, localExportX, localRHS,
+                             ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);
         Kokkos::parallel_reduce(
-          "CrsSingletonFilter_LinearProblem:ConstructReducedProblem", range_policy(0, localNumRows),
+          "CrsSingletonFilter_LinearProblem:SolveSingletonProblem", range_policy(0, localNumRows),
           functor, ColSingletonCounter);
         auto h_error = Kokkos::create_mirror_view(error_code);
         Kokkos::deep_copy(h_error, error_code);
@@ -871,28 +881,32 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       }
 
       // Part of the reduced matrix
-      // Port to device ??
-      for (LocalOrdinal i = 0; i < localNumRows; i++) {
-        GlobalOrdinal curGRID = FullMatrixRowMap()->getGlobalElement(i);
-        if (ReducedMatrixRowMap()->isNodeGlobalElement(curGRID)) {  // Check if this row should go into reduced matrix
-          GetRowGCIDs(i, NumEntries, Values, Indices);
+      {
+        using execution_space = typename vector_type_int::execution_space;
+        using error_code_type = typename Kokkos::View<int*, execution_space>;
+        using functor_type = ConstructReducedProblemFunctor<local_map_type, local_ptr_view_type, local_ind_view_type,
+                                                            const_local_val_view_type, local_val_view_type>;
+        using range_policy = Kokkos::RangePolicy<execution_space>;
 
-          // Filter indices and values
-          Teuchos::Array<GlobalOrdinal> filteredIndices;
-          Teuchos::Array<Scalar> filteredValues;
+        auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
+        auto lclReducedRowPtr = ReducedMatrix_->getLocalRowPtrsDevice();
+        auto lclReducedColInd = ReducedMatrix_->getLocalIndicesDevice();
+        auto lclReducedValues = ReducedMatrix_->getLocalValuesDevice(Tpetra::Access::ReadWrite);
 
-          for (typename Teuchos::Array<GlobalOrdinal>::size_type j = 0; j < Indices.size(); ++j) {
-            if (ReducedMatrixColMap()->isNodeGlobalElement(Indices[j])) {
-              filteredIndices.push_back(Indices[j]);
-              filteredValues.push_back(Values[j]);
-            }
-          }
+        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
+        auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
+        auto lclFullRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
+        auto lclFullColInd = FullCrsMatrix_->getLocalIndicesDevice();
+        auto lclFullValues = FullCrsMatrix_->getLocalValuesDevice(Tpetra::Access::ReadOnly);
 
-          // Insert filtered values into the matrix
-          if (!filteredIndices.empty()) {
-            ReducedMatrix()->replaceGlobalValues(curGRID, filteredIndices(), filteredValues());
-          }
-        }
+
+        // launch functor
+        functor_type functor(lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                             lclFullRowPtr, lclFullColInd, lclFullValues,
+                             lclReducedRowPtr, lclReducedColInd, lclReducedValues);
+        Kokkos::parallel_for(
+          "CrsSingletonFilter_LinearProblem:ConstructReducedProblem", range_policy(0, localNumRows),
+          functor);
       }
     }
 
