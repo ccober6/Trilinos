@@ -21,7 +21,7 @@ namespace Tpetra {
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-    CrsSingletonFilter_LinearProblem(bool verbose, bool run_on_host)
+    CrsSingletonFilter_LinearProblem(bool run_on_host, bool verbose)
   : globalNumSingletonRows_(Teuchos::as<local_ordinal_type>(0))
   , globalNumSingletonCols_(Teuchos::as<local_ordinal_type>(0))
   , RatioOfDimensions_(0.0)
@@ -31,8 +31,8 @@ CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   , SymmetricElimination_(true)
   , localMaxNumRowEntries_(Teuchos::as<local_ordinal_type>(0))
   , FullMatrixIsCrsMatrix_(false)
-  , verbose_(verbose)
-  , run_on_host_(run_on_host) {
+  , run_on_host_(run_on_host)
+  , verbose_(verbose) {
 }
 
 //==============================================================================
@@ -561,10 +561,6 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     Full2ReducedLHSImporter_ = Teuchos::rcp(new import_type(FullMatrixDomainMap(), ReducedMatrixDomainMap()));
     Full2ReducedRHSImporter_ = Teuchos::rcp(new import_type(FullRHS->getMap(), ReducedMatrixRowMap()));
 
-    // Construct Reduced Matrix
-    LocalOrdinal maxNumEntries = FullCrsMatrix()->getLocalMaxNumRowEntries();
-    ReducedMatrix_             = Teuchos::rcp(new crs_matrix_type(ReducedMatrixRowMap(), ReducedMatrixColMap(), maxNumEntries));
-
     // Create storage for temporary X values due to explicit elimination of rows
     tempExportX_ = Teuchos::rcp(new multivector_type(FullMatrixColMap(), NumVectors));
 
@@ -577,6 +573,10 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     // Check if ColSingletonPivotLIDs_, ColSingletonPivot_ can be accessed on host
     bool canRunOnHost = std::is_same_v<typename device_type::memory_space, Kokkos::HostSpace>;
     if (run_on_host_ && canRunOnHost) {
+      // Construct Reduced Matrix
+      LocalOrdinal maxNumEntries = FullCrsMatrix()->getLocalMaxNumRowEntries();
+      ReducedMatrix_             = Teuchos::rcp(new crs_matrix_type(ReducedMatrixRowMap(), ReducedMatrixColMap(), maxNumEntries));
+
       for (LocalOrdinal i = 0; i < localNumRows; i++) {
         GlobalOrdinal curGRID = FullMatrixRowMap()->getGlobalElement(i);
         if (ReducedMatrixRowMap()->isNodeGlobalElement(curGRID)) {  // Check if this row should go into reduced matrix
@@ -638,51 +638,85 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       // The ReducedMatrix has the row and column indices already removed so cannot "insert" them.
       // Need to filter them to only insert remaining.
       // Filter indices and values
+
+      // Construct the reduced matrix
       // * Only the maps have been setup, and hence the rowptr, colind, nzvals need to be still allocated.
-      {
-
-        for (LocalOrdinal i = 0; i < localNumRows; i++) {
-          GlobalOrdinal curGRID = FullMatrixRowMap()->getGlobalElement(i);
-          if (ReducedMatrixRowMap()->isNodeGlobalElement(curGRID)) {  // Check if this row should go into reduced matrix
-            GetRowGCIDs(i, NumEntries, Values, Indices);              // Get current row (Indices are global)
-
-           Teuchos::Array<GlobalOrdinal> filteredIndices;
-            Teuchos::Array<Scalar> filteredValues;
-
-            for (typename Teuchos::Array<GlobalOrdinal>::size_type j = 0; j < Indices.size(); ++j) {
-              if (ReducedMatrixColMap()->isNodeGlobalElement(Indices[j])) {
-                filteredIndices.push_back(Indices[j]);
-                filteredValues.push_back(Values[j]);
-              }
-            }
-
-            // Insert filtered values into the matrix
-            if (!filteredIndices.empty()) {
-              ReducedMatrix()->insertGlobalValues(curGRID, filteredIndices(), filteredValues());
-            }
-          }
-        }
-      }
-      // Now convert to local indexing.  We have constructed things so that the domain and range of the
-      // matrix will have the same map.  If the reduced matrix domain and range maps were not the same, the
-      // differences were addressed in the ConstructRedistributeExporter() method
-      ReducedMatrix()->fillComplete(ReducedMatrixDomainMap(), ReducedMatrixRangeMap());
-
       {
         using execution_space = typename vector_type_int::execution_space;
         using error_code_type = typename Kokkos::View<int*, execution_space>;
-        using functor_type = SolveSingletonProblemFunctor<local_map_type, local_ptr_view_type, local_ind_view_type, const_local_val_view_type,
+
+        using graph_type =  typename local_matrix_type::StaticCrsGraphType;
+        using row_map_type = typename graph_type::row_map_type::non_const_type;
+        using entries_type = typename graph_type::entries_type::non_const_type;
+        using values_type  = typename local_matrix_type::values_type;
+        using functor_type = ConstructReducedProblemFunctor<local_map_type, local_matrix_type, row_map_type, entries_type, values_type>;
+
+        size_t nnzA = 1;
+        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
+        auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
+        auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
+
+        auto lclFullMatrix = FullCrsMatrix_->getLocalMatrixDevice();
+
+        LocalOrdinal localNumReducedRows = ReducedMatrixRowMap()->getLocalNumElements();
+        row_map_type rowmap_view("rowmap_view", localNumReducedRows + 1);
+        entries_type column_view("colind_view", nnzA);
+        values_type  values_view("values_view", nnzA);
+
+        // launch functor to count nnz per row
+        {
+          using range_count_policy = Kokkos::RangePolicy<execution_space, typename functor_type::CountTag>;
+          Kokkos::deep_copy(rowmap_view, 0);
+
+          functor_type functor(lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                               lclFullMatrix, rowmap_view, column_view, values_view);
+          Kokkos::parallel_reduce(
+            "CrsSingletonFilter_LinearProblem:CountReducedProblem", range_count_policy(0, localNumRows),
+            functor, nnzA);
+        }
+
+        // convert to rowptrs
+        KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>(1 + localNumReducedRows, rowmap_view);
+
+        // insert non-zero entries
+        {
+          using range_insert_policy = Kokkos::RangePolicy<execution_space, typename functor_type::InsertTag>;
+          Kokkos::resize(column_view, nnzA);
+          Kokkos::resize(values_view, nnzA);
+
+          // functor with new view sizes
+          functor_type functor(lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                               lclFullMatrix, rowmap_view, column_view, values_view);
+          Kokkos::parallel_for(
+            "CrsSingletonFilter_LinearProblem:InsertReducedProblem", range_insert_policy(0, localNumRows),
+            functor);
+        }
+
+        // construct local crsmatrix
+        graph_type static_graph(column_view, rowmap_view);
+        local_matrix_type crsmat("CrsMatrix", localNumReducedRows, values_view, static_graph);
+
+        // Construct Reduced Matrix with localmatrix + rowmap, colmap, domainmap, & rangemap
+        // We have constructed things so that the domain and range of the
+        // matrix will have the same map.  If the reduced matrix domain and range maps were not the same, the
+        // differences were addressed in the ConstructRedistributeExporter() method
+        ReducedMatrix_ = Teuchos::rcp(new crs_matrix_type(crsmat, ReducedMatrixRowMap(), ReducedMatrixColMap(), ReducedMatrixDomainMap(), ReducedMatrixRangeMap()));
+      }
+
+      // Solve with singleton part
+      {
+        using execution_space = typename vector_type_int::execution_space;
+        using error_code_type = typename Kokkos::View<int*, execution_space>;
+        using functor_type = SolveSingletonProblemFunctor<local_map_type, local_matrix_type,
                                                           local_multivector_type, const_local_multivector_type,
                                                           vector_view_type_int, vector_view_type_scalar, error_code_type>;
         using range_policy = Kokkos::RangePolicy<execution_space>;
 
-        auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
-
         auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
-        auto lclFullRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
-        auto lclFullColInd = FullCrsMatrix_->getLocalIndicesDevice();
-        auto lclFullValues = FullCrsMatrix_->getLocalValuesDevice(Tpetra::Access::ReadOnly);
+        auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
+
+        auto lclFullMatrix = FullCrsMatrix_->getLocalMatrixDevice();
 
         auto localExportX = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
         auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
@@ -693,7 +727,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         // launch functor
         functor_type functor(NumVectors, localNumSingletonCols_, error_code,
                              lclFullColMap, lclFullRowMap, lclReducedRowMap,
-                             lclFullRowPtr, lclFullColInd, lclFullValues, localExportX, localRHS,
+                             lclFullMatrix, localExportX, localRHS,
                              ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);
         Kokkos::parallel_for(
           "CrsSingletonFilter_LinearProblem:SolveSingletonProblem", range_policy(0, localNumRows),
@@ -846,18 +880,15 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       {
         using execution_space = typename vector_type_int::execution_space;
         using error_code_type = typename Kokkos::View<int*, execution_space>;
-        using functor_type = SolveSingletonProblemFunctor<local_map_type, local_ptr_view_type, local_ind_view_type, const_local_val_view_type,
-                                                          local_multivector_type, const_local_multivector_type,
+        using functor_type = SolveSingletonProblemFunctor<local_map_type, local_matrix_type, local_multivector_type, const_local_multivector_type,
                                                           vector_view_type_int, vector_view_type_scalar, error_code_type>;
         using range_policy = Kokkos::RangePolicy<execution_space>;
 
-        auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
-
         auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
-        auto lclFullRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
-        auto lclFullColInd = FullCrsMatrix_->getLocalIndicesDevice();
-        auto lclFullValues = FullCrsMatrix_->getLocalValuesDevice(Tpetra::Access::ReadOnly);
+        auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
+
+        auto lclFullMatrix = FullCrsMatrix_->getLocalMatrixDevice();
 
         auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
         auto localExportX = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
@@ -867,7 +898,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 
         functor_type functor(NumVectors, localNumSingletonCols_, error_code,
                              lclFullColMap, lclFullRowMap, lclReducedRowMap,
-                             lclFullRowPtr, lclFullColInd, lclFullValues, localExportX, localRHS,
+                             lclFullMatrix, localExportX, localRHS,
                              ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);
         Kokkos::parallel_reduce(
           "CrsSingletonFilter_LinearProblem:SolveSingletonProblem", range_policy(0, localNumRows),
@@ -884,28 +915,21 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       {
         using execution_space = typename vector_type_int::execution_space;
         using error_code_type = typename Kokkos::View<int*, execution_space>;
-        using functor_type = ConstructReducedProblemFunctor<local_map_type, local_ptr_view_type, local_ind_view_type,
-                                                            const_local_val_view_type, local_val_view_type>;
+        using functor_type = UpdateReducedProblemFunctor<local_map_type, local_matrix_type>;
         using range_policy = Kokkos::RangePolicy<execution_space>;
-
-        auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
-        auto lclReducedRowPtr = ReducedMatrix_->getLocalRowPtrsDevice();
-        auto lclReducedColInd = ReducedMatrix_->getLocalIndicesDevice();
-        auto lclReducedValues = ReducedMatrix_->getLocalValuesDevice(Tpetra::Access::ReadWrite);
 
         auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
-        auto lclFullRowPtr = FullCrsMatrix_->getLocalRowPtrsDevice();
-        auto lclFullColInd = FullCrsMatrix_->getLocalIndicesDevice();
-        auto lclFullValues = FullCrsMatrix_->getLocalValuesDevice(Tpetra::Access::ReadOnly);
+        auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
 
+        auto lclReducedMatrix = ReducedMatrix_->getLocalMatrixDevice();
+        auto lclFullMatrix = FullCrsMatrix_->getLocalMatrixDevice();
 
         // launch functor
         functor_type functor(lclFullColMap, lclFullRowMap, lclReducedRowMap,
-                             lclFullRowPtr, lclFullColInd, lclFullValues,
-                             lclReducedRowPtr, lclReducedColInd, lclReducedValues);
+                             lclFullMatrix, lclReducedMatrix);
         Kokkos::parallel_for(
-          "CrsSingletonFilter_LinearProblem:ConstructReducedProblem", range_policy(0, localNumRows),
+          "CrsSingletonFilter_LinearProblem:UpdateReducedProblem", range_policy(0, localNumRows),
           functor);
       }
     }

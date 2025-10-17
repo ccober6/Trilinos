@@ -146,6 +146,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
 
   using local_map_type = typename map_type::local_map_type;
 
+  using local_matrix_type = typename crs_matrix_type::local_matrix_device_type;
   using local_ptr_view_type = typename crs_matrix_type::row_ptrs_device_view_type;
   using local_ind_view_type = typename crs_matrix_type::local_inds_device_view_type;
   using local_val_view_type = typename crs_matrix_type::local_matrix_device_type::values_type;
@@ -161,7 +162,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
 
   //@{ \name Constructors/Destructor.
   /// \brief Constructor.
-  CrsSingletonFilter_LinearProblem(bool verbose = false, bool run_on_host = false);
+  CrsSingletonFilter_LinearProblem(bool run_on_host = false, bool verbose = false);
 
   /// \brief Destructor
   virtual ~CrsSingletonFilter_LinearProblem() = default;
@@ -389,233 +390,321 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
 
  public:
 
- template<class LocalLO_type, class ColIDView_type, class MapColor_type>
- struct CreatePostSolveArraysFunctor
- {
-   LocalLO_type   LocalRowIDofSingletonColData;
-   ColIDView_type ColSingletonRowLIDs;
-   ColIDView_type ColSingletonColLIDs;
+  // Functor to create post-solve arrays
+  template<class LocalLO_type, class ColIDView_type, class MapColor_type>
+  struct CreatePostSolveArraysFunctor
+  {
+    LocalLO_type   LocalRowIDofSingletonColData;
+    ColIDView_type ColSingletonRowLIDs;
+    ColIDView_type ColSingletonColLIDs;
 
-   LocalLO_type  NewColProfilesData;
-   LocalLO_type  ColProfilesData;
-   LocalLO_type  ColHasRowWithSingletonData;
-   MapColor_type ColMapColors_Data;
-   MapColor_type RowMapColors_Data;
+    LocalLO_type  NewColProfilesData;
+    LocalLO_type  ColProfilesData;
+    LocalLO_type  ColHasRowWithSingletonData;
+    MapColor_type ColMapColors_Data;
+    MapColor_type RowMapColors_Data;
 
-   CreatePostSolveArraysFunctor(LocalLO_type localRowIDofSingletonColData,
-                                ColIDView_type colSingletonRowLIDs, ColIDView_type colSingletonColLIDs,
-                                LocalLO_type  newColProfilesData, LocalLO_type colProfilesData, LocalLO_type colHasRowWithSingletonData,
-                                MapColor_type colMapColors_Data, MapColor_type rowMapColors_Data) :
-   LocalRowIDofSingletonColData(localRowIDofSingletonColData),
-   ColSingletonRowLIDs(colSingletonRowLIDs), ColSingletonColLIDs(colSingletonColLIDs),
-   NewColProfilesData(newColProfilesData), ColProfilesData(colProfilesData),
-   ColHasRowWithSingletonData(colHasRowWithSingletonData),
-   ColMapColors_Data(colMapColors_Data), RowMapColors_Data(rowMapColors_Data)
-   {}
+    CreatePostSolveArraysFunctor(LocalLO_type localRowIDofSingletonColData,
+                                 ColIDView_type colSingletonRowLIDs, ColIDView_type colSingletonColLIDs,
+                                 LocalLO_type  newColProfilesData, LocalLO_type colProfilesData, LocalLO_type colHasRowWithSingletonData,
+                                 MapColor_type colMapColors_Data, MapColor_type rowMapColors_Data) :
+    LocalRowIDofSingletonColData(localRowIDofSingletonColData),
+    ColSingletonRowLIDs(colSingletonRowLIDs), ColSingletonColLIDs(colSingletonColLIDs),
+    NewColProfilesData(newColProfilesData), ColProfilesData(colProfilesData),
+    ColHasRowWithSingletonData(colHasRowWithSingletonData),
+    ColMapColors_Data(colMapColors_Data), RowMapColors_Data(rowMapColors_Data)
+    {}
 
-   KOKKOS_INLINE_FUNCTION
-   void operator()(const size_t j, local_ordinal_type &lclNumSingletonCols) const {
-     int i = LocalRowIDofSingletonColData(j, 0);
-     if (ColProfilesData(j, 0) == 1 && RowMapColors_Data(i, 0) != 1) {
-       // These will be sorted by rowLIDs, so no need to be in any particular order
-       ColSingletonRowLIDs(lclNumSingletonCols) = i;
-       ColSingletonColLIDs(lclNumSingletonCols) = j;
-       lclNumSingletonCols ++;
-     }
-     // Also check for columns that were eliminated implicitly by
-     // having all associated row eliminated
-     else if (NewColProfilesData(j, 0) == 0 && ColHasRowWithSingletonData(j, 0) != 1 && RowMapColors_Data(i, 0) == 0) {
-       ColMapColors_Data(j, 0) = 1;
-     }
-   }
- };
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const size_t j, local_ordinal_type &lclNumSingletonCols) const {
+      int i = LocalRowIDofSingletonColData(j, 0);
+      if (ColProfilesData(j, 0) == 1 && RowMapColors_Data(i, 0) != 1) {
+        // These will be sorted by rowLIDs, so no need to be in any particular order
+        ColSingletonRowLIDs(lclNumSingletonCols) = i;
+        ColSingletonColLIDs(lclNumSingletonCols) = j;
+        lclNumSingletonCols ++;
+      }
+      // Also check for columns that were eliminated implicitly by
+      // having all associated row eliminated
+      else if (NewColProfilesData(j, 0) == 0 && ColHasRowWithSingletonData(j, 0) != 1 && RowMapColors_Data(i, 0) == 0) {
+        ColMapColors_Data(j, 0) = 1;
+      }
+    }
+  };
 
- template<class Map_type, class LocalPtr_type, class LocalInd_type, class LocalVal_type, class NonConstLocalVal_type>
- struct ConstructReducedProblemFunctor {
 
-   Map_type lclFullColMap;
-   Map_type lclFullRowMap;
-   Map_type lclReducedRowMap;
+  // Functors to construct or update reduced problem
+  template<class Map_type, class LocalMatrix_type, class row_map_type, class entries_type, class values_type>
+  struct ConstructReducedProblemFunctor {
 
-   LocalPtr_type lclFullRowPtr;
-   LocalInd_type lclFullColInd;
-   LocalVal_type lclFullValues;
+    Map_type lclFullColMap;
+    Map_type lclFullRowMap;
+    Map_type lclReducedRowMap;
 
-   LocalPtr_type lclReducedRowPtr;
-   LocalInd_type lclReducedColInd;
-   NonConstLocalVal_type lclReducedValues;
+    LocalMatrix_type lclFullMatrix;
 
-   // Constructor
-   ConstructReducedProblemFunctor(Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
-                                  LocalPtr_type lclFullRowPtr_, LocalInd_type lclFullColInd_, LocalVal_type lclFullValues_,
-                                  LocalPtr_type lclReducedRowPtr_, LocalInd_type lclReducedColInd_, NonConstLocalVal_type lclReducedValues_) :
-   lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_),
-   lclFullRowPtr(lclFullRowPtr_), lclFullColInd(lclFullColInd_), lclFullValues(lclFullValues_),
-   lclReducedRowPtr(lclReducedRowPtr_), lclReducedColInd(lclReducedColInd_), lclReducedValues(lclReducedValues_)
-   {}
+    row_map_type lclReducedRowPtr;
+    entries_type lclReducedColInd;
+    values_type  lclReducedValues;
 
-   KOKKOS_INLINE_FUNCTION
-   void operator()(const local_ordinal_type i) const {
-     const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
-     GlobalOrdinal glbRowID = lclFullRowMap.getGlobalElement(i);
-     LocalOrdinal  lclRowID = lclReducedRowMap.getLocalElement(glbRowID);
+    // Constructor
+    ConstructReducedProblemFunctor(Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_, LocalMatrix_type lclFullMatrix_,
+                                   row_map_type lclReducedRowPtr_, entries_type lclReducedColInd_, values_type lclReducedValues_) :
+    lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_), lclFullMatrix(lclFullMatrix_),
+    lclReducedRowPtr(lclReducedRowPtr_), lclReducedColInd(lclReducedColInd_), lclReducedValues(lclReducedValues_)
+    {}
 
-     if (lclRowID != INVALID) {
-       for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
-         GlobalOrdinal glbColID = lclFullColMap.getGlobalElement(lclFullColInd[j]);
-         LocalOrdinal  lclColID = lclReducedRowMap.getLocalElement(glbColID);
-         if (lclRowID != INVALID) {
-           for (size_t k = lclReducedRowPtr(lclRowID); k < lclReducedRowPtr(lclRowID+1); k++) {
-             if (lclReducedColInd[k] == lclColID) {
-               lclReducedValues[k] = lclFullValues[j];
-             }
-           }
-         }
-       }
-     }
-   }
- };
+    // Tags
+    struct CountTag {};
+    struct InsertTag {};
 
- // Functor to solve singleton problem
- template<class Map_type, class LocalPtr_type, class LocalInd_type, class LocalVal_type, class LocalX_type, class LocalB_type,
-          class View_type_int, class View_type_scalar, class Err_type>
- struct SolveSingletonProblemFunctor {
+    // Functor to count nonzero entries
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const CountTag &, const local_ordinal_type i, size_t &nnz) const {
+      const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
 
-   local_ordinal_type NumVectors;
-   local_ordinal_type localNumSingletonCols;
+      auto lclFullRowPtr = lclFullMatrix.graph.row_map;
+      auto lclFullColInd = lclFullMatrix.graph.entries;
+      auto lclFullValues = lclFullMatrix.values;
 
-   Err_type error_code;
-   Map_type lclFullColMap;
-   Map_type lclFullRowMap;
-   Map_type lclReducedRowMap;
+      GlobalOrdinal glbRowID = lclFullRowMap.getGlobalElement(i);
+      LocalOrdinal  lclRowID = lclReducedRowMap.getLocalElement(glbRowID);
 
-   LocalPtr_type lclFullRowPtr;
-   LocalInd_type lclFullColInd;
-   LocalVal_type lclFullValues;
+      if (lclRowID != INVALID) {
+        for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
+          GlobalOrdinal glbColID = lclFullColMap.getGlobalElement(lclFullColInd[j]);
+          LocalOrdinal  lclColID = lclReducedRowMap.getLocalElement(glbColID);
+          if (lclColID != INVALID) {
+            lclReducedRowPtr(1+lclRowID) += 1;
+          }
+        }
+      }
+      nnz += lclReducedRowPtr(1+lclRowID);;
+    }
 
-   LocalX_type localExportX;
-   LocalB_type localRHS;
+    // Functor to insert nonzero entries
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const InsertTag &, const local_ordinal_type i) const {
+      const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
 
-   View_type_int ColSingletonColLIDs;
-   View_type_int ColSingletonRowLIDs;
-   View_type_int ColSingletonPivotLIDs;
-   View_type_scalar ColSingletonPivots;
+      auto lclFullRowPtr = lclFullMatrix.graph.row_map;
+      auto lclFullColInd = lclFullMatrix.graph.entries;
+      auto lclFullValues = lclFullMatrix.values;
 
-   // Constructor
-   SolveSingletonProblemFunctor(local_ordinal_type NumVectors_, local_ordinal_type localNumSingletonCols_, Err_type error_code_,
-                                Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
-                                LocalPtr_type lclFullRowPtr_, LocalInd_type lclFullColInd_, LocalVal_type lclFullValues_,
-                                LocalX_type localExportX_, LocalB_type localRHS_,
-                                View_type_int colSingletonColLIDs_, View_type_int colSingletonRowLIDs_,
-                                View_type_int colSingletonPivotLIDs_, View_type_scalar colSingletonPivots_) :
-   NumVectors(NumVectors_), localNumSingletonCols(localNumSingletonCols_), error_code(error_code_),
-   lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_),
-   lclFullRowPtr(lclFullRowPtr_), lclFullColInd(lclFullColInd_), lclFullValues(lclFullValues_),
-   localExportX(localExportX_), localRHS(localRHS_),
-   ColSingletonColLIDs(colSingletonColLIDs_), ColSingletonRowLIDs(colSingletonRowLIDs_),
-   ColSingletonPivotLIDs(colSingletonPivotLIDs_), ColSingletonPivots(colSingletonPivots_)
-   {}
+      GlobalOrdinal glbRowID = lclFullRowMap.getGlobalElement(i);
+      LocalOrdinal  lclRowID = lclReducedRowMap.getLocalElement(glbRowID);
 
-   // Functor used in ConstructReducedProblem with parallel-for
-   KOKKOS_INLINE_FUNCTION
-   void operator()(const local_ordinal_type i) const {
-     const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
-     GlobalOrdinal glbID = lclFullRowMap.getGlobalElement(i);
-     LocalOrdinal  lclID = lclReducedRowMap.getLocalElement(glbID);
+      if (lclRowID != INVALID) {
+        size_t k = lclReducedRowPtr(lclRowID);
+        for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
+          GlobalOrdinal glbColID = lclFullColMap.getGlobalElement(lclFullColInd[j]);
+          LocalOrdinal  lclColID = lclReducedRowMap.getLocalElement(glbColID);
+          if (lclColID != INVALID) {
+            lclReducedColInd[k] = lclColID;
+            lclReducedValues[k] = lclFullValues[j];
+            k++;
+          }
+        }
+      }
+    }
+  };
 
-     if (lclID == INVALID) {
-       if (lclFullRowPtr(i+1) == lclFullRowPtr(i)+1) {
-         // Singleton row
-         LocalOrdinal indX = lclFullColInd(lclFullRowPtr(i));
-         Scalar pivot = lclFullValues(lclFullRowPtr(i));
-         if (pivot == 0.0) {
-           Kokkos::atomic_exchange(&error_code(0), 1);
-         } else {
-           for (LocalOrdinal j = 0; j < NumVectors; j++) {
-             localExportX(indX, j) = localRHS(i, j) / pivot;
-           }
-         }
-       } else {
-         // Not singleton row, but need to be removed == Singleton column
-         //  look for matching row ID
-         int myNum = -1;
-         for (local_ordinal_type j = 0; j < localNumSingletonCols; j++) {
-           if (ColSingletonRowLIDs[j] == i) {
-             myNum = j;
-           }
-         }
-         if (myNum == -1) {
-           Kokkos::atomic_exchange(&error_code(0), 3);
-         } else {
-           //  look for matching col ID
-           LocalOrdinal targetCol = ColSingletonColLIDs[myNum];
-           for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
-             if (lclFullColMap.getGlobalElement(lclFullColInd[j]) == targetCol) {
-               Scalar pivot = lclFullValues[j];
-               if (pivot == 0.0) {
-                 Kokkos::atomic_exchange(&error_code(0), 2);
-               } else {
-                 ColSingletonPivotLIDs[myNum] = j;
-                 ColSingletonPivots[myNum]    = pivot;
-               }
-               break;
-             }
-           }
-         }
-       }
-     }
-   }
+  template<class Map_type, class LocalMatrix_type>
+  struct UpdateReducedProblemFunctor {
 
-   // Functor used in UpdateReducedProblem with parallel-reduce
-   KOKKOS_INLINE_FUNCTION
-   void operator()(const local_ordinal_type i, local_ordinal_type &lclNumSingletonCols) const {
-    const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
-     GlobalOrdinal glbID = lclFullRowMap.getGlobalElement(i);
-     LocalOrdinal  lclID = lclReducedRowMap.getLocalElement(glbID);
+    Map_type lclFullColMap;
+    Map_type lclFullRowMap;
+    Map_type lclReducedRowMap;
 
-     if (lclID == INVALID) {
-       if (lclFullRowPtr(i+1) == lclFullRowPtr(i)+1) {
-         // Singleton row
-         LocalOrdinal indX = lclFullColInd(lclFullRowPtr(i));
-         Scalar pivot = lclFullValues(lclFullRowPtr(i));
-         if (pivot == 0.0) {
-           Kokkos::atomic_exchange(&error_code(0), 1);
-         } else {
-           for (LocalOrdinal j = 0; j < NumVectors; j++) {
-             localExportX(indX, j) = localRHS(i, j) / pivot;
-           }
-         }
-       } else {
-         // Not singleton row, but need to be removed == Singleton column
-         //  look for matching row ID
-         int myNum = -1;
-         for (local_ordinal_type j = 0; j < localNumSingletonCols; j++) {
-           if (ColSingletonRowLIDs[j] == i) {
-             myNum =j;
-           }
-         }
-         if (myNum == -1) {
-           Kokkos::atomic_exchange(&error_code(0), 3);
-         } else {
-           //  look for matching col ID
-           LocalOrdinal targetCol = ColSingletonColLIDs[myNum];
-           for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
-             if (lclFullColMap.getGlobalElement(lclFullColInd[j]) == targetCol) {
-               Scalar pivot = lclFullValues[j];
-               if (pivot == 0.0) {
-                 Kokkos::atomic_exchange(&error_code(0), 2);
-               } else {
-                 ColSingletonPivots[myNum] = pivot;
-               }
-               break;
-             }
-           }
-           lclNumSingletonCols++;
-         }
-       }
-     }
-   }
- };
+    LocalMatrix_type lclFullMatrix;
+    LocalMatrix_type lclReducedMatrix;
+
+    // Constructor
+    UpdateReducedProblemFunctor(Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
+                                LocalMatrix_type lclFullMatrix_, LocalMatrix_type lclReducedMatrix_) :
+    lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_),
+    lclFullMatrix(lclFullMatrix_), lclReducedMatrix(lclReducedMatrix_)
+    {}
+
+    // Functor to update nonzero entries
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const local_ordinal_type i) const {
+      const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
+
+      auto lclFullRowPtr = lclFullMatrix.graph.row_map;
+      auto lclFullColInd = lclFullMatrix.graph.entries;
+      auto lclFullValues = lclFullMatrix.values;
+
+      auto lclReducedRowPtr = lclReducedMatrix.graph.row_map;
+      auto lclReducedColInd = lclReducedMatrix.graph.entries;
+      auto lclReducedValues = lclReducedMatrix.values;
+
+      GlobalOrdinal glbRowID = lclFullRowMap.getGlobalElement(i);
+      LocalOrdinal  lclRowID = lclReducedRowMap.getLocalElement(glbRowID);
+
+      if (lclRowID != INVALID) {
+        for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
+          GlobalOrdinal glbColID = lclFullColMap.getGlobalElement(lclFullColInd(j));
+          LocalOrdinal  lclColID = lclReducedRowMap.getLocalElement(glbColID);
+          if (lclColID != INVALID) {
+            for (size_t k = lclReducedRowPtr(lclRowID); k < lclReducedRowPtr(lclRowID+1); k++) {
+              if (lclReducedColInd[k] == lclColID) {
+                lclReducedValues[k] = lclFullValues[j];
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+
+  // Functor to solve singleton problem
+  template<class Map_type, class LocalMatrix_type, class LocalX_type, class LocalB_type,
+           class View_type_int, class View_type_scalar, class Err_type>
+  struct SolveSingletonProblemFunctor {
+
+    local_ordinal_type NumVectors;
+    local_ordinal_type localNumSingletonCols;
+
+    Err_type error_code;
+    Map_type lclFullColMap;
+    Map_type lclFullRowMap;
+    Map_type lclReducedRowMap;
+
+    LocalMatrix_type lclFullMatrix;
+
+    LocalX_type localExportX;
+    LocalB_type localRHS;
+
+    View_type_int ColSingletonColLIDs;
+    View_type_int ColSingletonRowLIDs;
+    View_type_int ColSingletonPivotLIDs;
+    View_type_scalar ColSingletonPivots;
+
+    // Constructor
+    SolveSingletonProblemFunctor(local_ordinal_type NumVectors_, local_ordinal_type localNumSingletonCols_, Err_type error_code_,
+                                 Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
+                                 LocalMatrix_type lclFullMatrix_, LocalX_type localExportX_, LocalB_type localRHS_,
+                                 View_type_int colSingletonColLIDs_, View_type_int colSingletonRowLIDs_,
+                                 View_type_int colSingletonPivotLIDs_, View_type_scalar colSingletonPivots_) :
+    NumVectors(NumVectors_), localNumSingletonCols(localNumSingletonCols_), error_code(error_code_),
+    lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_),
+    lclFullMatrix(lclFullMatrix_), localExportX(localExportX_), localRHS(localRHS_),
+    ColSingletonColLIDs(colSingletonColLIDs_), ColSingletonRowLIDs(colSingletonRowLIDs_),
+    ColSingletonPivotLIDs(colSingletonPivotLIDs_), ColSingletonPivots(colSingletonPivots_)
+    {}
+
+    // Functor used in ConstructReducedProblem with parallel-for
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const local_ordinal_type i) const {
+      const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
+
+      auto lclFullRowPtr = lclFullMatrix.graph.row_map;
+      auto lclFullColInd = lclFullMatrix.graph.entries;
+      auto lclFullValues = lclFullMatrix.values;
+
+      GlobalOrdinal glbID = lclFullRowMap.getGlobalElement(i);
+      LocalOrdinal  lclID = lclReducedRowMap.getLocalElement(glbID);
+
+      if (lclID == INVALID) {
+        if (lclFullRowPtr(i+1) == lclFullRowPtr(i)+1) {
+          // Singleton row
+          LocalOrdinal indX = lclFullColInd(lclFullRowPtr(i));
+          Scalar pivot = lclFullValues(lclFullRowPtr(i));
+          if (pivot == 0.0) {
+            Kokkos::atomic_exchange(&error_code(0), 1);
+          } else {
+            for (LocalOrdinal j = 0; j < NumVectors; j++) {
+              localExportX(indX, j) = localRHS(i, j) / pivot;
+            }
+          }
+        } else {
+          // Not singleton row, but need to be removed == Singleton column
+          //  look for matching row ID
+          int myNum = -1;
+          for (local_ordinal_type j = 0; j < localNumSingletonCols; j++) {
+            if (ColSingletonRowLIDs[j] == i) {
+              myNum = j;
+            }
+          }
+          if (myNum == -1) {
+            Kokkos::atomic_exchange(&error_code(0), 3);
+          } else {
+            //  look for matching col ID
+            LocalOrdinal targetCol = ColSingletonColLIDs[myNum];
+            for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
+              if (lclFullColMap.getGlobalElement(lclFullColInd[j]) == targetCol) {
+                Scalar pivot = lclFullValues[j];
+                if (pivot == 0.0) {
+                  Kokkos::atomic_exchange(&error_code(0), 2);
+                } else {
+                  ColSingletonPivotLIDs[myNum] = j;
+                  ColSingletonPivots[myNum]    = pivot;
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Functor used in UpdateReducedProblem with parallel-reduce
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const local_ordinal_type i, local_ordinal_type &lclNumSingletonCols) const {
+      const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
+
+      auto lclFullRowPtr = lclFullMatrix.graph.row_map;
+      auto lclFullColInd = lclFullMatrix.graph.entries;
+      auto lclFullValues = lclFullMatrix.values;
+
+      GlobalOrdinal glbID = lclFullRowMap.getGlobalElement(i);
+      LocalOrdinal  lclID = lclReducedRowMap.getLocalElement(glbID);
+
+      if (lclID == INVALID) {
+        if (lclFullRowPtr(i+1) == lclFullRowPtr(i)+1) {
+          // Singleton row
+          LocalOrdinal indX = lclFullColInd(lclFullRowPtr(i));
+          Scalar pivot = lclFullValues(lclFullRowPtr(i));
+          if (pivot == 0.0) {
+            Kokkos::atomic_exchange(&error_code(0), 1);
+          } else {
+            for (LocalOrdinal j = 0; j < NumVectors; j++) {
+              localExportX(indX, j) = localRHS(i, j) / pivot;
+            }
+          }
+        } else {
+          // Not singleton row, but need to be removed == Singleton column
+          //  look for matching row ID
+          int myNum = -1;
+          for (local_ordinal_type j = 0; j < localNumSingletonCols; j++) {
+            if (ColSingletonRowLIDs[j] == i) {
+              myNum =j;
+            }
+          }
+          if (myNum == -1) {
+            Kokkos::atomic_exchange(&error_code(0), 3);
+          } else {
+            //  look for matching col ID
+            LocalOrdinal targetCol = ColSingletonColLIDs[myNum];
+            for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
+              if (lclFullColMap.getGlobalElement(lclFullColInd[j]) == targetCol) {
+                Scalar pivot = lclFullValues[j];
+                if (pivot == 0.0) {
+                  Kokkos::atomic_exchange(&error_code(0), 2);
+                } else {
+                  ColSingletonPivots[myNum] = pivot;
+                }
+                break;
+              }
+            }
+            lclNumSingletonCols++;
+          }
+        }
+      }
+    }
+  };
 
 };
 

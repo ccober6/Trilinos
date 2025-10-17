@@ -666,7 +666,7 @@ Teuchos::RCP<Tpetra::MultiVector<Scalar, LO, GO, Node>> createMultiVector() {
     bool run_on_host = false;
     RCP<MultiVector_t> x = rcp(new MultiVector_t(A_Original_Map, LHS_Original->getNumVectors() ));
     RCP<LinearProblem_t> preSingletonProblem = rcp(new LinearProblem_t( A_Original, x, RHS_Original ));
-    CrsSingletonFiltering_t SingletonTransform(verbose, run_on_host);
+    CrsSingletonFiltering_t SingletonTransform(run_on_host, verbose);
     RCP<LinearProblem_t> postSingletonProblem = SingletonTransform( preSingletonProblem );
 
     SingletonTransform.fwd();
