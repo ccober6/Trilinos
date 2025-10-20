@@ -128,6 +128,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   using vector_type_LO      = Tpetra::Vector<LocalOrdinal, LocalOrdinal, GlobalOrdinal, Node>;
   using linear_problem_type = Tpetra::LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
   using import_type         = Tpetra::Import<LocalOrdinal, GlobalOrdinal, Node>;
+  using export_type         = Tpetra::Export<LocalOrdinal, GlobalOrdinal, Node>;
 
   using scalar_type         = Tpetra::Vector<>::scalar_type;
   using local_ordinal_type  = Tpetra::Vector<>::local_ordinal_type;
@@ -305,9 +306,9 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
                              vector_type_LO NewColProfiles,
                              vector_type_LO ColHasRowWithSingleton);
 
-  // int ConstructRedistributeExporter(Epetra_Map * SourceMap, Epetra_Map * TargetMap,
-  //                                   Epetra_Export * & RedistributeExporter,
-  //                                   Epetra_Map * & RedistributeMap);
+  void ConstructRedistributeExporter(Teuchos::RCP<const map_type> SourceMap, Teuchos::RCP<const map_type> TargetMap,
+                                     Teuchos::RCP<export_type> & RedistributeExporter,
+                                     Teuchos::RCP<const map_type> & RedistributeMap);
 
   Teuchos::RCP<const map_type> GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
                                                   const Teuchos::RCP<vector_type_int>& mapColors,
@@ -328,7 +329,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   Teuchos::RCP<const map_type> OrigReducedMatrixDomainMap_;
   Teuchos::RCP<import_type> Full2ReducedRHSImporter_;
   Teuchos::RCP<import_type> Full2ReducedLHSImporter_;
-  // Teuchos::RCP<export_type> RedistributeDomainExporter_;
+  Teuchos::RCP<export_type> RedistributeDomainExporter_;
 
   Teuchos::ArrayRCP<local_ordinal_type> ColSingletonRowLIDs_;
   Teuchos::ArrayRCP<local_ordinal_type> ColSingletonColLIDs_;

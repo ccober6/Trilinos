@@ -114,7 +114,6 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     rvs() {
-  // GOT TO HERE!!
   // ComputeFullSolution();
 }
 
@@ -394,14 +393,12 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     // conformally with the rows of the reduced matrix and the RHS multivector
     SymmetricElimination_ = ReducedMatrixRangeMap()->isSameAs(*OrigReducedMatrixDomainMap_);
     if (!SymmetricElimination_) {
-      TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(SymmetricElimination_ != 0,
-                                            std::runtime_error, "Symmetric Elimination has not been tested or transitioned from Epetra!");
-      // ConstructRedistributeExporter(OrigReducedMatrixDomainMap_, ReducedMatrixRangeMap_,
-      //                               RedistributeDomainExporter_, ReducedMatrixDomainMap_);
+      ConstructRedistributeExporter(OrigReducedMatrixDomainMap_, ReducedMatrixRangeMap_,
+                                    RedistributeDomainExporter_, ReducedMatrixDomainMap_);
     } else {
       ReducedMatrixDomainMap_     = OrigReducedMatrixDomainMap_;
       OrigReducedMatrixDomainMap_ = Teuchos::null;
-      // RedistributeDomainExporter_ = 0;
+      RedistributeDomainExporter_ = Teuchos::null;
     }
 
     // Create pointer to Full RHS, LHS
@@ -659,50 +656,75 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   return;
 }
 
-////==============================================================================
-// template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-// void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-// ConstructRedistributeExporter(Epetra_Map * SourceMap, Epetra_Map * TargetMap,
-//                               Epetra_Export * & RedistributeExporter,
-//                               Epetra_Map * & RedistributeMap) {
-//
-//   int_type IndexBase = (int_type) SourceMap->IndexBase64();
-//   if (IndexBase!=(int_type) TargetMap->IndexBase64()) EPETRA_CHK_ERR(-1);
-//
-//   const Epetra_Comm & Comm = TargetMap->Comm();
-//
-//   int TargetNumMyElements = TargetMap->NumMyElements();
-//   int SourceNumMyElements = SourceMap->NumMyElements();
-//
-//   // ContiguousTargetMap has same number of elements per PE as TargetMap, but uses contigious indexing
-//   Epetra_Map ContiguousTargetMap((int_type) -1, TargetNumMyElements, IndexBase,Comm);
-//
-//   // Same for ContiguousSourceMap
-//   Epetra_Map ContiguousSourceMap((int_type) -1, SourceNumMyElements, IndexBase, Comm);
-//
-//   assert(ContiguousSourceMap.NumGlobalElements64()==ContiguousTargetMap.NumGlobalElements64());
-//
-//   // Now create a vector that contains the global indices of the Source Epetra_MultiVector
-//   int_type* SourceMapMyGlobalElements = 0;
-//   SourceMap->MyGlobalElementsPtr(SourceMapMyGlobalElements);
-//   typename Epetra_GIDTypeVector<int_type>::impl SourceIndices(View, ContiguousSourceMap, SourceMapMyGlobalElements);
-//
-//   // Create an exporter to send the SourceMap global IDs to the target distribution
-//   Epetra_Export Exporter(ContiguousSourceMap, ContiguousTargetMap);
-//
-//   // Create a vector to catch the global IDs in the target distribution
-//   typename Epetra_GIDTypeVector<int_type>::impl TargetIndices(ContiguousTargetMap);
-//   TargetIndices.Export(SourceIndices, Exporter, Insert);
-//
-//   // Create a new map that describes how the Source MultiVector should be laid out so that it has
-//   // the same number of elements on each processor as the TargetMap
-//   RedistributeMap = new Epetra_Map((int_type) -1, TargetNumMyElements, TargetIndices.Values(), IndexBase, Comm);
-//
-//   // This exporter will finally redistribute the Source MultiVector to the same layout as the TargetMap
-//   RedistributeExporter = new Epetra_Export(*SourceMap, *RedistributeMap);
-//   return(0);
-// }
-//
+  //==============================================================================
+  template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+  void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
+  ConstructRedistributeExporter(Teuchos::RCP<const map_type> SourceMap, Teuchos::RCP<const map_type> TargetMap,
+                                Teuchos::RCP<export_type> & RedistributeExporter,
+                                Teuchos::RCP<const map_type> & RedistributeMap) {
+
+    const char tfecfFuncName[] = "ConstructRedistributeExporter: ";
+
+    auto IndexBase = SourceMap->getIndexBase();
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(IndexBase != TargetMap->getIndexBase(), std::runtime_error,
+      "Base indices do not match.");
+  
+    auto Comm = TargetMap->getComm();
+  
+    size_t TargetNumMyElements = TargetMap->getLocalNumElements();
+    size_t SourceNumMyElements = SourceMap->getLocalNumElements();
+
+    // ContiguousTargetMap has the same number of elements per PE as TargetMap, but uses contiguous indexing
+    Teuchos::RCP<const map_type> ContiguousTargetMap =
+        Teuchos::rcp(new const map_type(
+            Teuchos::OrdinalTraits<Tpetra::global_size_t>::invalid(),
+            TargetNumMyElements, IndexBase, Comm));
+
+    // Same for ContiguousSourceMap
+    Teuchos::RCP<const map_type> ContiguousSourceMap =
+        Teuchos::rcp(new const map_type(
+            Teuchos::OrdinalTraits<Tpetra::global_size_t>::invalid(),
+            SourceNumMyElements, IndexBase, Comm));
+
+    TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(
+      ContiguousSourceMap->getGlobalNumElements() != ContiguousTargetMap->getGlobalNumElements(),
+      std::runtime_error, "Global number of elements do not match.");
+
+    // Retrieve the global indices owned by the calling process as a Kokkos::View
+    auto SourceMapMyGlobalIndices = SourceMap->getMyGlobalIndices();
+    
+    // Create a Tpetra::Vector to hold the global indices
+    Teuchos::RCP<Tpetra::MultiVector<GlobalOrdinal, LocalOrdinal, GlobalOrdinal, Node>> SourceIndices =
+        Teuchos::rcp(new Tpetra::MultiVector<GlobalOrdinal, LocalOrdinal, GlobalOrdinal, Node>(ContiguousSourceMap, 1));
+    
+    // Fill the Tpetra::Vector with the global indices
+    for (size_t i = 0; i < static_cast<size_t>(SourceMapMyGlobalIndices.size()); ++i) {
+      SourceIndices->replaceLocalValue(i, 0, static_cast<GlobalOrdinal>(SourceMapMyGlobalIndices[i]));
+    }
+
+    // Get the map associated with the vector
+    auto map = SourceIndices->getMap();
+
+    Teuchos::RCP<Tpetra::Export<LocalOrdinal, GlobalOrdinal, Node>> Exporter =
+      Teuchos::rcp(new Tpetra::Export<LocalOrdinal, GlobalOrdinal, Node>(ContiguousSourceMap, ContiguousTargetMap));
+
+    Teuchos::RCP<Tpetra::MultiVector<GlobalOrdinal, LocalOrdinal, GlobalOrdinal, Node>> TargetIndices =
+        Teuchos::rcp(new Tpetra::MultiVector<GlobalOrdinal, LocalOrdinal, GlobalOrdinal, Node>(ContiguousTargetMap, 1));
+        
+    TargetIndices->doExport(*SourceIndices, *Exporter, Tpetra::INSERT);
+
+    // Create a new map that describes how the Source MultiVector should be laid out so that it has
+    // the same number of elements on each processor as the TargetMap
+    RedistributeMap = Tpetra::createNonContigMapWithNode<LocalOrdinal, GlobalOrdinal, Node>(
+        Teuchos::ArrayView<const GlobalOrdinal>(TargetIndices->getData(0).getRawPtr(), TargetIndices->getLocalLength()),
+        Comm);
+
+    RedistributeExporter =
+      Teuchos::rcp(new Tpetra::Export<LocalOrdinal, GlobalOrdinal, Node>(SourceMap, RedistributeMap));
+
+    return;
+  }
+
 ////==============================================================================
 // int CrsSingletonFilter_LinearProblem::ComputeFullSolution() {
 //
