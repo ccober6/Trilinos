@@ -9,6 +9,8 @@
 
 #include "SingletonFiltering_TestUtils.hpp"
 
+#include <Kokkos_Core.hpp>
+
 #include <Tpetra_TestingUtilities.hpp>
 #include <Teuchos_UnitTestHelpers.hpp>
 #include <MatrixMarket_Tpetra.hpp>
@@ -163,13 +165,28 @@ namespace {
         TEST_ASSERT(this->localNumSingletonRows_ == 1);
         TEST_ASSERT(this->localNumSingletonCols_ == 1);
 
-        Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonRowLIDs 
-          = Teuchos::arcp(new local_ordinal_type[1]{8}, 0, 1, true);
-        TEST_COMPARE_ARRAYS(this->ColSingletonRowLIDs_, ansColSingletonRowLIDs);
-
-        Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonColLIDs 
-          = Teuchos::arcp(new local_ordinal_type[1]{10}, 0, 1, true);
-        TEST_COMPARE_ARRAYS(this->ColSingletonColLIDs_, ansColSingletonColLIDs);
+        {
+          auto kokkosView = Kokkos::View<local_ordinal_type*, Kokkos::HostSpace>(
+             this->ColSingletonRowLIDs_.getRawPtr(), this->ColSingletonRowLIDs_.size());
+          auto h_ColSingletonRowLIDs = Kokkos::create_mirror_view(kokkosView);
+          Kokkos::deep_copy(h_ColSingletonRowLIDs, kokkosView);
+          Teuchos::ArrayRCP<local_ordinal_type> ColSingletonRowLIDs
+            = Teuchos::arcp(h_ColSingletonRowLIDs.data(), 0, h_ColSingletonRowLIDs.extent(0), false);
+          Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonRowLIDs 
+            = Teuchos::arcp(new local_ordinal_type[1]{8}, 0, 1, true);
+          TEST_COMPARE_ARRAYS(ColSingletonRowLIDs, ansColSingletonRowLIDs);
+        }
+        {
+          auto kokkosView = Kokkos::View<local_ordinal_type*, Kokkos::HostSpace>(
+             this->ColSingletonColLIDs_.getRawPtr(), this->ColSingletonColLIDs_.size());
+          auto h_ColSingletonColLIDs = Kokkos::create_mirror_view(kokkosView);
+          Kokkos::deep_copy(h_ColSingletonColLIDs, kokkosView);
+          Teuchos::ArrayRCP<local_ordinal_type> ColSingletonColLIDs
+            = Teuchos::arcp(h_ColSingletonColLIDs.data(), 0, h_ColSingletonColLIDs.extent(0), false);
+          Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonColLIDs 
+            = Teuchos::arcp(new local_ordinal_type[1]{10}, 0, 1, true);
+          TEST_COMPARE_ARRAYS(ColSingletonColLIDs, ansColSingletonColLIDs);
+        }
       }
 
       void test_Operator(Teuchos::FancyOStream &out, bool &success){

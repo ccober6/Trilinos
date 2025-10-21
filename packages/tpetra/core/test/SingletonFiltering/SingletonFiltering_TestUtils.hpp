@@ -333,9 +333,12 @@ bool compareCrsMatrices(const Teuchos::RCP<const Tpetra::CrsMatrix<Scalar, LO, G
     LHS_Original = Reader_t::readDenseFile(LHS_Original_file, Comm, A_Original_Map);
     RHS_Original = Reader_t::readDenseFile(RHS_Original_file, Comm, A_Original_Map);
 
+    //bool verbose = true;
+    //bool run_on_host = false;
     RCP<MultiVector_t> x = rcp(new MultiVector_t(A_Original_Map, LHS_Original->getNumVectors() ));
     RCP<LinearProblem_t> preSingletonProblem = rcp(new LinearProblem_t( A_Original, x, RHS_Original ));
     CrsSingletonFiltering_t SingletonTransform(true);
+    //CrsSingletonFiltering_t SingletonTransform(run_on_host, verbose);
     RCP<LinearProblem_t> postSingletonProblem = SingletonTransform( preSingletonProblem );
 
     SingletonTransform.fwd();
