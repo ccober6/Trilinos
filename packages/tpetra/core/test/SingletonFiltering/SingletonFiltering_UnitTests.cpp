@@ -9,8 +9,6 @@
 
 #include "SingletonFiltering_TestUtils.hpp"
 
-#include <Kokkos_Core.hpp>
-
 #include <Tpetra_TestingUtilities.hpp>
 #include <Teuchos_UnitTestHelpers.hpp>
 #include <MatrixMarket_Tpetra.hpp>
@@ -166,10 +164,8 @@ namespace {
         TEST_ASSERT(this->localNumSingletonCols_ == 1);
 
         {
-          auto kokkosView = Kokkos::View<local_ordinal_type*, Kokkos::HostSpace>(
-             this->ColSingletonRowLIDs_.getRawPtr(), this->ColSingletonRowLIDs_.size());
-          auto h_ColSingletonRowLIDs = Kokkos::create_mirror_view(kokkosView);
-          Kokkos::deep_copy(h_ColSingletonRowLIDs, kokkosView);
+          auto h_ColSingletonRowLIDs = Kokkos::create_mirror_view(this->ColSingletonRowLIDs_);
+          Kokkos::deep_copy(h_ColSingletonRowLIDs, this->ColSingletonRowLIDs_);
           Teuchos::ArrayRCP<local_ordinal_type> ColSingletonRowLIDs
             = Teuchos::arcp(h_ColSingletonRowLIDs.data(), 0, h_ColSingletonRowLIDs.extent(0), false);
           Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonRowLIDs 
@@ -177,10 +173,8 @@ namespace {
           TEST_COMPARE_ARRAYS(ColSingletonRowLIDs, ansColSingletonRowLIDs);
         }
         {
-          auto kokkosView = Kokkos::View<local_ordinal_type*, Kokkos::HostSpace>(
-             this->ColSingletonColLIDs_.getRawPtr(), this->ColSingletonColLIDs_.size());
-          auto h_ColSingletonColLIDs = Kokkos::create_mirror_view(kokkosView);
-          Kokkos::deep_copy(h_ColSingletonColLIDs, kokkosView);
+          auto h_ColSingletonColLIDs = Kokkos::create_mirror_view(this->ColSingletonColLIDs_);
+          Kokkos::deep_copy(h_ColSingletonColLIDs, this->ColSingletonColLIDs_);
           Teuchos::ArrayRCP<local_ordinal_type> ColSingletonColLIDs
             = Teuchos::arcp(h_ColSingletonColLIDs.data(), 0, h_ColSingletonColLIDs.extent(0), false);
           Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonColLIDs 
