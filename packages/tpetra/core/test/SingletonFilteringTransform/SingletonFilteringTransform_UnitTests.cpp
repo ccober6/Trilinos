@@ -496,13 +496,24 @@ Teuchos::RCP<Tpetra::MultiVector<Scalar, LO, GO, Node>> createMultiVector() {
         TEST_ASSERT(this->localNumSingletonRows_ == 1);
         TEST_ASSERT(this->localNumSingletonCols_ == 1);
 
-        Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonRowLIDs 
-          = Teuchos::arcp(new local_ordinal_type[1]{8}, 0, 1, true);
-        TEST_COMPARE_ARRAYS(this->ColSingletonRowLIDs_, ansColSingletonRowLIDs);
-
-        Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonColLIDs 
-          = Teuchos::arcp(new local_ordinal_type[1]{10}, 0, 1, true);
-        TEST_COMPARE_ARRAYS(this->ColSingletonColLIDs_, ansColSingletonColLIDs);
+        {
+          auto h_ColSingletonRowLIDs = Kokkos::create_mirror_view(this->ColSingletonRowLIDs_);
+          Kokkos::deep_copy(h_ColSingletonRowLIDs, this->ColSingletonRowLIDs_);
+          Teuchos::ArrayRCP<local_ordinal_type> ColSingletonRowLIDs
+            = Teuchos::arcp(h_ColSingletonRowLIDs.data(), 0, h_ColSingletonRowLIDs.extent(0), false);
+          Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonRowLIDs 
+            = Teuchos::arcp(new local_ordinal_type[1]{8}, 0, 1, true);
+          TEST_COMPARE_ARRAYS(ColSingletonRowLIDs, ansColSingletonRowLIDs);
+        }
+        {
+          auto h_ColSingletonColLIDs = Kokkos::create_mirror_view(this->ColSingletonColLIDs_);
+          Kokkos::deep_copy(h_ColSingletonColLIDs, this->ColSingletonColLIDs_);
+          Teuchos::ArrayRCP<local_ordinal_type> ColSingletonColLIDs
+            = Teuchos::arcp(h_ColSingletonColLIDs.data(), 0, h_ColSingletonColLIDs.extent(0), false);
+          Teuchos::ArrayRCP<local_ordinal_type> ansColSingletonColLIDs 
+            = Teuchos::arcp(new local_ordinal_type[1]{10}, 0, 1, true);
+          TEST_COMPARE_ARRAYS(ColSingletonColLIDs, ansColSingletonColLIDs);
+        }
       }
 
       void test_Operator(Teuchos::FancyOStream &out, bool &success){
@@ -651,9 +662,11 @@ Teuchos::RCP<Tpetra::MultiVector<Scalar, LO, GO, Node>> createMultiVector() {
     LHS_Original = Reader_t::readDenseFile("SF1_LHS_Original.mm", Comm, A_Original_Map);
     RHS_Original = Reader_t::readDenseFile("SF1_RHS_Original.mm", Comm, A_Original_Map);
 
+    bool verbose = true;
+    bool run_on_host = false;
     RCP<MultiVector_t> x = rcp(new MultiVector_t(A_Original_Map, LHS_Original->getNumVectors() ));
     RCP<LinearProblem_t> preSingletonProblem = rcp(new LinearProblem_t( A_Original, x, RHS_Original ));
-    CrsSingletonFiltering_t SingletonTransform(true);
+    CrsSingletonFiltering_t SingletonTransform(run_on_host, verbose);
     RCP<LinearProblem_t> postSingletonProblem = SingletonTransform( preSingletonProblem );
 
     SingletonTransform.fwd();
