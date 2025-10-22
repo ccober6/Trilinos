@@ -30,7 +30,10 @@ namespace {
     : public Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node> {
     public:
 
-      using row_matrix_type     = Tpetra::RowMatrix<Scalar, LO, GO, Node>;
+      using row_matrix_type = Tpetra::RowMatrix<Scalar, LO, GO, Node>;
+
+      Test_CrsSingletonFilter_LinearProblem(bool run_on_host = false, bool verbose = false) :
+      Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>(run_on_host, verbose) {}
 
       void setFullMatrix(Teuchos::RCP<row_matrix_type> matrix) { this->FullMatrix_ = matrix; }
 

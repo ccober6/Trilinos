@@ -382,13 +382,13 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
           // i = id of "last" local row with non-zero in this col
           // since this is singletone column , "i" is the row id of the single nonzero entry in this column
           local_ordinal_type i = localRowIDofSingletonColData(j, 0);
-          // RowMapColors(i,0) : 0 = ith row was not singleton, 1 = was singleton, 2 = was not singleton, but processed
-          // Multiple singleton columns cannot have nonzero entry in the same row, i
-          //  which also means the matrix is singular
-          // So, rowMapColors(i,) should be checked by one singleton column (note 1, also see check 2)
-          //  not atomic needed
 
           // Check to see if this column already eliminated by the row check above
+          //  RowMapColors(i,0) : 0 = ith row was not singleton, 1 = was singleton, 2 = was not singleton, but processed
+          //  Multiple singleton columns cannot have nonzero entry in the same row, i
+          //   Otherwise, the matrix will be singular
+          //  So, rowMapColors(i,0) should be checked by one singleton column (note 1, also see check 2)
+          //   not atomic needed
           if (RowMapColors_Data(i, 0) != 1) { // that row is not singleton, and hence this col has not been removed
             RowMapColors_Data(i, 0) = 2;
             ColMapColors_Data(j, 0) = 1;
@@ -420,7 +420,10 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
           // (note: multiple singleton columns cannot have nonzero in the same column, colhasrowwithsingleton(j) is 0 or 1)
           //  This column has "one" row, which is singleton
           //   that singleton row has the single nonzero entry at jth col
-          if (ColHasRowWithSingletonData(j, 0) == 1 && (RowMapColors_Data(i, 0) != 1 && RowMapColors_Data(i, 0)-j < 2)) {
+          //  At jth iteration, if RowMapColors_Data(i, 0) == 1, then it stays as 1
+          //             otherwise it has been processed into 2 by previous column, or still 0
+          if (ColHasRowWithSingletonData(j, 0) == 1 && RowMapColors_Data(i, 0) != 1) {
+            // RowMapColors_Data(i, 0) was 0, or processed by a previous column
             // TODO: check the second and third conditions
             ColMapColors_Data(j, 0) = 1;
           }
@@ -437,14 +440,14 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   if (run_on_host_) {
     auto RowMapColors_Data = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
     for (local_ordinal_type i = 0; i < localNumRows; i++) {
-      if (RowMapColors_Data(i, 0) >= 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
+      if (RowMapColors_Data(i, 0) == 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
     }
   } else {
     auto RowMapColors_Data = RowMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
     Kokkos::parallel_for(
       "CrsSingletonFilter_LinearProblem:Analyze(convert-rowmap-color)", range_policy(0, localNumRows),
       KOKKOS_LAMBDA(const size_t i) {
-        if (RowMapColors_Data(i, 0) >= 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
+        if (RowMapColors_Data(i, 0) == 2) RowMapColors_Data(i, 0) = 1;  // Convert all eliminated rows to same color
       });
   }
 
@@ -640,7 +643,6 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       // * Only the maps have been setup, and hence the rowptr, colind, nzvals need to be still allocated.
       {
         using execution_space = typename vector_type_int::execution_space;
-        using error_code_type = typename Kokkos::View<int*, execution_space>;
 
         using graph_type =  typename local_matrix_type::StaticCrsGraphType;
         using row_map_type = typename graph_type::row_map_type::non_const_type;
@@ -649,9 +651,10 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         using functor_type = ConstructReducedProblemFunctor<local_map_type, local_matrix_type, row_map_type, entries_type, values_type>;
 
         size_t nnzA = 1;
-        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
+        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
+        auto lclReducedColMap = ReducedMatrixColMap()->getLocalMap();
 
         auto lclFullMatrix = FullCrsMatrix_->getLocalMatrixDevice();
 
@@ -665,7 +668,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
           using range_count_policy = Kokkos::RangePolicy<execution_space, typename functor_type::CountTag>;
           Kokkos::deep_copy(rowmap_view, 0);
 
-          functor_type functor(lclFullColMap, lclFullRowMap, lclReducedRowMap,
+          functor_type functor(lclFullRowMap, lclFullColMap, lclReducedRowMap, lclReducedColMap,
                                lclFullMatrix, rowmap_view, column_view, values_view);
           Kokkos::parallel_reduce(
             "CrsSingletonFilter_LinearProblem:CountReducedProblem", range_count_policy(0, localNumRows),
@@ -682,7 +685,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
           Kokkos::resize(values_view, nnzA);
 
           // functor with new view sizes
-          functor_type functor(lclFullColMap, lclFullRowMap, lclReducedRowMap,
+          functor_type functor(lclFullRowMap, lclFullColMap, lclReducedRowMap, lclReducedColMap,
                                lclFullMatrix, rowmap_view, column_view, values_view);
           Kokkos::parallel_for(
             "CrsSingletonFilter_LinearProblem:InsertReducedProblem", range_insert_policy(0, localNumRows),
@@ -709,8 +712,8 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
                                                           vector_view_type_int, vector_view_type_scalar, error_code_type>;
         using range_policy = Kokkos::RangePolicy<execution_space>;
 
-        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
+        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
 
         auto lclFullMatrix = FullCrsMatrix_->getLocalMatrixDevice();
@@ -723,7 +726,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 
         // launch functor
         functor_type functor(NumVectors, localNumSingletonCols_, error_code,
-                             lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                             lclFullRowMap, lclFullColMap, lclReducedRowMap,
                              lclFullMatrix, localExportX, localRHS,
                              ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);
         Kokkos::parallel_for(
@@ -732,11 +735,13 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         auto h_error = Kokkos::create_mirror_view(error_code);
         Kokkos::deep_copy(h_error, error_code);
         TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 1, std::runtime_error,
-                                              "Encountered zero row, unable to continue.");  // Should improve this comparison to zero.
+                                              "ConstructReducedProblem: Encountered zero row, unable to continue.");  // Should improve this comparison to zero.
         TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 2, std::runtime_error,
-                                              "Encountered zero column, unable to continue.");  // Should improve this comparison to zero.
+                                              "ConstructReducedProblem: Encountered zero column, unable to continue.");  // Should improve this comparison to zero.
+        TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 3, std::runtime_error,
+                                              "ConstructReducedProblem: Unable to find my column.");
       }
-  }
+    }
 
     // 1) The vector ColProfiles has column nonzero counts for each processor's contribution
     // Construct Reduced LHS (Puts any initial guess values into reduced system)
@@ -881,8 +886,8 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
                                                           vector_view_type_int, vector_view_type_scalar, error_code_type>;
         using range_policy = Kokkos::RangePolicy<execution_space>;
 
-        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
+        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
 
         auto lclFullMatrix = FullCrsMatrix_->getLocalMatrixDevice();
@@ -893,37 +898,42 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
         error_code_type error_code("singleton-bound-check", 2);
         Kokkos::deep_copy(error_code, 0);
 
+	// launch functor
         functor_type functor(NumVectors, localNumSingletonCols_, error_code,
-                             lclFullColMap, lclFullRowMap, lclReducedRowMap,
+                             lclFullRowMap, lclFullColMap, lclReducedRowMap,
                              lclFullMatrix, localExportX, localRHS,
                              ColSingletonColLIDs_, ColSingletonRowLIDs_, ColSingletonPivotLIDs_, ColSingletonPivots_);
         Kokkos::parallel_reduce(
           "CrsSingletonFilter_LinearProblem:SolveSingletonProblem", range_policy(0, localNumRows),
           functor, ColSingletonCounter);
+
+	// get error
         auto h_error = Kokkos::create_mirror_view(error_code);
         Kokkos::deep_copy(h_error, error_code);
         TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 1, std::runtime_error,
-                                              "Encountered zero row, unable to continue.");  // Should improve this comparison to zero.
+                                              "UpdateReducedProblem: Encountered zero row, unable to continue.");  // Should improve this comparison to zero.
         TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 2, std::runtime_error,
-                                              "Encountered zero column, unable to continue.");  // Should improve this comparison to zero.
+                                              "UpdateReducedProblem: Encountered zero column, unable to continue.");  // Should improve this comparison to zero.
+        TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(h_error(0) == 3, std::runtime_error,
+                                              "UpdateReducedProblem: Unable to find local column.");
       }
 
       // Part of the reduced matrix
       {
         using execution_space = typename vector_type_int::execution_space;
-        using error_code_type = typename Kokkos::View<int*, execution_space>;
         using functor_type = UpdateReducedProblemFunctor<local_map_type, local_matrix_type>;
         using range_policy = Kokkos::RangePolicy<execution_space>;
 
-        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclFullRowMap = FullMatrixRowMap()->getLocalMap();
+        auto lclFullColMap = FullMatrixColMap()->getLocalMap();
         auto lclReducedRowMap = ReducedMatrixRowMap()->getLocalMap();
+        auto lclReducedColMap = ReducedMatrixColMap()->getLocalMap();
 
         auto lclReducedMatrix = ReducedMatrix_->getLocalMatrixDevice();
         auto lclFullMatrix = FullCrsMatrix_->getLocalMatrixDevice();
 
         // launch functor
-        functor_type functor(lclFullColMap, lclFullRowMap, lclReducedRowMap,
+        functor_type functor(lclFullRowMap, lclFullColMap, lclReducedRowMap, lclReducedColMap,
                              lclFullMatrix, lclReducedMatrix);
         Kokkos::parallel_for(
           "CrsSingletonFilter_LinearProblem:UpdateReducedProblem", range_policy(0, localNumRows),
@@ -932,7 +942,8 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     }
 
     TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(!(ColSingletonCounter == localNumSingletonCols_),
-                                          std::runtime_error, "Sanity Check.");
+                                          std::runtime_error, "Sanity Check "+std::to_string(ColSingletonCounter)
+                                          +" vs "+std::to_string(localNumSingletonCols_)+" (UpdateReducedProblem).");
 
     // Update Reduced LHS (Puts any initial guess values into reduced system)
 
@@ -1152,7 +1163,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     FullCrsMatrix()->getLocalRowView(Row, localIndices, rowValues);
 
     NumIndices = localIndices.size();
-    Values     = Teuchos::ArrayView<const Scalar>(rowValues.data(), rowValues.size());
+    Values     = Teuchos::ArrayView<const Scalar>(reinterpret_cast<const Scalar*> (rowValues.data()), rowValues.size());
     Indices    = Teuchos::ArrayView<const LocalOrdinal>(localIndices.data(), localIndices.size());
 
   } else {  // Copy of current row
@@ -1161,7 +1172,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 
     FullMatrix()->getLocalRowCopy(Row, localIndicesCopy, rowValuesCopy, NumIndices);
 
-    Values  = Teuchos::ArrayView<const Scalar>(rowValuesCopy.data(), NumIndices);
+    Values  = Teuchos::ArrayView<const Scalar>(reinterpret_cast<const Scalar*> (rowValuesCopy.data()), NumIndices);
     Indices = Teuchos::ArrayView<const LocalOrdinal>(localIndicesCopy.data(), NumIndices);
   }
   return;
@@ -1189,7 +1200,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     GlobalIndices[j] = FullMatrixColMap()->getGlobalElement(LocalIndices[j]);
   }
   // Copy values into the provided ArrayView
-  Values = Teuchos::ArrayView<const Scalar>(RowValues.data(), RowValues.size());
+  Values = Teuchos::ArrayView<const Scalar>(reinterpret_cast<const Scalar*> (RowValues.data()), RowValues.size());
 
   return;
 }
@@ -1256,22 +1267,31 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewDevice(Tpetra::Access::ReadWrite);
       auto ColMapColors_Data            = ColMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
 
+      // counter to be atomic-incremented
+      Kokkos::View<int*, execution_space> numSingletonCols("numSingletonCols", 1);
+      Kokkos::deep_copy(numSingletonCols, 0);
+
+      // launch functor
       CreatePostSolveArraysFunctor functor(localRowIDofSingletonColData,
                                            ColSingletonRowLIDs_, ColSingletonColLIDs_,
                                            NewColProfilesData, ColProfilesData, ColHasRowWithSingletonData,
-                                           ColMapColors_Data, RowMapColors_Data);
-      Kokkos::parallel_reduce(
+                                           ColMapColors_Data, RowMapColors_Data, numSingletonCols);
+      Kokkos::parallel_for(
         "CrsSingletonFilter_LinearProblem:CreatePostSolveArrays", range_policy(0, localNumCols),
-        functor, NumMyColSingletonstmp);
-    }
+        functor);
 
+      // get the counter
+      auto h_numSingletonCols = Kokkos::create_mirror_view(numSingletonCols);
+      Kokkos::deep_copy(h_numSingletonCols, numSingletonCols);
+      NumMyColSingletonstmp = h_numSingletonCols(0);
+    }
   }
 
   TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(NumMyColSingletonstmp != localNumSingletonCols_,
-                                        std::runtime_error, "Sanity check.");
+                                        std::runtime_error, "Sanity Check "+std::to_string(NumMyColSingletonstmp)
+                                        +" vs "+std::to_string(localNumSingletonCols_)+" (CreatePostSolveArrays).");
 
   Kokkos::Experimental::sort_by_key(execution_space(), ColSingletonRowLIDs_, ColSingletonColLIDs_);
-  //Tpetra::sort2(ColSingletonRowLIDs_.begin(), ColSingletonRowLIDs_.end(), ColSingletonColLIDs_.begin());
 
   return;
 }

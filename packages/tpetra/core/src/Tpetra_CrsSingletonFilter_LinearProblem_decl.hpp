@@ -121,6 +121,10 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   //! @name Typedefs
   //@{
 
+  using scalar_type         = Scalar;
+  using local_ordinal_type  = LocalOrdinal;
+  using global_ordinal_type = GlobalOrdinal;
+
   using map_type            = Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>;
   using crs_matrix_type     = Tpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
   using row_matrix_type     = Tpetra::RowMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
@@ -131,10 +135,6 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   using linear_problem_type = Tpetra::LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
   using import_type         = Tpetra::Import<LocalOrdinal, GlobalOrdinal, Node>;
   using export_type         = Tpetra::Export<LocalOrdinal, GlobalOrdinal, Node>;
-
-  using scalar_type         = Tpetra::Vector<>::scalar_type;
-  using local_ordinal_type  = Tpetra::Vector<>::local_ordinal_type;
-  using global_ordinal_type = Tpetra::Vector<>::global_ordinal_type;
 
   using OriginalType      = typename Transform<linear_problem_type, linear_problem_type>::OriginalType;
   using OriginalConstType = typename Transform<linear_problem_type, linear_problem_type>::OriginalConstType;
@@ -392,7 +392,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
  public:
 
   // Functor to create post-solve arrays
-  template<class LocalLO_type, class ColIDView_type, class MapColor_type>
+  template<class LocalLO_type, class ColIDView_type, class MapColor_type, class Counter_type>
   struct CreatePostSolveArraysFunctor
   {
     LocalLO_type   LocalRowIDofSingletonColData;
@@ -404,26 +404,28 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
     LocalLO_type  ColHasRowWithSingletonData;
     MapColor_type ColMapColors_Data;
     MapColor_type RowMapColors_Data;
+    Counter_type  numSingletonCols;
 
     CreatePostSolveArraysFunctor(LocalLO_type localRowIDofSingletonColData,
                                  ColIDView_type colSingletonRowLIDs, ColIDView_type colSingletonColLIDs,
                                  LocalLO_type  newColProfilesData, LocalLO_type colProfilesData, LocalLO_type colHasRowWithSingletonData,
-                                 MapColor_type colMapColors_Data, MapColor_type rowMapColors_Data) :
+                                 MapColor_type colMapColors_Data, MapColor_type rowMapColors_Data, Counter_type in_numSingletonCols) :
     LocalRowIDofSingletonColData(localRowIDofSingletonColData),
     ColSingletonRowLIDs(colSingletonRowLIDs), ColSingletonColLIDs(colSingletonColLIDs),
     NewColProfilesData(newColProfilesData), ColProfilesData(colProfilesData),
     ColHasRowWithSingletonData(colHasRowWithSingletonData),
-    ColMapColors_Data(colMapColors_Data), RowMapColors_Data(rowMapColors_Data)
+    ColMapColors_Data(colMapColors_Data), RowMapColors_Data(rowMapColors_Data),
+    numSingletonCols(in_numSingletonCols)
     {}
 
     KOKKOS_INLINE_FUNCTION
-    void operator()(const size_t j, local_ordinal_type &lclNumSingletonCols) const {
+    void operator()(const size_t j) const {
       int i = LocalRowIDofSingletonColData(j, 0);
       if (ColProfilesData(j, 0) == 1 && RowMapColors_Data(i, 0) != 1) {
         // These will be sorted by rowLIDs, so no need to be in any particular order
+        auto lclNumSingletonCols = Kokkos::atomic_fetch_add(&numSingletonCols(0), 1);
         ColSingletonRowLIDs(lclNumSingletonCols) = i;
         ColSingletonColLIDs(lclNumSingletonCols) = j;
-        lclNumSingletonCols ++;
       }
       // Also check for columns that were eliminated implicitly by
       // having all associated row eliminated
@@ -438,9 +440,10 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   template<class Map_type, class LocalMatrix_type, class row_map_type, class entries_type, class values_type>
   struct ConstructReducedProblemFunctor {
 
-    Map_type lclFullColMap;
     Map_type lclFullRowMap;
+    Map_type lclFullColMap;
     Map_type lclReducedRowMap;
+    Map_type lclReducedColMap;
 
     LocalMatrix_type lclFullMatrix;
 
@@ -449,9 +452,9 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
     values_type  lclReducedValues;
 
     // Constructor
-    ConstructReducedProblemFunctor(Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_, LocalMatrix_type lclFullMatrix_,
+    ConstructReducedProblemFunctor(Map_type lclFullRowMap_, Map_type lclFullColMap_, Map_type lclReducedRowMap_, Map_type lclReducedColMap_, LocalMatrix_type lclFullMatrix_,
                                    row_map_type lclReducedRowPtr_, entries_type lclReducedColInd_, values_type lclReducedValues_) :
-    lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_), lclFullMatrix(lclFullMatrix_),
+    lclFullRowMap(lclFullRowMap_), lclFullColMap(lclFullColMap_), lclReducedRowMap(lclReducedRowMap_), lclReducedColMap(lclReducedColMap_), lclFullMatrix(lclFullMatrix_),
     lclReducedRowPtr(lclReducedRowPtr_), lclReducedColInd(lclReducedColInd_), lclReducedValues(lclReducedValues_)
     {}
 
@@ -474,9 +477,9 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
       if (lclRowID != INVALID) {
         for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
           GlobalOrdinal glbColID = lclFullColMap.getGlobalElement(lclFullColInd[j]);
-          LocalOrdinal  lclColID = lclReducedRowMap.getLocalElement(glbColID);
+          LocalOrdinal  lclColID = lclReducedColMap.getLocalElement(glbColID);
           if (lclColID != INVALID) {
-            lclReducedRowPtr(1+lclRowID) += 1;
+            lclReducedRowPtr(1+lclRowID)++;
           }
         }
       }
@@ -499,7 +502,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
         size_t k = lclReducedRowPtr(lclRowID);
         for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
           GlobalOrdinal glbColID = lclFullColMap.getGlobalElement(lclFullColInd[j]);
-          LocalOrdinal  lclColID = lclReducedRowMap.getLocalElement(glbColID);
+          LocalOrdinal  lclColID = lclReducedColMap.getLocalElement(glbColID);
           if (lclColID != INVALID) {
             lclReducedColInd[k] = lclColID;
             lclReducedValues[k] = lclFullValues[j];
@@ -513,17 +516,20 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   template<class Map_type, class LocalMatrix_type>
   struct UpdateReducedProblemFunctor {
 
-    Map_type lclFullColMap;
     Map_type lclFullRowMap;
+    Map_type lclFullColMap;
     Map_type lclReducedRowMap;
+    Map_type lclReducedColMap;
 
     LocalMatrix_type lclFullMatrix;
     LocalMatrix_type lclReducedMatrix;
 
     // Constructor
-    UpdateReducedProblemFunctor(Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
+    UpdateReducedProblemFunctor(Map_type lclFullRowMap_, Map_type lclFullColMap_,
+                                Map_type lclReducedRowMap_, Map_type lclReducedColMap_,
                                 LocalMatrix_type lclFullMatrix_, LocalMatrix_type lclReducedMatrix_) :
-    lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_),
+    lclFullRowMap(lclFullRowMap_), lclFullColMap(lclFullColMap_),
+    lclReducedRowMap(lclReducedRowMap_), lclReducedColMap(lclReducedColMap_),
     lclFullMatrix(lclFullMatrix_), lclReducedMatrix(lclReducedMatrix_)
     {}
 
@@ -546,7 +552,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
       if (lclRowID != INVALID) {
         for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
           GlobalOrdinal glbColID = lclFullColMap.getGlobalElement(lclFullColInd(j));
-          LocalOrdinal  lclColID = lclReducedRowMap.getLocalElement(glbColID);
+          LocalOrdinal  lclColID = lclReducedColMap.getLocalElement(glbColID);
           if (lclColID != INVALID) {
             for (size_t k = lclReducedRowPtr(lclRowID); k < lclReducedRowPtr(lclRowID+1); k++) {
               if (lclReducedColInd[k] == lclColID) {
@@ -569,8 +575,8 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
     local_ordinal_type localNumSingletonCols;
 
     Err_type error_code;
-    Map_type lclFullColMap;
     Map_type lclFullRowMap;
+    Map_type lclFullColMap;
     Map_type lclReducedRowMap;
 
     LocalMatrix_type lclFullMatrix;
@@ -585,12 +591,12 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
 
     // Constructor
     SolveSingletonProblemFunctor(local_ordinal_type NumVectors_, local_ordinal_type localNumSingletonCols_, Err_type error_code_,
-                                 Map_type lclFullColMap_, Map_type lclFullRowMap_, Map_type lclReducedRowMap_,
+                                 Map_type lclFullRowMap_, Map_type lclFullColMap_, Map_type lclReducedRowMap_,
                                  LocalMatrix_type lclFullMatrix_, LocalX_type localExportX_, LocalB_type localRHS_,
                                  View_type_int colSingletonColLIDs_, View_type_int colSingletonRowLIDs_,
                                  View_type_int colSingletonPivotLIDs_, View_type_scalar colSingletonPivots_) :
     NumVectors(NumVectors_), localNumSingletonCols(localNumSingletonCols_), error_code(error_code_),
-    lclFullColMap(lclFullColMap_), lclFullRowMap(lclFullRowMap_), lclReducedRowMap(lclReducedRowMap_),
+    lclFullRowMap(lclFullRowMap_), lclFullColMap(lclFullColMap_), lclReducedRowMap(lclReducedRowMap_),
     lclFullMatrix(lclFullMatrix_), localExportX(localExportX_), localRHS(localRHS_),
     ColSingletonColLIDs(colSingletonColLIDs_), ColSingletonRowLIDs(colSingletonRowLIDs_),
     ColSingletonPivotLIDs(colSingletonPivotLIDs_), ColSingletonPivots(colSingletonPivots_)
@@ -681,7 +687,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
           int myNum = -1;
           for (local_ordinal_type j = 0; j < localNumSingletonCols; j++) {
             if (ColSingletonRowLIDs[j] == i) {
-              myNum =j;
+              myNum = j;
             }
           }
           if (myNum == -1) {
