@@ -153,6 +153,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   using local_val_view_type = typename crs_matrix_type::local_matrix_device_type::values_type;
   using const_local_val_view_type = typename local_val_view_type::const_type;
 
+  using impl_scalar_type = typename multivector_type::impl_scalar_type;
   using local_multivector_type = typename multivector_type::dual_view_type::t_dev;
   using const_local_multivector_type = typename local_multivector_type::const_type;
 
@@ -606,6 +607,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
     KOKKOS_INLINE_FUNCTION
     void operator()(const local_ordinal_type i) const {
       const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
+      const impl_scalar_type zero(0);
 
       auto lclFullRowPtr = lclFullMatrix.graph.row_map;
       auto lclFullColInd = lclFullMatrix.graph.entries;
@@ -618,8 +620,8 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
         if (lclFullRowPtr(i+1) == lclFullRowPtr(i)+1) {
           // Singleton row
           LocalOrdinal indX = lclFullColInd(lclFullRowPtr(i));
-          Scalar pivot = lclFullValues(lclFullRowPtr(i));
-          if (pivot == 0.0) {
+          impl_scalar_type pivot = lclFullValues(lclFullRowPtr(i));
+          if (pivot == zero) {
             Kokkos::atomic_exchange(&error_code(0), 1);
           } else {
             for (LocalOrdinal j = 0; j < NumVectors; j++) {
@@ -642,8 +644,8 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
             LocalOrdinal targetCol = ColSingletonColLIDs[myNum];
             for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
               if (lclFullColMap.getGlobalElement(lclFullColInd[j]) == targetCol) {
-                Scalar pivot = lclFullValues[j];
-                if (pivot == 0.0) {
+                impl_scalar_type pivot = lclFullValues[j];
+                if (pivot == zero) {
                   Kokkos::atomic_exchange(&error_code(0), 2);
                 } else {
                   ColSingletonPivotLIDs[myNum] = j;
@@ -661,6 +663,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
     KOKKOS_INLINE_FUNCTION
     void operator()(const local_ordinal_type i, local_ordinal_type &lclNumSingletonCols) const {
       const LocalOrdinal INVALID = Tpetra::Details::OrdinalTraits<LocalOrdinal>::invalid();
+      const impl_scalar_type zero(0);
 
       auto lclFullRowPtr = lclFullMatrix.graph.row_map;
       auto lclFullColInd = lclFullMatrix.graph.entries;
@@ -673,8 +676,8 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
         if (lclFullRowPtr(i+1) == lclFullRowPtr(i)+1) {
           // Singleton row
           LocalOrdinal indX = lclFullColInd(lclFullRowPtr(i));
-          Scalar pivot = lclFullValues(lclFullRowPtr(i));
-          if (pivot == 0.0) {
+          impl_scalar_type pivot = lclFullValues(lclFullRowPtr(i));
+          if (pivot == zero) {
             Kokkos::atomic_exchange(&error_code(0), 1);
           } else {
             for (LocalOrdinal j = 0; j < NumVectors; j++) {
@@ -697,8 +700,8 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
             LocalOrdinal targetCol = ColSingletonColLIDs[myNum];
             for (size_t j = lclFullRowPtr(i); j < lclFullRowPtr(i+1); j++) {
               if (lclFullColMap.getGlobalElement(lclFullColInd[j]) == targetCol) {
-                Scalar pivot = lclFullValues[j];
-                if (pivot == 0.0) {
+                impl_scalar_type pivot = lclFullValues[j];
+                if (pivot == zero) {
                   Kokkos::atomic_exchange(&error_code(0), 2);
                 } else {
                   ColSingletonPivots[myNum] = pivot;

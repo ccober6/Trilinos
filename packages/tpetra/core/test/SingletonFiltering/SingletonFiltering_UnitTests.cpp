@@ -44,11 +44,12 @@ namespace {
         TEUCHOS_ASSERT(this->FullMatrixIsCrsMatrix_ == true);
         TEUCHOS_ASSERT(this->FullCrsMatrix_ != Teuchos::null);
 
+        const Scalar zero(0);
         for (auto i = 0; i < this->Indices_.size(); ++i) {
             TEUCHOS_ASSERT(this->Indices_[i] == 0);
         }
         for (auto i = 0; i < this->Values_.size(); ++i) {
-            TEUCHOS_ASSERT(this->Values_[i] == 0);
+            TEUCHOS_ASSERT(this->Values_[i] == zero);
         }
       }
 
@@ -82,7 +83,7 @@ namespace {
         this->GetRow(8, NumEntries, Values, localIndices);
         Teuchos::Array<local_ordinal_type> ansIndices = Teuchos::Array<local_ordinal_type>({6, 8, 9, 10, 12, 13});
         TEST_COMPARE_ARRAYS(localIndices, ansIndices);
-        Scalar relTol = Scalar(1.0e-05);
+        double relTol = 1.0e-05;
         Teuchos::Array<Scalar> ansValues = Teuchos::Array<Scalar>({Scalar(-1.0), Scalar(0.00140635), Scalar(-1.0), Scalar(1.0), Scalar(-0.0012461), Scalar(-0.000160258)});
         if constexpr (std::is_same<Scalar, long long>::value) {
           // It appears that Reader_t::readSparseFile() and Scalar() round/truncate differently for long long,
@@ -101,7 +102,7 @@ namespace {
         this->GetRowGCIDs(8, NumEntries, Values, Indices);
         Teuchos::Array<global_ordinal_type> ansIndices = Teuchos::Array<global_ordinal_type>({6, 8, 9, 10, 12, 13});
         TEST_COMPARE_ARRAYS(Indices, ansIndices);
-        Scalar relTol = Scalar(1.0e-05);
+        double relTol = 1.0e-05;
         Teuchos::Array<Scalar> ansValues = Teuchos::Array<Scalar>({Scalar(-1.0), Scalar(0.00140635), Scalar(-1.0), Scalar(1.0), Scalar(-0.0012461), Scalar(-0.000160258)});
         if constexpr (std::is_same<Scalar, long long>::value) {
           // It appears that Reader_t::readSparseFile() and Scalar() round/truncate differently for long long,
@@ -214,7 +215,7 @@ namespace {
     
         TEUCHOS_ASSERT(compareCrsMatrices(
           Teuchos::rcp_dynamic_cast<const CrsMatrix_t>(A_Reduced, true),
-          Teuchos::rcp_dynamic_cast<const CrsMatrix_t>(this->ReducedMatrix(), true), Comm, out, Scalar(1.0e-05)));
+          Teuchos::rcp_dynamic_cast<const CrsMatrix_t>(this->ReducedMatrix(), true), Comm, out, 1.0e-05));
     
         TEUCHOS_ASSERT(compareMultiVectors(
           Teuchos::rcp_dynamic_cast<const MultiVector_t>(LHS_Reduced, true),

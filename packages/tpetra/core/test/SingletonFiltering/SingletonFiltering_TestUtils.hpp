@@ -122,8 +122,13 @@ bool compareCrsMatrices(const Teuchos::RCP<const Tpetra::CrsMatrix<Scalar, LO, G
                         Teuchos::FancyOStream& out,
                         double relativeTolerance = 1e-12)
 {
+    using impl_scalar_type = typename Kokkos::ArithTraits<Scalar>::val_type;
+    using mag_type = typename Kokkos::ArithTraits<impl_scalar_type>::mag_type;
+
     bool comparePass = true;
 
+    Scalar  one(1.0);
+    Scalar mone(-1.0);
     // Compare global dimensions
     if (A->getGlobalNumRows() != B->getGlobalNumRows() ||
         A->getGlobalNumCols() != B->getGlobalNumCols()) {
@@ -172,22 +177,22 @@ bool compareCrsMatrices(const Teuchos::RCP<const Tpetra::CrsMatrix<Scalar, LO, G
       Tpetra::MatrixMatrix::Add(
           *A,    // matrix A
           false, // transpose A (don't transpose)
-          1.0,  // alpha
+          one,   // alpha
           *B,    // matrix B
           false, // transpose B (don't transpose)
-          -1.0, // beta
+          mone,  // beta
           diff);   // output matrix
 
       // Compute the norm-2 of the difference
-      Scalar diffNorm = diff->getFrobeniusNorm();
+      mag_type diffNorm = diff->getFrobeniusNorm();
 
       // Check if the norm is below the relative tolerance
-      Scalar maxNormA = A->getFrobeniusNorm();
-      Scalar maxNormB = B->getFrobeniusNorm();
-      Scalar maxNorm = std::max(maxNormA, maxNormB);
+      mag_type maxNormA = A->getFrobeniusNorm();
+      mag_type maxNormB = B->getFrobeniusNorm();
+      mag_type maxNorm = std::max(maxNormA, maxNormB);
 
       if (maxNorm > 0.0) { // Avoid division by zero
-          double relativeError = diffNorm / maxNorm;
+          mag_type relativeError = diffNorm / maxNorm;
           if (relativeError > relativeTolerance) {
               out << "Matrix failed relative tolerance check." << std::endl;
               out << "Norm of difference: " << diffNorm << std::endl;
@@ -227,6 +232,9 @@ bool compareCrsMatrices(const Teuchos::RCP<const Tpetra::CrsMatrix<Scalar, LO, G
                            Teuchos::FancyOStream& out,
                            double relativeTolerance = 1e-12)
   {
+      using impl_scalar_type = typename Kokkos::ArithTraits<Scalar>::val_type;
+      using mag_type = typename Kokkos::ArithTraits<impl_scalar_type>::mag_type;
+
       bool comparePass = true;
   
       // Compare global dimensions
@@ -255,10 +263,10 @@ bool compareCrsMatrices(const Teuchos::RCP<const Tpetra::CrsMatrix<Scalar, LO, G
       diff->update(1.0, *A, -1.0, *B, 0.0);
   
       // Prepare a container to store the norms
-      Teuchos::Array<Scalar> norms(A->getNumVectors());
+      Teuchos::Array<mag_type> norms(A->getNumVectors());
   
       // Compute the 2-norm of the difference for each vector
-      diff->norm2(Teuchos::ArrayView<Scalar>(norms));
+      diff->norm2(Teuchos::ArrayView<mag_type>(norms));
   
       if constexpr (!std::is_same<Scalar, long long>::value) {
         // It appears that Reader_t::readSparseFile() reads the file for long long badly when it has real values. 
@@ -266,12 +274,12 @@ bool compareCrsMatrices(const Teuchos::RCP<const Tpetra::CrsMatrix<Scalar, LO, G
 
         // Check if the norms are below the relative tolerance
         for (size_t i = 0; i < static_cast<size_t>(norms.size()); ++i) {
-            double maxNormA = A->getVector(i)->norm2();
-            double maxNormB = B->getVector(i)->norm2();
-            double maxNorm = std::max(maxNormA, maxNormB);
+            mag_type maxNormA = A->getVector(i)->norm2();
+            mag_type maxNormB = B->getVector(i)->norm2();
+            mag_type maxNorm = std::max(maxNormA, maxNormB);
   
             if (maxNorm > 0.0) { // Avoid division by zero
-                double relativeError = norms[i] / maxNorm;
+                mag_type relativeError = norms[i] / maxNorm;
                 if (relativeError > relativeTolerance) {
                     out << "Vector " << i << " failed relative tolerance check." << std::endl;
                     out << "Norm of difference: " << norms[i] << std::endl;
@@ -358,7 +366,7 @@ bool compareCrsMatrices(const Teuchos::RCP<const Tpetra::CrsMatrix<Scalar, LO, G
     TEUCHOS_ASSERT(compareCrsMatrices(
       Teuchos::rcp_dynamic_cast<const CrsMatrix_t>(A_Reduced, true),
       Teuchos::rcp_dynamic_cast<const CrsMatrix_t>(postSingletonProblem->getMatrix(), true),
-      Comm, out, Scalar(1.0e-05)));
+      Comm, out, 1.0e-05));
 
     TEUCHOS_ASSERT(compareMultiVectors(
       Teuchos::rcp_dynamic_cast<const MultiVector_t>(LHS_Reduced, true),
