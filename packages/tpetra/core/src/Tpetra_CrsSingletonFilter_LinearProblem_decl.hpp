@@ -11,7 +11,7 @@
 #define TPETRA_CRSSINGLETONFILTER_LINEARPROBLEM_DECL_HPP
 
 /// \file Tpetra_CrsSingletonFilter_LinearProblem_decl.hpp
-/// \brief Declaration of the Tpetra::Transform class
+/// \brief Declaration of the Tpetra::CrsSingletonFilter_LinearProblem class
 
 #include "Tpetra_LinearProblem.hpp"
 #include "Tpetra_Transform.hpp"
@@ -32,12 +32,12 @@ namespace Tpetra {
 /// \brief A class for explicitly eliminating matrix rows and columns from a LinearProblem.
 ///
 /// The Tpetra::CrsSingletonFilter class takes an existing Tpetra::LinearProblem
-/// object, analyzes it structure and explicitly eliminates singleton
+/// object, analyzes its structure and explicitly eliminates singleton
 /// rows and columns from the matrix and appropriately modifies the RHS
 /// and LHS of the linear problem.  The result of this process is a
 /// reduced system of equations that is itself an Tpetra::LinearProblem
 /// object.  The reduced system can then be solved using any solver
-/// that is understands an Tpetra::LinearProblem.  The solution for the
+/// that understands a Tpetra::LinearProblem.  The solution for the
 /// full system is obtained by calling ComputeFullSolution().
 ///
 /// Singleton rows are defined to be rows that have a single nonzero
@@ -89,10 +89,10 @@ namespace Tpetra {
 ///      is computed (via any solver that understands an Tpetra::LinearProblem),
 ///      you should call the ComputeFullSolution() method to compute
 ///      the LHS values assocaited with the singleton columns.
-/// <li> Solve reduced problem: Obtain a RCP to the reduced problem
+/// <li> Solve reduced problem: Obtain an RCP to the reduced problem
 ///      using the ReducedProblem() method.  Using the solver of your
 ///      choice, solve the reduced system.
-/// <li> Compute solution to full problem:  Once the solution the reduced
+/// <li> Compute solution to full problem:  Once the solution of the reduced
 ///      problem is determined, the ComputeFullSolution() method will
 ///      place the reduced solution values into the appropriate locations
 ///      of the full solution LHS and then compute the values associated
@@ -103,7 +103,7 @@ namespace Tpetra {
 ///      of a problem will be the same for a sequence of linear problems.
 ///      In this case, the UpdateReducedProblem() method can be useful.
 ///      After going through the above process one time, if you have a
-///      linear problem that is structural \e identical to the previous
+///      linear problem that is structurally \e identical to the previous
 ///      problem, you can minimize memory and time costs by using the
 ///      UpdateReducedProblem() method, passing in the subsequent
 ///      problem.  Once you have called the UpdateReducedProblem()
@@ -213,7 +213,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   /// \brief Return a reduced linear problem based on results of Analyze().
   ///
   /// Creates a new Tpetra::LinearProblem object based on the
-  /// results of the Analyze phase.  A RCP to the reduced
+  /// results of the Analyze phase.  An RCP to the reduced
   /// problem is obtained via a call to ReducedProblem().
   void ConstructReducedProblem(const Teuchos::RCP<linear_problem_type>& Problem);
 
@@ -244,12 +244,12 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   //@{ \name Filter Statistics.
 
   /// \brief Return number of rows that contain a single entry,
-  /// returns -1 if Analysis not performed yet.
+  /// returns -1 if Analysis has not been performed yet.
   int NumSingletonRows() const { return (globalNumSingletonRows_); }
 
   /// \brief Return number of columns that contain a single entry
   /// that are \e not associated with singleton row, returns -1 if
-  /// Analysis not performed yet.
+  /// Analysis has not been performed yet.
   int NumSingletonCols() const { return (globalNumSingletonCols_); }
 
   /// \brief Return total number of singletons detected.
