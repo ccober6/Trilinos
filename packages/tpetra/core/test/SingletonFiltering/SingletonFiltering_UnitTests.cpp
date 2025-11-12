@@ -229,6 +229,8 @@ class Test_CrsSingletonFilter_LinearProblem
 // --------------------------------------------------------------------------
 
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SF1, Functions, LO, GO, Scalar, Node) {
+  if (Teuchos::ScalarTraits<Scalar>::isComplex) return;  // MatrixMarket reader does not work properly with complex.
+
   using CrsMatrix_t   = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>::crs_matrix_type;
   using MultiVector_t = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>::multivector_type;
   using Reader_t      = typename Tpetra::MatrixMarket::Reader<CrsMatrix_t>;
@@ -250,6 +252,8 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SF1, Functions, LO, GO, Scalar, Node) {
 }
 
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SF1, Analyze, LO, GO, Scalar, Node) {
+  if (Teuchos::ScalarTraits<Scalar>::isComplex) return;  // MatrixMarket reader does not work properly with complex.
+
   using CrsMatrix_t     = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>::crs_matrix_type;
   using MultiVector_t   = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>::multivector_type;
   using Map_t           = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>::map_type;
@@ -277,6 +281,9 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SF1, Analyze, LO, GO, Scalar, Node) {
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SF1, Operator, LO, GO, Scalar, Node) {
   // operator() just calls analyze(LinearProblem) and construct(), so this test will
   // basically cover construct() since analyze() is covered above.
+
+  if (Teuchos::ScalarTraits<Scalar>::isComplex) return;  // MatrixMarket reader does not work properly with complex.
+
   using CrsMatrix_t     = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>::crs_matrix_type;
   using MultiVector_t   = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>::multivector_type;
   using Map_t           = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>::map_type;
@@ -302,6 +309,8 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SF1, Operator, LO, GO, Scalar, Node) {
 }
 
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SF2, fwd, LO, GO, Scalar, Node) {
+  if (Teuchos::ScalarTraits<Scalar>::isComplex) return;  // MatrixMarket reader does not work properly with complex.
+
   auto Comm = Tpetra::getDefaultComm();
 
   test_Singleton_fwd<Scalar, LO, GO, Node>(
@@ -318,6 +327,6 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SF2, fwd, LO, GO, Scalar, Node) {
 
 TPETRA_ETI_MANGLING_TYPEDEFS()
 
-TPETRA_INSTANTIATE_SLGN(UNIT_TEST_GROUP)
+TPETRA_INSTANTIATE_SLGN_NO_ORDINAL_SCALAR(UNIT_TEST_GROUP)
 
 }  // namespace

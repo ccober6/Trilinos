@@ -32,6 +32,8 @@ using Tpetra::TestingUtilities::getDefaultComm;
 
 // Singleton Filtering Test
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SingletonFiltering_P1, fwd, LO, GO, Scalar, Node) {
+  if (Teuchos::ScalarTraits<Scalar>::isComplex) return;  // MatrixMarket reader does not work properly with complex.
+  
   auto Comm = Tpetra::getDefaultComm();
 
   test_Singleton_fwd<Scalar, LO, GO, Node>(
@@ -42,6 +44,9 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SingletonFiltering_P1, fwd, LO, GO, Scalar, No
 
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SingletonFiltering_P1, MultipleTransforms, LO, GO, Scalar, Node) {
   // MultipleTransforms sequences several transforms together (SingletonFiltering, SolverMap and ReIndex)
+
+  if (Teuchos::ScalarTraits<Scalar>::isComplex) return;  // MatrixMarket reader does not work properly with complex.
+  
   using Problem_t               = typename Tpetra::LinearProblem<Scalar, LO, GO, Node>;
   using CrsSingletonFiltering_t = typename Tpetra::CrsSingletonFilter_LinearProblem<Scalar, LO, GO, Node>;
   using CrsMatrix_t             = typename CrsSingletonFiltering_t::crs_matrix_type;
@@ -123,6 +128,6 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SingletonFiltering_P1, MultipleTransforms, LO,
 
 TPETRA_ETI_MANGLING_TYPEDEFS()
 
-TPETRA_INSTANTIATE_SLGN(UNIT_TEST_GROUP)
+TPETRA_INSTANTIATE_SLGN_NO_ORDINAL_SCALAR(UNIT_TEST_GROUP)
 
 }  // namespace
