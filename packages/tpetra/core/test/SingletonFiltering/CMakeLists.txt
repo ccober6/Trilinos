@@ -40,6 +40,8 @@ TRIBITS_COPY_FILES_TO_BINARY_DIR(SingletonFilteringFileCopies
     SF1_LHS_Reduced.mm
     SF1_RHS_Reduced.mm
     SF1_Matrix_Reduced_Map.mm
+    SF1_Solution_Reduced.mm
+    SF1_Solution.mm
     SF2_Matrix_Original.mm
     SF2_LHS_Original.mm
     SF2_RHS_Original.mm

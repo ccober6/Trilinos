@@ -454,7 +454,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     rvs() {
-  // ComputeFullSolution();
+  ComputeFullSolution();
 }
 
 //==============================================================================
@@ -1392,53 +1392,57 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   return;
 }
 
-////==============================================================================
-// int CrsSingletonFilter_LinearProblem::ComputeFullSolution() {
-//
-//   if ( SingletonsDetected() ) {
-//     int jj, k;
-//
-//     Epetra_MultiVector * FullLHS = FullProblem()->GetLHS();
-//     Epetra_MultiVector * FullRHS = FullProblem()->GetRHS();
-//
-//     tempX_->PutScalar(0.0); tempExportX_->PutScalar(0.0);
-//     // Inject values that the user computed for the reduced problem into the full solution vector
-//     EPETRA_CHK_ERR(tempX_->Export(*ReducedLHS_, *Full2ReducedLHSImporter_, Add));
-//
-//     FullLHS->Update(1.0, *tempX_, 1.0);
-//
-//     // Next we will use our full solution vector which is populated with pre-filter solution
-//     // values and reduced system solution values to compute the sum of the row contributions
-//     // that must be subtracted to get the post-filter solution values
-//
-//     EPETRA_CHK_ERR(FullMatrix()->Multiply(false, *FullLHS, *tempB_));
-//
-//     // Finally we loop through the local rows that were associated with column singletons and compute the
-//     // solution for these equations.
-//
-//     int NumVectors = tempB_->NumVectors();
-//     for (k=0; k<localNumSingletonCols_; k++) {
-//       int i = ColSingletonRowLIDs_[k];
-//       int j = ColSingletonColLIDs_[k];
-//       double pivot = ColSingletonPivots_[k];
-//       for (jj=0; jj<NumVectors; jj++)
-//         (*tempExportX_)[jj][j]= ((*FullRHS)[jj][i] - (*tempB_)[jj][i])/pivot;
-//     }
-//
-//     // Finally, insert values from post-solve step and we are done!!!!
-//
-//     if (FullMatrix()->RowMatrixImporter()!=0) {
-//       EPETRA_CHK_ERR(tempX_->Export(*tempExportX_, *FullMatrix()->RowMatrixImporter(), Add));
-//     }
-//     else {
-//       tempX_->Update(1.0, *tempExportX_, 0.0);
-//     }
-//
-//     FullLHS->Update(1.0, *tempX_, 1.0);
-//   }
-//
-//   return(0);
-// }
+//==============================================================================
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
+ComputeFullSolution() {
+
+  if ( SingletonsDetected() ) {
+    Teuchos::RCP<multivector_type> FullLHS = FullProblem()->getLHS();
+    Teuchos::RCP<multivector_type> FullRHS = FullProblem()->getRHS();
+
+    tempX_->putScalar(Scalar(0.0));
+    tempExportX_->putScalar(Scalar(0.0));
+
+    // Inject values that the user computed for the reduced problem into the full solution vector
+    tempX_->doExport(*ReducedLHS_, *Full2ReducedLHSImporter_, Tpetra::ADD);
+    FullLHS->update(Scalar(1.0), *tempX_, Scalar(1.0));  // FullLHS = 1.0 * tempX_ + 1.0 * FullLHS
+
+    // Next we will use our full solution vector which is populated with pre-filter solution
+    // values and reduced system solution values to compute the sum of the row contributions
+    // that must be subtracted to get the post-filter solution values
+    FullMatrix()->apply(*FullLHS, *tempB_);
+
+    // Finally we loop through the local rows that were associated with column singletons and compute the
+    // solution for these equations.
+    size_t NumVectors = tempB_->getNumVectors();
+    for (int k = 0; k < localNumSingletonCols_; k++) {
+      LocalOrdinal i = ColSingletonRowLIDs_[k];
+      LocalOrdinal j = ColSingletonColLIDs_[k];
+      Scalar pivot = ColSingletonPivots_[k];
+      for (size_t jj = 0; jj < NumVectors; jj++) {
+        auto tempExportXData = tempExportX_->getDataNonConst(jj);
+        auto FullRHSData = FullRHS->getData(jj);
+        auto tempBData = tempB_->getData(jj);
+        tempExportXData[j] = (FullRHSData[i] - tempBData[i]) / pivot;
+      }
+    }
+    
+
+    // Finally, insert values from post-solve step and we are done!!!!
+    auto importer = FullMatrix()->getGraph()->getImporter();
+    if (importer != Teuchos::null) {
+      tempX_->doExport(*tempExportX_, *importer, Tpetra::ADD);
+    }
+    else {
+      tempX_->update(Scalar(1.0), *tempExportX_, Scalar(0.0));
+    }
+
+    FullLHS->update(Scalar(1.0), *tempX_, Scalar(1.0));
+  }
+
+  return;
+}
 //==============================================================================
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>

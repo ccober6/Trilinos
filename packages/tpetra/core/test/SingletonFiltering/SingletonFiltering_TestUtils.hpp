@@ -238,8 +238,8 @@ bool compareMultiVectors(const Teuchos::RCP<const Tpetra::MultiVector<Scalar, LO
   if (A->getGlobalLength() != B->getGlobalLength() ||
       A->getNumVectors() != B->getNumVectors()) {
     out << "Global dimensions do not match." << std::endl;
-    out << "Global Length   : A(" << A->getGlobalLength() << " != B(" << B->getGlobalLength() << ")" << std::endl;
-    out << "Global # vectors: A(" << A->getNumVectors() << " != B(" << B->getNumVectors() << ")" << std::endl;
+    out << "Global Length   : A(" << A->getGlobalLength() << ") != B(" << B->getGlobalLength() << ")" << std::endl;
+    out << "Global # vectors: A(" << A->getNumVectors() << ") != B(" << B->getNumVectors() << ")" << std::endl;
     return false;
   }
 
