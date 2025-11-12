@@ -1395,9 +1395,8 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 //==============================================================================
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-ComputeFullSolution() {
-
-  if ( SingletonsDetected() ) {
+    ComputeFullSolution() {
+  if (SingletonsDetected()) {
     Teuchos::RCP<multivector_type> FullLHS = FullProblem()->getLHS();
     Teuchos::RCP<multivector_type> FullRHS = FullProblem()->getRHS();
 
@@ -1419,22 +1418,20 @@ ComputeFullSolution() {
     for (int k = 0; k < localNumSingletonCols_; k++) {
       LocalOrdinal i = ColSingletonRowLIDs_[k];
       LocalOrdinal j = ColSingletonColLIDs_[k];
-      Scalar pivot = ColSingletonPivots_[k];
+      Scalar pivot   = ColSingletonPivots_[k];
       for (size_t jj = 0; jj < NumVectors; jj++) {
         auto tempExportXData = tempExportX_->getDataNonConst(jj);
-        auto FullRHSData = FullRHS->getData(jj);
-        auto tempBData = tempB_->getData(jj);
-        tempExportXData[j] = (FullRHSData[i] - tempBData[i]) / pivot;
+        auto FullRHSData     = FullRHS->getData(jj);
+        auto tempBData       = tempB_->getData(jj);
+        tempExportXData[j]   = (FullRHSData[i] - tempBData[i]) / pivot;
       }
     }
-    
 
     // Finally, insert values from post-solve step and we are done!!!!
     auto importer = FullMatrix()->getGraph()->getImporter();
     if (importer != Teuchos::null) {
       tempX_->doExport(*tempExportX_, *importer, Tpetra::ADD);
-    }
-    else {
+    } else {
       tempX_->update(Scalar(1.0), *tempExportX_, Scalar(0.0));
     }
 

@@ -51,8 +51,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SingletonFiltering_P1, MultipleTransforms, LO,
   using SolverMap_t             = typename Tpetra::SolverMap_LinearProblem<Scalar, LO, GO, Node>;
   using Reindex_t               = typename Tpetra::Reindex_LinearProblem<Scalar, LO, GO, Node>;
   using Reader_t                = typename Tpetra::MatrixMarket::Reader<CrsMatrix_t>;
-  
-  
+
   auto Comm = Tpetra::getDefaultComm();
 
   RCP<CrsMatrix_t> A_Original;
@@ -72,7 +71,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SingletonFiltering_P1, MultipleTransforms, LO,
   CrsSingletonFiltering_t SingletonTransform(run_on_host, verbose);
   RCP<Problem_t> postSingletonProblem = SingletonTransform(preSingletonProblem);
   SingletonTransform.fwd();
-  
+
   // Solver Map Transform Forward
   SolverMap_t SolverMapTransform;
   RCP<Problem_t> postSolverMapProblem = SolverMapTransform(postSingletonProblem);
@@ -102,10 +101,8 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SingletonFiltering_P1, MultipleTransforms, LO,
   // Singleton Transform Reverse
   SingletonTransform.rvs();
 
-
   // Test so long as not long long.
   if constexpr (!std::is_same<Scalar, long long>::value) {
-
     RCP<MultiVector_t> solution = Reader_t::readDenseFile("SF1_Solution.mm", Comm, A_Original_Map);
 
     TEUCHOS_ASSERT(compareMultiVectors(
@@ -117,11 +114,10 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(SingletonFiltering_P1, MultipleTransforms, LO,
     solution->describe(out, Teuchos::VERB_EXTREME);
     out << "MultiVector preSingletonProblem->getLHS():" << std::endl;
     preSingletonProblem->getLHS()->describe(out, Teuchos::VERB_EXTREME);
-
   }
 }
 
-#define UNIT_TEST_GROUP(SCALAR, LO, GO, NODE) \
+#define UNIT_TEST_GROUP(SCALAR, LO, GO, NODE)                                            \
   TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(SingletonFiltering_P1, fwd, LO, GO, SCALAR, NODE) \
   TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(SingletonFiltering_P1, MultipleTransforms, LO, GO, SCALAR, NODE)
 
