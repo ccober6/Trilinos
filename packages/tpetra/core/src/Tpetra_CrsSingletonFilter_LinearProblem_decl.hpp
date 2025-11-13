@@ -158,6 +158,8 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   using local_multivector_type       = typename multivector_type::dual_view_type::t_dev;
   using const_local_multivector_type = typename local_multivector_type::const_type;
 
+  using local_vector_int_type   = typename vector_type_int::dual_view_type::t_dev;
+
   using device_type             = typename Node::device_type;
   using vector_view_type_int    = Kokkos::View<local_ordinal_type*, device_type>;
   using vector_view_type_scalar = Kokkos::View<scalar_type*, device_type>;
