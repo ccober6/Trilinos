@@ -24,12 +24,12 @@ struct CreatePostSolveArraysFunctor {
   ColIDView_type ColSingletonRowLIDs;
   ColIDView_type ColSingletonColLIDs;
 
-  LocalLO_type     NewColProfilesData;
-  LocalLO_type     ColProfilesData;
-  LocalLO_type     ColHasRowWithSingletonData;
+  LocalLO_type NewColProfilesData;
+  LocalLO_type ColProfilesData;
+  LocalLO_type ColHasRowWithSingletonData;
   ColMapColor_type ColMapColors_Data;
   RowMapColor_type RowMapColors_Data;
-  Counter_type     numSingletonCols;
+  Counter_type numSingletonCols;
 
   CreatePostSolveArraysFunctor(LocalLO_type localRowIDofSingletonColData,
                                ColIDView_type colSingletonRowLIDs, ColIDView_type colSingletonColLIDs,
@@ -353,7 +353,7 @@ struct SolveSingletonProblemFunctor {
 };
 
 // Functor to compute full singleton problem
-template<class View_type_int, class View_type_scalar, class SOL_type, class RHS_type>
+template <class View_type_int, class View_type_scalar, class SOL_type, class RHS_type>
 struct ComputeFullSolutionFunctor {
   using scalar_type = typename View_type_scalar::non_const_value_type;
 
@@ -366,32 +366,29 @@ struct ComputeFullSolutionFunctor {
   RHS_type localB;
 
   ComputeFullSolutionFunctor(View_type_int rowLIDs, View_type_int colLIDs, View_type_scalar pivots,
-                             SOL_type X, RHS_type RHS, RHS_type B) :
-  ColSingletonRowLIDs(rowLIDs),
-  ColSingletonColLIDs(colLIDs),
-  ColSingletonPivots(pivots),
-  localX(X),
-  localRHS(RHS),
-  localB(B)
-  {}
+                             SOL_type X, RHS_type RHS, RHS_type B)
+    : ColSingletonRowLIDs(rowLIDs)
+    , ColSingletonColLIDs(colLIDs)
+    , ColSingletonPivots(pivots)
+    , localX(X)
+    , localRHS(RHS)
+    , localB(B) {}
 
   KOKKOS_INLINE_FUNCTION
   void operator()(const size_t k) const {
-    int i = ColSingletonRowLIDs[k];
-    int j = ColSingletonColLIDs[k];
+    int i             = ColSingletonRowLIDs[k];
+    int j             = ColSingletonColLIDs[k];
     scalar_type pivot = ColSingletonPivots[k];
 
     size_t NumVectors = localX.extent(1);
     for (size_t jj = 0; jj < NumVectors; jj++) {
-      localX(j,jj) = (localRHS(i,jj) - localB(i,jj)) / pivot;
+      localX(j, jj) = (localRHS(i, jj) - localB(i, jj)) / pivot;
     }
   }
 };
 
-template<class Map_color_type, class LocalMap_type, class IndexList_type>
+template <class Map_color_type, class LocalMap_type, class IndexList_type>
 struct GenerateReducedMapFunctor {
-
-
   int color;
   Map_color_type mapColors;
   LocalMap_type lclMap;
@@ -402,22 +399,19 @@ struct GenerateReducedMapFunctor {
   Kokkos::View<size_t*, device_type> numView;
 
   // constructor for counting
-  GenerateReducedMapFunctor(int color_, Map_color_type mapColors_) :
-  color(color_),
-  mapColors(mapColors_)
-  {}
+  GenerateReducedMapFunctor(int color_, Map_color_type mapColors_)
+    : color(color_)
+    , mapColors(mapColors_) {}
 
   // constructor for inserting
-  GenerateReducedMapFunctor(int color_, Map_color_type mapColors_, LocalMap_type lclMap_, IndexList_type indexList_) :
-  color(color_),
-  mapColors(mapColors_),
-  lclMap(lclMap_),
-  indexList(indexList_)
-  {
-   Kokkos::resize(numView, 1);
-   Kokkos::deep_copy(numView, 0);
+  GenerateReducedMapFunctor(int color_, Map_color_type mapColors_, LocalMap_type lclMap_, IndexList_type indexList_)
+    : color(color_)
+    , mapColors(mapColors_)
+    , lclMap(lclMap_)
+    , indexList(indexList_) {
+    Kokkos::resize(numView, 1);
+    Kokkos::deep_copy(numView, 0);
   }
-
 
   // Functor to count number of elements with matching color (parallel-reduce)
   KOKKOS_INLINE_FUNCTION
@@ -431,11 +425,10 @@ struct GenerateReducedMapFunctor {
   KOKKOS_INLINE_FUNCTION
   void operator()(const size_t i) const {
     if (mapColors(i, 0) == color) {
-      auto num = Kokkos::atomic_fetch_add(&numView(0), 1); // ..atomic to count..
-     indexList(num) = lclMap.getGlobalElement(i); // to global
+      auto num       = Kokkos::atomic_fetch_add(&numView(0), 1);  // ..atomic to count..
+      indexList(num) = lclMap.getGlobalElement(i);                // to global
     }
   }
-
 };
 
 //==============================================================================
@@ -914,20 +907,20 @@ CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   } else {
     // Iterate through the global indices to find the ones that match the color
     using execution_space = typename vector_type_int::execution_space;
-    using range_policy = Kokkos::RangePolicy<execution_space>;
+    using range_policy    = Kokkos::RangePolicy<execution_space>;
 
     using IndexListType = Kokkos::View<GlobalOrdinal*, device_type>;
-    using functor_type = GenerateReducedMapFunctor<local_vector_int_type, local_map_type, IndexListType>;
+    using functor_type  = GenerateReducedMapFunctor<local_vector_int_type, local_map_type, IndexListType>;
     auto mapColors_Data = mapColors->getLocalViewDevice(Tpetra::Access::ReadWrite);
 
     // count number of elements with the matching color
     size_t lclNumReducedElements = 0;
-    size_t lclNumElements = originalMap->getLocalNumElements();
+    size_t lclNumElements        = originalMap->getLocalNumElements();
     {
       functor_type functor(color, mapColors_Data);
       Kokkos::parallel_reduce(
-        "CrsSingletonFilter_LinearProblem:GenerateReduceMap(count)", range_policy(0, lclNumElements),
-        functor, lclNumReducedElements);
+          "CrsSingletonFilter_LinearProblem:GenerateReduceMap(count)", range_policy(0, lclNumElements),
+          functor, lclNumReducedElements);
     }
     // create the list of elements with the matching color
     IndexListType indexList;
@@ -936,15 +929,15 @@ CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
       Kokkos::resize(indexList, lclNumReducedElements);
       functor_type functor(color, mapColors_Data, lclMap, indexList);
       Kokkos::parallel_for(
-        "CrsSingletonFilter_LinearProblem:GenerateReduceMap(insert)", range_policy(0, lclNumElements),
-        functor);
+          "CrsSingletonFilter_LinearProblem:GenerateReduceMap(insert)", range_policy(0, lclNumElements),
+          functor);
     }
 
     // Create the reduced map using the collected indices
     const Tpetra::global_size_t INVALID = Tpetra::Details::OrdinalTraits<Tpetra::global_size_t>::invalid();
-    reducedMap = Teuchos::rcp(new map_type(INVALID, indexList,
-                                           originalMap->getIndexBase(),
-                                           originalMap->getComm()));
+    reducedMap                          = Teuchos::rcp(new map_type(INVALID, indexList,
+                                                                    originalMap->getIndexBase(),
+                                                                    originalMap->getComm()));
   }
 
   return reducedMap;
@@ -1102,7 +1095,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       // * Only the maps have been setup, and hence the rowptr, colind, nzvals need to be still allocated.
       {
         using execution_space = typename vector_type_int::execution_space;
-        using range_policy = Kokkos::RangePolicy<execution_space>;
+        using range_policy    = Kokkos::RangePolicy<execution_space>;
 
         using graph_type   = typename local_matrix_type::StaticCrsGraphType;
         using row_map_type = typename graph_type::row_map_type::non_const_type;
@@ -1551,15 +1544,15 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       using execution_space = typename vector_type_int::execution_space;
       using range_policy    = Kokkos::RangePolicy<execution_space>;
       using functor_type    = ComputeFullSolutionFunctor<vector_view_type_int, vector_view_type_scalar,
-                                                         local_multivector_type, const_local_multivector_type>;
-      auto localB   = tempB_->getLocalViewDevice(Tpetra::Access::ReadOnly);
-      auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
-      auto localX   = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+                                                      local_multivector_type, const_local_multivector_type>;
+      auto localB           = tempB_->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto localRHS         = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto localX           = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
 
       functor_type functor(ColSingletonRowLIDs_, ColSingletonColLIDs_, ColSingletonPivots_, localX, localRHS, localB);
       Kokkos::parallel_for(
-        "CrsSingletonFilter_LinearProblem:ComputeFullSolution", range_policy(0, localNumSingletonCols_),
-        functor);
+          "CrsSingletonFilter_LinearProblem:ComputeFullSolution", range_policy(0, localNumSingletonCols_),
+          functor);
     }
 
     // Finally, insert values from post-solve step and we are done!!!!
