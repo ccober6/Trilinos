@@ -377,11 +377,6 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
   // Maximum number of entries in any row of the matrix, on this process.
   local_ordinal_type localMaxNumRowEntries_;
 
-  // Array of global indices of length localMaxNumRowEntries_
-  Teuchos::ArrayRCP<global_ordinal_type> Indices_;
-  // Array of scalars of length localMaxNumRowEntries_
-  Teuchos::ArrayRCP<scalar_type> Values_;
-
   Teuchos::RCP<vector_type_int> RowMapColors_;
   Teuchos::RCP<vector_type_int> ColMapColors_;
   bool FullMatrixIsCrsMatrix_;

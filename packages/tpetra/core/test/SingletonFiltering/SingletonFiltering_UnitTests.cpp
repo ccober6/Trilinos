@@ -39,14 +39,6 @@ class Test_CrsSingletonFilter_LinearProblem
     TEUCHOS_ASSERT(this->localMaxNumRowEntries_ == 6);
     TEUCHOS_ASSERT(this->FullMatrixIsCrsMatrix_ == true);
     TEUCHOS_ASSERT(this->FullCrsMatrix_ != Teuchos::null);
-
-    const Scalar zero(0);
-    for (auto i = 0; i < this->Indices_.size(); ++i) {
-      TEUCHOS_ASSERT(this->Indices_[i] == 0);
-    }
-    for (auto i = 0; i < this->Values_.size(); ++i) {
-      TEUCHOS_ASSERT(this->Values_[i] == zero);
-    }
   }
 
   void test_GetRow3(Teuchos::FancyOStream &out, bool &success) {  // 3 arguments

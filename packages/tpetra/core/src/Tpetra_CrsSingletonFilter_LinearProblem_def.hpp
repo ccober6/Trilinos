@@ -1585,14 +1585,6 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   // Cast to CrsMatrix, if possible.  Can save some work.
   FullCrsMatrix_         = Teuchos::rcp_dynamic_cast<crs_matrix_type>(FullMatrix());
   FullMatrixIsCrsMatrix_ = (FullCrsMatrix() != Teuchos::null);  // Pointer is non-null if cast worked
-  Indices_               = Teuchos::arcp(new global_ordinal_type[localMaxNumRowEntries_], 0, localMaxNumRowEntries_, true);
-  for (auto i = 0; i < Indices_.size(); ++i) {
-    Indices_[i] = 0;
-  }
-  Values_ = Teuchos::arcp(new scalar_type[localMaxNumRowEntries_], 0, localMaxNumRowEntries_, true);
-  for (auto i = 0; i < Values_.size(); ++i) {
-    Values_[i] = 0;
-  }
 
   return;
 }
