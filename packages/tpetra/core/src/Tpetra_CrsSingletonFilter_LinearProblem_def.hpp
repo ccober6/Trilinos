@@ -18,23 +18,23 @@
 namespace Tpetra {
 
 // Functor to create post-solve arrays
-template <class LocalLO_type, class ColIDView_type, class MapColor_type, class Counter_type>
+template <class LocalLO_type, class ColIDView_type, class ColMapColor_type, class RowMapColor_type, class Counter_type>
 struct CreatePostSolveArraysFunctor {
   LocalLO_type LocalRowIDofSingletonColData;
   ColIDView_type ColSingletonRowLIDs;
   ColIDView_type ColSingletonColLIDs;
 
-  LocalLO_type NewColProfilesData;
-  LocalLO_type ColProfilesData;
-  LocalLO_type ColHasRowWithSingletonData;
-  MapColor_type ColMapColors_Data;
-  MapColor_type RowMapColors_Data;
-  Counter_type numSingletonCols;
+  LocalLO_type     NewColProfilesData;
+  LocalLO_type     ColProfilesData;
+  LocalLO_type     ColHasRowWithSingletonData;
+  ColMapColor_type ColMapColors_Data;
+  RowMapColor_type RowMapColors_Data;
+  Counter_type     numSingletonCols;
 
   CreatePostSolveArraysFunctor(LocalLO_type localRowIDofSingletonColData,
                                ColIDView_type colSingletonRowLIDs, ColIDView_type colSingletonColLIDs,
                                LocalLO_type newColProfilesData, LocalLO_type colProfilesData, LocalLO_type colHasRowWithSingletonData,
-                               MapColor_type colMapColors_Data, MapColor_type rowMapColors_Data, Counter_type in_numSingletonCols)
+                               ColMapColor_type colMapColors_Data, RowMapColor_type rowMapColors_Data, Counter_type in_numSingletonCols)
     : LocalRowIDofSingletonColData(localRowIDofSingletonColData)
     , ColSingletonRowLIDs(colSingletonRowLIDs)
     , ColSingletonColLIDs(colSingletonColLIDs)
@@ -352,6 +352,42 @@ struct SolveSingletonProblemFunctor {
           lclNumSingletonCols++;
         }
       }
+    }
+  }
+};
+
+// Functor to compute full singleton problem
+template<class View_type_int, class View_type_scalar, class SOL_type, class RHS_type>
+struct ComputeFullSolutionFunctor {
+  using scalar_type = typename View_type_scalar::non_const_value_type;
+
+  View_type_int ColSingletonRowLIDs;
+  View_type_int ColSingletonColLIDs;
+  View_type_scalar ColSingletonPivots;
+
+  SOL_type localX;
+  RHS_type localRHS;
+  RHS_type localB;
+
+  ComputeFullSolutionFunctor(View_type_int rowLIDs, View_type_int colLIDs, View_type_scalar pivots,
+                             SOL_type X, RHS_type RHS, RHS_type B) :
+  ColSingletonRowLIDs(rowLIDs),
+  ColSingletonColLIDs(colLIDs),
+  ColSingletonPivots(pivots),
+  localX(X),
+  localRHS(RHS),
+  localB(B)
+  {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const size_t k) const {
+    int i = ColSingletonRowLIDs[k];
+    int j = ColSingletonColLIDs[k];
+    scalar_type pivot = ColSingletonPivots[k];
+
+    size_t NumVectors = localX.extent(1);
+    for (size_t jj = 0; jj < NumVectors; jj++) {
+      localX(j,jj) = (localRHS(i,jj) - localB(i,jj)) / pivot;
     }
   }
 };
@@ -1415,16 +1451,31 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     // Finally we loop through the local rows that were associated with column singletons and compute the
     // solution for these equations.
     size_t NumVectors = tempB_->getNumVectors();
-    for (int k = 0; k < localNumSingletonCols_; k++) {
-      LocalOrdinal i = ColSingletonRowLIDs_[k];
-      LocalOrdinal j = ColSingletonColLIDs_[k];
-      Scalar pivot   = ColSingletonPivots_[k];
-      for (size_t jj = 0; jj < NumVectors; jj++) {
-        auto tempExportXData = tempExportX_->getDataNonConst(jj);
-        auto FullRHSData     = FullRHS->getData(jj);
-        auto tempBData       = tempB_->getData(jj);
-        tempExportXData[j]   = (FullRHSData[i] - tempBData[i]) / pivot;
+    if (run_on_host_) {
+      for (int k = 0; k < localNumSingletonCols_; k++) {
+        LocalOrdinal i = ColSingletonRowLIDs_[k];
+        LocalOrdinal j = ColSingletonColLIDs_[k];
+        Scalar pivot   = ColSingletonPivots_[k];
+        for (size_t jj = 0; jj < NumVectors; jj++) {
+          auto tempExportXData = tempExportX_->getDataNonConst(jj);
+          auto FullRHSData     = FullRHS->getData(jj);
+          auto tempBData       = tempB_->getData(jj);
+          tempExportXData[j]   = (FullRHSData[i] - tempBData[i]) / pivot;
+        }
       }
+    } else {
+      using execution_space = typename vector_type_int::execution_space;
+      using range_policy    = Kokkos::RangePolicy<execution_space>;
+      using functor_type    = ComputeFullSolutionFunctor<vector_view_type_int, vector_view_type_scalar,
+                                                         local_multivector_type, const_local_multivector_type>;
+      auto localB   = tempB_->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto localRHS = FullRHS->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto localX   = tempExportX_->getLocalViewDevice(Tpetra::Access::ReadWrite);
+
+      functor_type functor(ColSingletonRowLIDs_, ColSingletonColLIDs_, ColSingletonPivots_, localX, localRHS, localB);
+      Kokkos::parallel_for(
+        "CrsSingletonFilter_LinearProblem:ComputeFullSolution", range_policy(0, localNumSingletonCols_),
+        functor);
     }
 
     // Finally, insert values from post-solve step and we are done!!!!
@@ -1573,11 +1624,11 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     // Register singleton columns (that were not already counted as singleton rows)
     // Check to see if any columns disappeared because all associated rows were eliminated
     local_ordinal_type localNumCols   = FullMatrix()->getLocalNumCols();
-    auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadWrite);
-    auto ColProfilesData              = ColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
-    auto RowMapColors_Data            = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
-    auto NewColProfilesData           = NewColProfiles.getLocalViewHost(Tpetra::Access::ReadWrite);
-    auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewHost(Tpetra::Access::ReadWrite);
+    auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewHost(Tpetra::Access::ReadOnly);
+    auto ColProfilesData              = ColProfiles.getLocalViewHost(Tpetra::Access::ReadOnly);
+    auto RowMapColors_Data            = RowMapColors_->getLocalViewHost(Tpetra::Access::ReadOnly);
+    auto NewColProfilesData           = NewColProfiles.getLocalViewHost(Tpetra::Access::ReadOnly);
+    auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewHost(Tpetra::Access::ReadOnly);
     auto ColMapColors_Data            = ColMapColors_->getLocalViewHost(Tpetra::Access::ReadWrite);
 
     for (int j = 0; j < localNumCols; j++) {
@@ -1599,11 +1650,11 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       // Register singleton columns (that were not already counted as singleton rows)
       // Check to see if any columns disappeared because all associated rows were eliminated
       local_ordinal_type localNumCols   = FullMatrix()->getLocalNumCols();
-      auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewDevice(Tpetra::Access::ReadWrite);
-      auto ColProfilesData              = ColProfiles.getLocalViewDevice(Tpetra::Access::ReadWrite);
-      auto RowMapColors_Data            = RowMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
-      auto NewColProfilesData           = NewColProfiles.getLocalViewDevice(Tpetra::Access::ReadWrite);
-      auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewDevice(Tpetra::Access::ReadWrite);
+      auto localRowIDofSingletonColData = localRowIDofSingletonCol.getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto ColProfilesData              = ColProfiles.getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto RowMapColors_Data            = RowMapColors_->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto NewColProfilesData           = NewColProfiles.getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto ColHasRowWithSingletonData   = ColHasRowWithSingleton.getLocalViewDevice(Tpetra::Access::ReadOnly);
       auto ColMapColors_Data            = ColMapColors_->getLocalViewDevice(Tpetra::Access::ReadWrite);
 
       // counter to be atomic-incremented
