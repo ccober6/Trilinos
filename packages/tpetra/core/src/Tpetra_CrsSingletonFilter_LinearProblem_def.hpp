@@ -881,7 +881,8 @@ template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>
 CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
-                       const Teuchos::RCP<vector_type_int>& mapColors, int color) {
+                       const Teuchos::RCP<vector_type_int>& mapColors, int color,
+                       bool locally_sort_gids) {
   Teuchos::RCP<const map_type> reducedMap;
   bool canRunOnHost = std::is_same_v<typename device_type::memory_space, Kokkos::HostSpace>;
   if (run_on_host_ && canRunOnHost) {
@@ -931,6 +932,10 @@ CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
       Kokkos::parallel_for(
           "CrsSingletonFilter_LinearProblem:GenerateReduceMap(insert)", range_policy(0, lclNumElements),
           functor);
+    }
+    if (locally_sort_gids) {
+      // locally-sort the matched GIDs
+      Kokkos::sort(execution_space(), indexList);
     }
 
     // Create the reduced map using the collected indices
@@ -1330,13 +1335,13 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
       }
     } else {
       // Not part of the reduced matrix
+      using execution_space = typename vector_type_int::execution_space;
+      using range_policy    = Kokkos::RangePolicy<execution_space>;
       {
-        using execution_space = typename vector_type_int::execution_space;
         using error_code_type = typename Kokkos::View<int*, execution_space>;
         using functor_type    = SolveSingletonProblemFunctor<scalar_type, local_ordinal_type, global_ordinal_type, Node, local_map_type, local_matrix_type,
                                                           local_multivector_type, const_local_multivector_type,
                                                           vector_view_type_int, vector_view_type_scalar, error_code_type>;
-        using range_policy    = Kokkos::RangePolicy<execution_space>;
 
         auto lclFullRowMap    = FullMatrixRowMap()->getLocalMap();
         auto lclFullColMap    = FullMatrixColMap()->getLocalMap();
@@ -1372,9 +1377,7 @@ void CrsSingletonFilter_LinearProblem<Scalar, LocalOrdinal, GlobalOrdinal, Node>
 
       // Part of the reduced matrix
       {
-        using execution_space = typename vector_type_int::execution_space;
         using functor_type    = UpdateReducedProblemFunctor<local_ordinal_type, global_ordinal_type, local_map_type, local_matrix_type>;
-        using range_policy    = Kokkos::RangePolicy<execution_space>;
 
         auto lclFullRowMap    = FullMatrixRowMap()->getLocalMap();
         auto lclFullColMap    = FullMatrixColMap()->getLocalMap();

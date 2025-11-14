@@ -333,7 +333,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
 
   Teuchos::RCP<const map_type> GenerateReducedMap(const Teuchos::RCP<const map_type>& originalMap,
                                                   const Teuchos::RCP<vector_type_int>& mapColors,
-                                                  int color = 0);
+                                                  int color = 0, bool locally_sort_gids = true);
 
   Teuchos::RCP<linear_problem_type> FullProblem_;
   Teuchos::RCP<linear_problem_type> ReducedProblem_;
