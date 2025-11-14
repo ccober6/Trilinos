@@ -162,7 +162,7 @@ class CrsSingletonFilter_LinearProblem : public SameTypeTransform<Tpetra::Linear
 
   using device_type             = typename Node::device_type;
   using vector_view_type_int    = Kokkos::View<local_ordinal_type*, device_type>;
-  using vector_view_type_scalar = Kokkos::View<scalar_type*, device_type>;
+  using vector_view_type_scalar = Kokkos::View<impl_scalar_type*, device_type>;
   //@}
 
   //@{ \name Constructors/Destructor.
