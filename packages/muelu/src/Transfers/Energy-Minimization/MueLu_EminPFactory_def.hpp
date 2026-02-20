@@ -179,7 +179,7 @@ void EminPFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::BuildP(Level& fine
     solverType = "Pseudo Block GMRES";
 
   RCP<Matrix> P;
-  {
+  if (numIts > 0) {
     // Construct diagonal preconditioner
     RCP<const Vector> invDiagonal = Utilities::GetMatrixDiagonalInverse(*A);
     auto invD                     = MatrixFactory::Build(invDiagonal);
@@ -231,13 +231,12 @@ void EminPFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::BuildP(Level& fine
       if (numIts > 0) solver->solve();
     }
     // Convert from vector to matrix
-    if (numIts > 0)
-      P = X->GetMatrixWithEntriesFromVector(*vecP);
-    else
-      P = Xpetra::MatrixFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::BuildCopy(P0);
-    if (P0->IsView("stridedMaps"))
-      P->CreateView("stridedMaps", P0);
+    P = X->GetMatrixWithEntriesFromVector(*vecP);
+  } else {
+    P = Xpetra::MatrixFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::BuildCopy(P0);
   }
+  if (P0->IsView("stridedMaps"))
+    P->CreateView("stridedMaps", P0);
 
   if (IsPrint(Statistics1)) {
     SubFactoryMonitor m2(*this, "Statistics", coarseLevel);
