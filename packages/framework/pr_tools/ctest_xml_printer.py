@@ -153,7 +153,7 @@ def parse_args(argv=None):
 def main(argv=None) -> int:
     args = parse_args(argv)
 
-    n_error = 0
+    n_errors = 0
     n_warnings = 0
 
     if args.build_errors:
