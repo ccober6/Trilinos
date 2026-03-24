@@ -47,11 +47,7 @@ class BuildTargetInfo:
     exit_val: str
 
     def __str__(self):
-        msg = f"""{self.info_type} when building {self.output_type} {self.output_file}:
-    Command: {self.command}
-    {self.stderr}
-        """
-        return msg
+        return f"{self.info_type} when building {self.output_type} {self.output_file}: Command: {self.command} {self.stderr}"
 
     def pretty_print(self):
         print(f"Info type: {self.info_type}")
