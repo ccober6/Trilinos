@@ -111,6 +111,7 @@ jobs:
             --max-cores-allowed=29 \
             --num-concurrent-tests=16
       - name: Build output logs
+        if: success() || failure()
         shell: bash -l {0}
         run: |
           build_dir=/home/Trilinos/build
@@ -219,6 +220,7 @@ jobs:
             --max-cores-allowed=29 \
             --num-concurrent-tests=16
       - name: Build output logs
+        if: success() || failure()
         shell: bash -l {0}
         run: |
           build_dir=/home/Trilinos/build
@@ -327,6 +329,7 @@ jobs:
             --num-concurrent-tests=112 \
             --slots-per-gpu=8
       - name: Build output logs
+        if: success() || failure()
         shell: bash -l {0}
         run: |
           build_dir=/home/Trilinos/build
@@ -436,15 +439,15 @@ jobs:
             --max-cores-allowed=29 \
             --num-concurrent-tests=16
       - name: Build output logs
+        if: success() || failure()
         shell: bash -l {0}
-        env:
-          PYTHONUNBUFFERED: "1"
         run: |
           build_dir=/home/Trilinos/build
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
             --print-errors \
+            --print-warnings \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
@@ -545,6 +548,7 @@ jobs:
             --max-cores-allowed=56 \
             --skip-run-tests
       - name: Build output logs
+        if: success() || failure()
         shell: bash -l {0}
         run: |
           build_dir=/home/Trilinos/build
@@ -650,6 +654,7 @@ jobs:
             --max-cores-allowed=29 \
             --num-concurrent-tests=16
       - name: Build output logs
+        if: success() || failure()
         shell: bash -l {0}
         run: |
           build_dir=/home/Trilinos/build
@@ -860,6 +865,7 @@ jobs:
             --filename-subprojects ./package_subproject_list.cmake \
             --skip-create-packageenables
       - name: Build output logs
+        if: success() || failure()
         shell: bash -l {0}
         run: |
           build_dir=/home/Trilinos/build
