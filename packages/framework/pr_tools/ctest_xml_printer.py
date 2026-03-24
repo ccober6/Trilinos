@@ -49,10 +49,9 @@ class BuildTargetInfo:
     exit_val: str
 
     def __str__(self):
-        msg = f"""
-            {self.info_type} when building {self.output_type} {self.output_file}:
-            Command: {self.command}
-            {self.stderr}
+        msg = f"""{self.info_type} when building {self.output_type} {self.output_file}:
+    Command: {self.command}
+    {self.stderr}
         """
         return msg
 
@@ -103,24 +102,26 @@ def parse_into_target_info(xml_file: str) -> BuildTargetInfo:
 def handle_build_errors(args) -> int:
     xml_path = args.ctest_xml_dir
     xml_files = [f.name for f in xml_path.glob("*.xml") if f.is_file() and "error" in f.name]
-    for f in xml_files:
-        target_info = parse_into_target_info(xml_path / f)
-        if args.github_actions_mode:
-            print(f"::error::{target_info}")
-        else:
-            print(target_info)
+    if args.print_errors:
+        for f in xml_files:
+            target_info = parse_into_target_info(xml_path / f)
+            if args.github_actions_mode:
+                print(f"::error::{target_info}")
+            else:
+                print(target_info)
     return len(xml_files)
 
 
 def handle_build_warnings(args) -> int:
     xml_path = args.ctest_xml_dir
     xml_files = [f.name for f in xml_path.glob("*.xml") if f.is_file() and "warning" in f.name]
-    for f in xml_files:
-        target_info = parse_into_target_info(xml_path / f)
-        if args.github_actions_mode:
-            print(f"::warning::{target_info}")
-        else:
-            print(target_info)
+    if args.print_warnings:
+        for f in xml_files:
+            target_info = parse_into_target_info(xml_path / f)
+            if args.github_actions_mode:
+                print(f"::warning::{target_info}")
+            else:
+                print(target_info)
     return len(xml_files)
 
 
@@ -133,14 +134,14 @@ def parse_args(argv=None):
         help="Path to CTest Testing directory.",
     )
     parser.add_argument(
-        "--build-errors",
+        "--print-errors",
         action="store_true",
-        help="Parse CTest-generated warning XML files.",
+        help="Print all compiler errors.",
     )
     parser.add_argument(
-        "--build-warnings",
+        "--print-warnings",
         action="store_true",
-        help="Parse CTest-generated warning XML files.",
+        help="Print all compiler warnings.",
     )
     parser.add_argument(
         "--github-actions-mode",
@@ -153,13 +154,8 @@ def parse_args(argv=None):
 def main(argv=None) -> int:
     args = parse_args(argv)
 
-    n_errors = 0
-    n_warnings = 0
-
-    if args.build_errors:
-        n_errors = handle_build_errors(args)
-    if args.build_warnings:
-        n_warnings = handle_build_warnings(args)
+    n_errors = handle_build_errors(args)
+    n_warnings = handle_build_warnings(args)
 
     print(f"Summary: total errors: {n_errors}, total warnings: {n_warnings}")
     return 0

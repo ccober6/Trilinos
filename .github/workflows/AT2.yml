@@ -117,7 +117,7 @@ jobs:
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
-            --build-errors \
+            --print-errors \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
@@ -225,7 +225,7 @@ jobs:
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
-            --build-errors \
+            --print-errors \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
@@ -333,7 +333,7 @@ jobs:
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
-            --build-errors \
+            --print-errors \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
@@ -444,8 +444,7 @@ jobs:
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
-            --build-errors \
-            --build-warnings \
+            --print-errors \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
@@ -552,7 +551,7 @@ jobs:
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
-            --build-errors \
+            --print-errors \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
@@ -657,7 +656,7 @@ jobs:
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
-            --build-errors \
+            --print-errors \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
@@ -765,7 +764,7 @@ jobs:
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
-            --build-errors \
+            --print-errors \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
@@ -867,7 +866,7 @@ jobs:
           build_tag=$(head -n 1 ${build_dir}/Testing/TAG)
           python3 ${GITHUB_WORKSPACE}/packages/framework/pr_tools/ctest_xml_printer.py \
             --ctest-xml-dir /home/Trilinos/build/Testing/${build_tag}/Build \
-            --build-errors \
+            --print-errors \
             --github-actions-mode
       - name: Copy artifacts
         if: success() || failure()
