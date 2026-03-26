@@ -3112,7 +3112,7 @@ void CrsGraph<LocalOrdinal, GlobalOrdinal, Node>::
                              const Teuchos::RCP<const export_type>& exporter,
                              const Teuchos::RCP<Teuchos::ParameterList>& params) {
   const char tfecfFuncName[] = "expertStaticFillComplete: ";
-  auto MM                    = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra ESFC-G-Setup"));
+  Tpetra::Details::ProfilingRegion prESFC("Tpetra::CrsGraph::expertStaticFillComplete");
 
   TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(
       domainMap.is_null() || rangeMap.is_null(),
@@ -3154,21 +3154,21 @@ void CrsGraph<LocalOrdinal, GlobalOrdinal, Node>::
   indicesAreGlobal_ = false;
 
   // set domain/range map: may clear the import/export objects
-  MM = Teuchos::null;
-  MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra ESFC-G-Maps"));
-  setDomainRangeMaps(domainMap, rangeMap);
+  {
+    Tpetra::Details::ProfilingRegion pr("Tpetra ESFC-G-Maps");
+    setDomainRangeMaps(domainMap, rangeMap);
+  }
 
   // Presume the user sorted and merged the arrays first
   indicesAreSorted_ = true;
   noRedundancies_   = true;
 
   // makeImportExport won't create a new importer/exporter if I set one here first.
-  MM = Teuchos::null;
-  MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra ESFC-G-mIXcheckI"));
 
   importer_ = Teuchos::null;
   exporter_ = Teuchos::null;
   if (importer != Teuchos::null) {
+    Tpetra::Details::ProfilingRegion pr("Tpetra ESFC-G-mIXcheckI");
     TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(
         !importer->getSourceMap()->isSameAs(*getDomainMap()) ||
             !importer->getTargetMap()->isSameAs(*getColMap()),
@@ -3176,10 +3176,8 @@ void CrsGraph<LocalOrdinal, GlobalOrdinal, Node>::
     importer_ = importer;
   }
 
-  MM = Teuchos::null;
-  MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra ESFC-G-mIXcheckE"));
-
   if (exporter != Teuchos::null) {
+    Tpetra::Details::ProfilingRegion pr("Tpetra ESFC-G-mIXcheckE");
     TEUCHOS_TEST_FOR_EXCEPTION_CLASS_FUNC(
         !exporter->getSourceMap()->isSameAs(*getRowMap()) ||
             !exporter->getTargetMap()->isSameAs(*getRangeMap()),
@@ -3187,25 +3185,25 @@ void CrsGraph<LocalOrdinal, GlobalOrdinal, Node>::
     exporter_ = exporter;
   }
 
-  MM = Teuchos::null;
-  MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra ESFC-G-mIXmake"));
-  Teuchos::Array<int> remotePIDs(0);  // unused output argument
-  this->makeImportExport(remotePIDs, false);
+  {
+    Tpetra::Details::ProfilingRegion pr("Tpetra ESFC-G-mIXmake");
+    Teuchos::Array<int> remotePIDs(0);  // unused output argument
+    this->makeImportExport(remotePIDs, false);
+  }
 
-  MM = Teuchos::null;
-  MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra ESFC-G-fLG"));
-  this->fillLocalGraph(params);
+  {
+    Tpetra::Details::ProfilingRegion pr("Tpetra ESFC-G-fLG");
+    this->fillLocalGraph(params);
+  }
 
   const bool callComputeGlobalConstants = params.get() == nullptr ||
                                           params->get("compute global constants", true);
 
   if (callComputeGlobalConstants) {
-    MM = Teuchos::null;
-    MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra ESFC-G-cGC (const)"));
+    Tpetra::Details::ProfilingRegion pr("Tpetra ESFC-G-cGC (const)");
     this->computeGlobalConstants();
   } else {
-    MM = Teuchos::null;
-    MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra ESFC-G-cGC (noconst)"));
+    Tpetra::Details::ProfilingRegion pr("Tpetra ESFC-G-cGC (noconst)");
     this->computeLocalConstants();
   }
 

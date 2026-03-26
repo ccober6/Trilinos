@@ -1061,6 +1061,7 @@ void Import<LocalOrdinal, GlobalOrdinal, Node>::
   Array<int>& remoteProcIDs = useRemotePIDs ? userRemotePIDs : newRemotePIDs;
 
   if (lookup == IDNotPresent) {
+    Tpetra::Details::ProfilingRegion pr("Tpetra:iport_ctor:setupExport:1");
     // There is at least one GID owned by the calling process in the
     // target Map, which is not owned by any process in the source
     // Map.
@@ -1088,8 +1089,6 @@ void Import<LocalOrdinal, GlobalOrdinal, Node>::
                                           "on the source Map returned IDNotPresent, but none of the returned "
                                           "\"remote\" process ranks are -1.  Please report this bug to the "
                                           "Tpetra developers.");
-
-    auto MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra:iport_ctor:setupExport:1"));
 
     // If all of them are invalid, we can delete the whole array.
     const size_type totalNumRemote = this->getNumRemoteIDs();
@@ -1146,6 +1145,7 @@ void Import<LocalOrdinal, GlobalOrdinal, Node>::
   // remoteProcIDs[i], remoteGIDs[i], and remoteLIDs_[i] all refer
   // to the same thing.
   {
+    Tpetra::Details::ProfilingRegion pr("Tpetra:iport_ctor:setupExport:2");
     this->TransferData_->remoteLIDs_.modify_host();
     auto remoteLIDs = this->TransferData_->remoteLIDs_.view_host();
     sort3(remoteProcIDs.begin(),
@@ -1161,24 +1161,23 @@ void Import<LocalOrdinal, GlobalOrdinal, Node>::
   // exportGIDs and exportProcIDs_ are output arrays which are
   // allocated by createFromRecvs().
   Array<GO> exportGIDs;
+  {
+    Tpetra::Details::ProfilingRegion pr("Tpetra:iport_ctor:setupExport:3");
 
-  auto MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra:iport_ctor:setupExport:3"));
-
-  if (this->verbose()) {
-    std::ostringstream os;
-    os << *prefix << "Call createFromRecvs" << endl;
-    this->verboseOutputStream() << endl;
+    if (this->verbose()) {
+      std::ostringstream os;
+      os << *prefix << "Call createFromRecvs" << endl;
+      this->verboseOutputStream() << endl;
+    }
+    this->TransferData_->distributor_.createFromRecvs(remoteGIDsView().getConst(),
+                                                      remoteProcIDs, exportGIDs,
+                                                      this->TransferData_->exportPIDs_);
   }
-  this->TransferData_->distributor_.createFromRecvs(remoteGIDsView().getConst(),
-                                                    remoteProcIDs, exportGIDs,
-                                                    this->TransferData_->exportPIDs_);
-
   // Find the LIDs corresponding to the (outgoing) GIDs in
   // exportGIDs.  For sparse matrix-vector multiply, this tells the
   // calling process how to index into the source vector to get the
   // elements which it needs to send.
-  MM = Teuchos::null;
-  MM = Teuchos::rcp(new Tpetra::Details::ProfilingRegion("Tpetra:iport_ctor:setupExport:4"));
+  Tpetra::Details::ProfilingRegion pr("Tpetra:iport_ctor:setupExport:4");
 
   // NOTE (mfh 03 Mar 2014) This is now a candidate for a
   // thread-parallel kernel, but only if using the new thread-safe
