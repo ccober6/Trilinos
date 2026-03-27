@@ -13,6 +13,8 @@
 /// \file Tpetra_CrsGraph_def.hpp
 /// \brief Definition of the Tpetra::CrsGraph class
 
+#include <memory>
+#include "Tpetra_Details_iallreduce.hpp"
 #ifdef KOKKOS_ENABLE_SYCL
 #include <sycl/sycl.hpp>
 #endif
@@ -3857,13 +3859,19 @@ void CrsGraph<LocalOrdinal, GlobalOrdinal, Node>::
 
   ProfilingRegion regionCGC("Tpetra::CrsGraph::computeGlobalConstants");
 
+  GST lcl, gbl;
+  std::shared_ptr<Details::CommRequest> req;
+  if (!this->haveGlobalConstants_) {
+    lcl = static_cast<GST>(this->getLocalNumEntries());
+    req = Details::iallreduce(lcl, gbl, Teuchos::REDUCE_SUM, *this->getComm());
+  }
+
   this->computeLocalConstants();
 
   // Compute global constants from local constants.  Processes that
   // already have local constants still participate in the
   // all-reduces, using their previously computed values.
   if (!this->haveGlobalConstants_) {
-    const Teuchos::Comm<int>& comm = *(this->getComm());
     // Promote all the nodeNum* and nodeMaxNum* quantities from
     // size_t to global_size_t, when doing the all-reduces for
     // globalNum* / globalMaxNum* results.
@@ -3876,15 +3884,13 @@ void CrsGraph<LocalOrdinal, GlobalOrdinal, Node>::
     // good idea to use nonblocking all-reduces (MPI 3), so that we
     // don't have to wait around for the first one to finish before
     // starting the second one.
-    GST lcl, gbl;
-    lcl = static_cast<GST>(this->getLocalNumEntries());
+    const GST lclMaxNumRowEnt = static_cast<GST>(this->nodeMaxNumRowEntries_);
+    auto req2                 = Details::iallreduce(lclMaxNumRowEnt, this->globalMaxNumRowEntries_, Teuchos::REDUCE_MAX, *this->getComm());
 
-    reduceAll<int, GST>(comm, Teuchos::REDUCE_SUM, 1, &lcl, &gbl);
+    req->wait();
     this->globalNumEntries_ = gbl;
 
-    const GST lclMaxNumRowEnt = static_cast<GST>(this->nodeMaxNumRowEntries_);
-    reduceAll<int, GST>(comm, Teuchos::REDUCE_MAX, lclMaxNumRowEnt,
-                        outArg(this->globalMaxNumRowEntries_));
+    req2->wait();
     this->haveGlobalConstants_ = true;
   }
 }
