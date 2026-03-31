@@ -1,0 +1,15 @@
+name: Caller workflow for Nightly builds
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronized
+  workflow_dispatch:
+
+jobs:
+  cuda-kokkos-bounds-check:
+    uses: ./.github/workflows/ci_pipeline.yml
+    with:
+      target-runner-labels: "[self-hosted, cuda-12.4.1-gcc-12.3.0-openmpi-4.1.6, 20251204, gpu:A100]"
+      genconfig-string: "cuda-12.4.1-gcc-12.3.0-openmpi-4.1.6"

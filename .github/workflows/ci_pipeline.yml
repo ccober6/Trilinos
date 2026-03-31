@@ -1,0 +1,21 @@
+name: Trilinos CI Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      target-runner-labels:
+        required: true
+        type: string
+      genconfig-string:
+        required: true
+        type: string
+
+
+jobs:
+  ci:
+    runs-on: ${{ fromJson(inputs.target-runner-labels) }}
+    steps:
+      - name: Printing workflow inputs
+        run: |
+          echo "${{ inputs.target-runner-labels}}"
+          echo "${{ inputs.genconfig-string }}"
