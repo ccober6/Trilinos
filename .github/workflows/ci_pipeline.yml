@@ -11,9 +11,18 @@ on:
         type: string
       max-cores-allowed:
         description: 'Max cores allowed that is detected on the system.'
-        required: true
+        required: false
         type: number
         default: 12
+      ctest-drop-site:
+        required: false
+        type: string
+        default: "sems-cdash-son.sandia.gov/cdash"
+      cdash-track:
+        description: 'Pull Request, Nightly, or Experimental'
+        required: false
+        type: string
+        default: "Pull Request"
       num-concurrent-tests:
         description: 'Number of concurrent tests allowed in CTest.'
         required: false
@@ -34,9 +43,6 @@ on:
 jobs:
   build-test:
     runs-on: ${{ fromJson(inputs.target-runner-labels) }}
-    env:
-      TRILINOS_DIR: "${GITHUB_WORKSPACE}/Trilinos"
-      BUILD_DIR: "${GITHUB_WORKSPACE}/build"
     steps:
       - name: Print workflow inputs
         run: |
@@ -60,9 +66,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 1
-          path: 'Trilinos'
       - name: Print repo status
-        working-directory: ${TRILINOS_DIR}
         run: |
           pwd
           ls -lhat
@@ -74,18 +78,47 @@ jobs:
         run: |
           ccache --show-stats --verbose
       - name: Get PR script dependencies
-        working-directory: ${TRILINOS_DIR}/packages/framework
+        working-directory: ./packages/framework
         run: |
-          mkdir -p ${BUILD_DIR}
+          mkdir -p /home/runner/build
           ./get_dependencies.sh
       - name: Run build and test driver script
         shell: bash -l {0}
-        working-directory: $BUILD_DIR
+        working-directory: /home/runner/build
         run: |
+          # python is python3 hackery
           pwd
           mkdir bin
           pushd bin
           ln -s $(type -p python3) python
           export PATH=$(pwd):${PATH}
           popd
+
+          export TRILINOS_DIR=${GITHUB_WORKSPACE:?}
+          export BUILD_DIR=/home/runner/build
+          export PYTHONPATH=${PYTHONPATH}:${TRILINOS_DIR}/packages/framework/GenConfig
+          export PYTHONPATH=${PYTHONPATH}:${TRILINOS_DIR}/packages/framework/pr_tools
+          printf "\n\n\n"
+
+          echo "image: ${AT2_IMAGE_FULLPATH:-${AT2_IMAGE:-unknown}}"
+          type python
+          python3 ${TRILINOS_DIR}/packages/framework/pr_tools/PullRequestLinuxDriverTest.py \
+            --target-branch-name ${{ github.event.pull_request.base.ref }} \
+            --genconfig-build-name ${{ inputs.genconfig-string }} \
+            --pullrequest-number ${{ github.event.pull_request.number }} \
+            --pullrequest-env-config-file ${TRILINOS_DIR}/packages/framework/pr_tools/trilinos_pr.ini \
+            --pullrequest-gen-config-file ${TRILINOS_DIR}/packages/framework/GenConfig/src/gen-config.ini \
+            --workspace-dir ${GITHUB_WORKSPACE} \
+            --source-dir ${TRILINOS_DIR} \
+            --build-dir ${BUILD_DIR} \
+            --dashboard-build-name=PR-${{ github.event.pull_request.number }}_${AT2_IMAGE}_release_static \
+            --ctest-driver ${TRILINOS_DIR}/cmake/SimpleTesting/cmake/ctest-driver.cmake \
+            --ctest-drop-site ${{ inputs.cdash-drop-site }} \
+            --pullrequest-cdash-track ${{ inputs.cdash-track }}
+            --filename-subprojects ./package_subproject_list.cmake \
+            --filename-packageenables ./packageEnables.cmake \
+            --max-cores-allowed=${{ inputs.max-cores-allowed }} \
+            --num-concurrent-tests=112 ${{ inputs.num-concurrent-tests }} \
+            --slots-per-gpu=${{ inputs.slots-per-gpu }} \
+            ${{ inputs.extra-pr-drive-args }}
 
