@@ -1,4 +1,4 @@
-name: Trilinos CI Pipeline
+name: Single build and test pipeline
 
 on:
   workflow_call:
@@ -9,13 +9,32 @@ on:
       genconfig-string:
         required: true
         type: string
+      max-cores-allowed:
+        description: 'Max cores allowed that is detected on the system.'
+        required: true
+        type: number
+        default: 12
+      num-concurrent-tests:
+        description: 'Number of concurrent tests allowed in CTest.'
+        required: false
+        type: number
+        default: -1
+      slots-per-gpu:
+        description: 'On a GPU machine, this is number of slots allowed per GPU. (e.g. 4 allows 4 MPI ranks per GPU)'
+        required: false
+        type: number
+        default: 0
+      extra-pr-driver-args:
+        description: 'Extra arguments to be used when calling PullRequestLinuxDriverTest.py'
+        required: false
+        type: string
 
 defaults:
   run:
     shell: bash -l {0}
 
 jobs:
-  ci:
+  build-test:
     runs-on: ${{ fromJson(inputs.target-runner-labels) }}
     steps:
       - name: Print workflow inputs
@@ -48,7 +67,17 @@ jobs:
       - name: Get PR script dependencies
         working-directory: ./packages/framework
         run: |
+          mkdir -p /home/Trilinos/build
           ./get_dependencies.sh
+      - name: Run build and test driver script
+        working-directory: /home/Trilinos/build
+        run: |
+          pwd
+          echo "GenConfig string: ${{ inputs.genconfig-string }}"
+          echo "Max cores allowed: ${{ inputs.max-cores-allowed }}"
+          echo "Num concurrent test: ${{ inputs.num-concurrent-tests }}"
+          echo "Slots per GPU: ${{ inputs.slots-per-gpu }}"
+          echo "Extra PR driver args: ${{ inputs.extra-pr-driver-args }}"
 
       
 
