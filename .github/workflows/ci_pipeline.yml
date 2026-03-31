@@ -44,39 +44,35 @@ jobs:
   build-test:
     runs-on: ${{ fromJson(inputs.target-runner-labels) }}
     steps:
-      - name: Print workflow inputs
-        run: |
-          echo "TRILINOS_DIR: ${TRILINOS_DIR}"
-          echo "BUILD_DIR: ${BUILD_DIR}"
-          echo "GenConfig string: ${{ inputs.genconfig-string }}"
-          echo "Max cores allowed: ${{ inputs.max-cores-allowed }}"
-          echo "Num concurrent test: ${{ inputs.num-concurrent-tests }}"
-          echo "Slots per GPU: ${{ inputs.slots-per-gpu }}"
-          echo "Extra PR driver args: ${{ inputs.extra-pr-driver-args }}"
-      - name: Print environment
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: |
-          env
-      - name: Print module list
-        shell: bash -l {0}
-        run: |
-          module list
       - name: Clone Trilinos
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 1
-      - name: Print repo status
+      - name: Print debug outputs
+        shell: bash -l {0}
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
         run: |
+          echo "::group::Loaded environment variables"
+          env
+          echo "::endgroup::"
+
+          echo "::group::Loaded modules"
+          module list
+          echo "::endgroup::"
+
+          echo "::group::Ccache stats"
+          ccache --show-stats --verbose
+          echo "::endgroup::"
+
+          echo "::group::Cloned repository status"
           pwd
           ls -lhat
           git status
           git fetch origin develop
           git branch -vv
           git branch -a
-      - name: Print ccache stats
-        run: |
-          ccache --show-stats --verbose
+          echo "::endgroup::"
       - name: Get PR script dependencies
         working-directory: ./packages/framework
         run: |
@@ -113,12 +109,12 @@ jobs:
             --build-dir ${BUILD_DIR} \
             --dashboard-build-name=PR-${{ github.event.pull_request.number }}_${AT2_IMAGE}_release_static \
             --ctest-driver ${TRILINOS_DIR}/cmake/SimpleTesting/cmake/ctest-driver.cmake \
-            --ctest-drop-site ${{ inputs.cdash-drop-site }} \
-            --pullrequest-cdash-track ${{ inputs.cdash-track }}
+            --ctest-drop-site ${{ inputs.ctest-drop-site }} \
+            --pullrequest-cdash-track ${{ inputs.cdash-track }} \
             --filename-subprojects ./package_subproject_list.cmake \
             --filename-packageenables ./packageEnables.cmake \
             --max-cores-allowed=${{ inputs.max-cores-allowed }} \
-            --num-concurrent-tests=112 ${{ inputs.num-concurrent-tests }} \
+            --num-concurrent-tests=${{ inputs.num-concurrent-tests }} \
             --slots-per-gpu=${{ inputs.slots-per-gpu }} \
             ${{ inputs.extra-pr-drive-args }}
 
