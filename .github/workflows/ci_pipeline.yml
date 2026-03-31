@@ -29,31 +29,40 @@ on:
         required: false
         type: string
 
-defaults:
-  run:
-    shell: bash -l {0}
+
 
 jobs:
   build-test:
     runs-on: ${{ fromJson(inputs.target-runner-labels) }}
+    env:
+      TRILINOS_DIR: "${GITHUB_WORKSPACE}/Trilinos"
+      BUILD_DIR: "${GITHUB_WORKSPACE}/build"
     steps:
       - name: Print workflow inputs
         run: |
-          echo "${{ inputs.target-runner-labels}}"
-          echo "${{ inputs.genconfig-string }}"
+          echo "TRILINOS_DIR: ${TRILINOS_DIR}"
+          echo "BUILD_DIR: ${BUILD_DIR}"
+          echo "GenConfig string: ${{ inputs.genconfig-string }}"
+          echo "Max cores allowed: ${{ inputs.max-cores-allowed }}"
+          echo "Num concurrent test: ${{ inputs.num-concurrent-tests }}"
+          echo "Slots per GPU: ${{ inputs.slots-per-gpu }}"
+          echo "Extra PR driver args: ${{ inputs.extra-pr-driver-args }}"
       - name: Print environment
         env:
           GITHUB_CONTEXT: ${{ toJson(github) }}
         run: |
           env
       - name: Print module list
+        shell: bash -l {0}
         run: |
           module list
       - name: Clone Trilinos
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 1
+          path: 'Trilinos'
       - name: Print repo status
+        working-directory: ${TRILINOS_DIR}
         run: |
           pwd
           ls -lhat
@@ -65,19 +74,18 @@ jobs:
         run: |
           ccache --show-stats --verbose
       - name: Get PR script dependencies
-        working-directory: ./packages/framework
+        working-directory: ${TRILINOS_DIR}/packages/framework
         run: |
-          mkdir -p /home/Trilinos/build
+          mkdir -p ${BUILD_DIR}
           ./get_dependencies.sh
       - name: Run build and test driver script
-        working-directory: /home/Trilinos/build
+        shell: bash -l {0}
+        working-directory: $BUILD_DIR
         run: |
           pwd
-          echo "GenConfig string: ${{ inputs.genconfig-string }}"
-          echo "Max cores allowed: ${{ inputs.max-cores-allowed }}"
-          echo "Num concurrent test: ${{ inputs.num-concurrent-tests }}"
-          echo "Slots per GPU: ${{ inputs.slots-per-gpu }}"
-          echo "Extra PR driver args: ${{ inputs.extra-pr-driver-args }}"
-
-      
+          mkdir bin
+          pushd bin
+          ln -s $(type -p python3) python
+          export PATH=$(pwd):${PATH}
+          popd
 
