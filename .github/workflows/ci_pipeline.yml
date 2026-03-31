@@ -39,6 +39,7 @@ jobs:
           pwd
           ls -lhat
           git status
+          git fetch origin develop
           git branch -vv
           git branch -a
       - name: Print ccache stats
