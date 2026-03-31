@@ -10,12 +10,52 @@ on:
         required: true
         type: string
 
+env:
+  TRILINOS_DIR: ${GITHUB_WORKSPACE}/Trilinos
+  BUILD_DIR: ${GITHUB_WORKSPACE}/build
 
 jobs:
   ci:
     runs-on: ${{ fromJson(inputs.target-runner-labels) }}
+    env:
+      TRILINOS_DIR: '/home/runner'
     steps:
-      - name: Printing workflow inputs
+      - name: Print workflow inputs
         run: |
           echo "${{ inputs.target-runner-labels}}"
           echo "${{ inputs.genconfig-string }}"
+      - name: Print environment
+        run: |
+          env
+      - name: Print module list
+        shell: bash -l {0}
+        run: |
+          module list
+      - name: Make directories
+        run: |
+          mkdir -p ${TRILINOS_DIR}
+          mkdir -p ${BUILD_DIR}
+      - name: Clone Trilinos
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 1
+          path: 'Trilinos'
+      - name: Print repo status
+        working-directory: ${TRILINOS_DIR}
+        run: |
+          pwd
+          ls -lhat
+          git status
+          git branch -vv
+          git branch -a
+      - name: Print ccache stats
+        run: |
+          bash -l -c "ccache --show-stats --verbose"
+      - name: Get PR script dependencies
+        shell: bash -l {0}
+        working-directory: ${TRILINOS_DIR}
+        run: |
+          ./packages/framework/get_dependencies.sh
+
+      
+
