@@ -104,7 +104,7 @@ jobs:
             --pullrequest-number ${{ github.event.pull_request.number }} \
             --pullrequest-env-config-file ${TRILINOS_DIR}/packages/framework/pr_tools/trilinos_pr.ini \
             --pullrequest-gen-config-file ${TRILINOS_DIR}/packages/framework/GenConfig/src/gen-config.ini \
-            --workspace-dir ${GITHUB_WORKSPACE} \
+            --workspace-dir ${TRILINOS_DIR}/../ \
             --source-dir ${TRILINOS_DIR} \
             --build-dir ${BUILD_DIR} \
             --dashboard-build-name=PR-${{ github.event.pull_request.number }}_${AT2_IMAGE}_release_static \
