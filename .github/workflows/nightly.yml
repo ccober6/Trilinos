@@ -13,7 +13,7 @@ on:
       - synchronize
   workflow_dispatch:
 
-permission:
+permissions:
   contents: read
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
       target-runner-labels: "['self-hosted', 'cuda-12.4.1-gcc-12.3.0-openmpi-4.1.6', '20251204', 'gpu:A100']"
       genconfig-string: "rhel_cuda-12-gcc-openmpi_release_static_Ampere80_no-asan_complex_no-fpic_mpi_pt_no-rdc_no-uvm_deprecated-on_all"
       cdash-track: "Nightly"
-    dashboard-build-name: ${AT2_IMAGE}_release_static_bounds-check
+      dashboard-build-name: ${AT2_IMAGE}_release_static_bounds-check
       max-cores-allowed: 56
       num-concurrent-tests: 112
       slots-per-gpu: 8
