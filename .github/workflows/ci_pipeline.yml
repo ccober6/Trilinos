@@ -76,14 +76,14 @@ jobs:
           pwd
           ls -lhat
           git status
-          git fetch origin develop
           git branch -vv
           git branch -a
           echo "::endgroup::"
-      - name: Get PR script dependencies
+      - name: Get CI script dependencies
         working-directory: ./packages/framework
         run: |
           mkdir -p /home/Trilinos/build
+          git fetch origin ${{ github.base_ref }}
           ./get_dependencies.sh
       - name: Run build and test driver script
         shell: bash -l {0}
@@ -96,8 +96,6 @@ jobs:
           ln -s $(type -p python3) python
           export PATH=$(pwd):${PATH}
           popd
-
-          git fetch origin ${{ github.base_ref }}
 
           export TRILINOS_DIR=${GITHUB_WORKSPACE:?}
           export BUILD_DIR=/home/Trilinos/build
