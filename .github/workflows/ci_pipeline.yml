@@ -9,6 +9,10 @@ on:
       genconfig-string:
         required: true
         type: string
+      target-branch:
+        required: false
+        type: string
+        default: "develop"
       max-cores-allowed:
         description: 'Max cores allowed that is detected on the system.'
         required: false
@@ -83,7 +87,7 @@ jobs:
         working-directory: ./packages/framework
         run: |
           mkdir -p /home/Trilinos/build
-          git fetch origin ${{ github.base_ref }}
+          git fetch origin ${{ inputs.target-branch }}
           ./get_dependencies.sh
       - name: Run build and test driver script
         shell: bash -l {0}
@@ -106,7 +110,7 @@ jobs:
           echo "image: ${AT2_IMAGE_FULLPATH:-${AT2_IMAGE:-unknown}}"
           type python
           python3 ${TRILINOS_DIR}/packages/framework/pr_tools/PullRequestLinuxDriverTest.py \
-            --target-branch-name ${{ github.event.pull_request.base.ref }} \
+            --target-branch-name ${{ inputs.target-branch }} \
             --genconfig-build-name ${{ inputs.genconfig-string }} \
             --pullrequest-number ${{ github.event.pull_request.number }} \
             --pullrequest-env-config-file ${TRILINOS_DIR}/packages/framework/pr_tools/trilinos_pr.ini \
