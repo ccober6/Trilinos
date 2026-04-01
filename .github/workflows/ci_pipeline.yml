@@ -83,11 +83,11 @@ jobs:
       - name: Get PR script dependencies
         working-directory: ./packages/framework
         run: |
-          mkdir -p /home/runner/build
+          mkdir -p /home/Trilinos/build
           ./get_dependencies.sh
       - name: Run build and test driver script
         shell: bash -l {0}
-        working-directory: /home/runner/build
+        working-directory: /home/Trilinos/build
         run: |
           # python is python3 hackery
           pwd
@@ -97,8 +97,10 @@ jobs:
           export PATH=$(pwd):${PATH}
           popd
 
+          git fetch origin ${{ github.base_ref }}
+
           export TRILINOS_DIR=${GITHUB_WORKSPACE:?}
-          export BUILD_DIR=/home/runner/build
+          export BUILD_DIR=/home/Trilinos/build
           export PYTHONPATH=${PYTHONPATH}:${TRILINOS_DIR}/packages/framework/GenConfig
           export PYTHONPATH=${PYTHONPATH}:${TRILINOS_DIR}/packages/framework/pr_tools
           printf "\n\n\n"
@@ -123,7 +125,7 @@ jobs:
             --max-cores-allowed=${{ inputs.max-cores-allowed }} \
             --num-concurrent-tests=${{ inputs.num-concurrent-tests }} \
             --slots-per-gpu=${{ inputs.slots-per-gpu }} \
-            ${{ inputs.extra-pr-drive-args }}
+            ${{ inputs.extra-pr-driver-args }}
       - name: Copy artifacts
         if: success() || failure()
         shell: bash -l {0}
