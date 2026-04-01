@@ -23,6 +23,10 @@ on:
         required: false
         type: string
         default: "Pull Request"
+      dashboard-build-name:
+        required: false
+        type: string
+        default:
       num-concurrent-tests:
         description: 'Number of concurrent tests allowed in CTest.'
         required: false
@@ -110,7 +114,7 @@ jobs:
             --workspace-dir ${TRILINOS_DIR}/../ \
             --source-dir ${TRILINOS_DIR} \
             --build-dir ${BUILD_DIR} \
-            --dashboard-build-name=PR-${{ github.event.pull_request.number }}_${AT2_IMAGE}_release_static \
+            --dashboard-build-name=${{ inputs.dashboard-build-name }} \
             --ctest-driver ${TRILINOS_DIR}/cmake/SimpleTesting/cmake/ctest-driver.cmake \
             --ctest-drop-site ${{ inputs.ctest-drop-site }} \
             --pullrequest-cdash-track ${{ inputs.cdash-track }} \
