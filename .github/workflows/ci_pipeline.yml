@@ -122,4 +122,23 @@ jobs:
             --num-concurrent-tests=${{ inputs.num-concurrent-tests }} \
             --slots-per-gpu=${{ inputs.slots-per-gpu }} \
             ${{ inputs.extra-pr-drive-args }}
-
+      - name: Copy artifacts
+        if: success() || failure()
+        shell: bash -l {0}
+        working-directory: /home/Trilinos/build
+        run: |
+          cp ./packageEnables.cmake /home/runner/artifacts/
+          cp ./configure_command.txt /home/runner/artifacts/
+          cp ./genconfig_build_name.txt /home/runner/artifacts/
+      - name: Upload artifacts
+        if: success() || failure()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        env:
+          NODE_USE_SYSTEM_CA: 1
+        with:
+          name: ${{ github.job }}-artifacts
+          path: /home/runner/artifacts/*
+          retention-days: 90
+      - name: Write Summary
+        if: ${{ !cancelled() }}
+        uses: ./.github/workflows/actions/summary
