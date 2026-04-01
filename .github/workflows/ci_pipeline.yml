@@ -38,12 +38,10 @@ on:
         required: false
         type: string
 
-
-# Cancels any in progress 'workflows' associated with this PR
+# Cancels any in progress 'workflows' associated with this workflow ref
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 
 jobs:
   build-test:

@@ -1,4 +1,5 @@
 name: Nightly
+run-name: Nightly Pipeline (#${{ github.run_number }})
 
 on:
   schedule:
@@ -11,6 +12,9 @@ on:
       - opened
       - synchronize
   workflow_dispatch:
+
+permission:
+  contents: read
 
 jobs:
   cuda-kokkos-bounds-check:
