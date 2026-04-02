@@ -54,7 +54,7 @@ class DenseConstraint
 
   void Setup();
 
-  typename CrsGraph::local_graph_type FindBlocks(RCP<const CrsGraph>& /*XXt*/);
+  typename CrsGraph::local_graph_type FindBlocks(RCP<const CrsGraph>& /*XXt*/) override;
 
   //! Compute norm of residual B - P*Bc.
   MagnitudeType ResidualNorm(RCP<const Matrix> P) const override;

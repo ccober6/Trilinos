@@ -245,7 +245,7 @@ class BlockInverseFunctor {
     // LU
     {
       // LU factorization: lclA = L * U
-      KokkosBatched::TeamLU<member_type, KokkosBlas::Algo::QR::Unblocked>::invoke(thread, lclA);
+      KokkosBatched::TeamLU<member_type, KokkosBlas::Algo::LU::Unblocked>::invoke(thread, lclA);
 
       // set lclInvA to identity matrix
       KokkosBatched::TeamSetIdentity<member_type>::invoke(thread, lclInvA);

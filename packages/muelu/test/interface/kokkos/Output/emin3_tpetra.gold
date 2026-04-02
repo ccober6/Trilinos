@@ -38,7 +38,7 @@ Getting P from coarseLevel
 *****   Test 1 : Belos::StatusTestImpResNorm<>: (2-Norm Res Vec) , tol = 1e-08
 *******************************************************
 Iter 0, [ 1] :    6.665458e+01
-Iter 1, [ 1] :    6.062458e-17
+Iter 1, [ 1] :    1.690194e-16
 emin: num iterations = 1
 emin: iterative method = gmres
 Transpose P (MueLu::TransPFactory)
@@ -84,7 +84,7 @@ Getting P from coarseLevel
 *****   Test 1 : Belos::StatusTestImpResNorm<>: (2-Norm Res Vec) , tol = 1e-08
 *******************************************************
 Iter 0, [ 1] :    4.275004e+00
-Iter 1, [ 1] :    8.575540e-16
+Iter 1, [ 1] :    7.387975e-16
 emin: num iterations = 1
 emin: iterative method = gmres
 Transpose P (MueLu::TransPFactory)
