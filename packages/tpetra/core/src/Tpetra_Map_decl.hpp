@@ -1429,6 +1429,16 @@ Teuchos::RCP<const Map<LocalOrdinal, GlobalOrdinal, Node>>
 createOneToOne(const Teuchos::RCP<const Map<LocalOrdinal, GlobalOrdinal, Node>>& M,
                const ::Tpetra::Details::TieBreak<LocalOrdinal, GlobalOrdinal>& tie_break);
 
+/// \brief Creates a one-to-one version of the given Map where each
+///   GID lives on only one process. It also replaces the input argument
+///   with a map that is locally fitted to the one-to-one map.
+///
+/// \relatesalso Map
+
+template <class LO, class GO, class NT>
+Teuchos::RCP<const Tpetra::Map<LO, GO, NT>>
+createOneToOneAndMakeOverlappingMapFitted(Teuchos::RCP<const Tpetra::Map<LO, GO, NT>>& M);
+
 }  // namespace Tpetra
 
 #include "Tpetra_Directory_decl.hpp"

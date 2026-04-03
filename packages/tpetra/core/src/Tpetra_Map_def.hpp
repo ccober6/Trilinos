@@ -24,6 +24,8 @@
 #include "Teuchos_TypeNameTraits.hpp"
 #include "Teuchos_CommHelpers.hpp"
 
+#include "Kokkos_Sort.hpp"
+
 #include "Tpetra_Directory.hpp"  // must include for implicit instantiation to work
 #include "Tpetra_Details_Behavior.hpp"
 #include "Tpetra_Details_FixedHashTable.hpp"
@@ -2691,6 +2693,86 @@ Tpetra::createOneToOne(const Teuchos::RCP<const Tpetra::Map<LocalOrdinal, Global
   return retMap;
 }
 
+namespace Tpetra::Details {
+
+template <class pids_view_type>
+struct SortToFit {
+  int myRank;
+  pids_view_type pids;
+
+  SortToFit(int _myRank, pids_view_type _pids)
+    : myRank(_myRank)
+    , pids(_pids) {}
+
+  KOKKOS_FUNCTION
+  bool operator()(size_t i, size_t j) const {
+    if (pids(i) == myRank) {
+      if (pids(j) == myRank)
+        return i < j;
+      else
+        return true;
+    } else {
+      if (pids(j) == myRank)
+        return false;
+      else
+        return i < j;
+    }
+  }
+};
+
+}  // namespace Tpetra::Details
+
+template <class LO, class GO, class NT>
+Teuchos::RCP<const Tpetra::Map<LO, GO, NT>>
+Tpetra::createOneToOneAndMakeOverlappingMapFitted(Teuchos::RCP<const Tpetra::Map<LO, GO, NT>>& M) {
+  Teuchos::RCP<const Tpetra::Map<LO, GO, NT>> constM = M;
+  auto owned_node_map                                = createOneToOne(constM);
+
+  const int locallyFitted   = M->isLocallyFitted(*owned_node_map);
+  int globallyLocallyFitted = 0;
+  reduceAll(*M->getComm(), Teuchos::REDUCE_MIN, locallyFitted, Teuchos::outArg(globallyLocallyFitted));
+
+  if (globallyLocallyFitted == 0) {
+    using pid_type = int;
+
+    const pid_type myRank   = M->getComm()->getRank();
+    const size_t numMyElems = M->getLocalNumElements();
+
+    Kokkos::View<pid_type*, typename NT::memory_space> pids("pids", numMyElems);
+    {
+      auto gids_vec = M->getLocalElementList();
+      Teuchos::Array<pid_type> pids_vec(numMyElems);
+      M->getRemoteIndexList(gids_vec, pids_vec);
+      Kokkos::View<pid_type*, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>> pids_h(pids_vec.data(), pids_vec.size());
+      Kokkos::deep_copy(pids, pids_h);
+    }
+
+    auto gids = M->getMyGlobalIndicesDevice();
+
+    auto policy = Kokkos::RangePolicy<size_t, typename NT::execution_space>(0, numMyElems);
+
+    Kokkos::View<size_t*, typename NT::memory_space> idx(Kokkos::ViewAllocateWithoutInitializing("idx"), numMyElems);
+    Kokkos::parallel_for(
+        policy, KOKKOS_LAMBDA(const size_t i) { idx(i) = i; });
+
+    Tpetra::Details::SortToFit cmp(myRank, pids);
+    Kokkos::sort(typename NT::execution_space(), idx, cmp);
+
+    Kokkos::View<GO*, typename NT::memory_space> new_gids(Kokkos::ViewAllocateWithoutInitializing("new_gids"), numMyElems);
+    Kokkos::parallel_for(
+        policy, KOKKOS_LAMBDA(const size_t i) { new_gids(i) = gids(idx(i)); });
+
+    Teuchos::RCP<const Tpetra::Map<LO, GO, NT>> shared_node_map =
+        Teuchos::rcp(new Tpetra::Map<LO, GO, NT>(M->getGlobalNumElements(),
+                                                 new_gids,
+                                                 M->getIndexBase(),
+                                                 M->getComm()));
+    M.swap(shared_node_map);
+  }
+
+  return owned_node_map;
+}
+
 //
 // Explicit instantiation macro
 //
@@ -2725,7 +2807,10 @@ Tpetra::createOneToOne(const Teuchos::RCP<const Tpetra::Map<LocalOrdinal, Global
                                                                                                     \
   template Teuchos::RCP<const Map<LO, GO, NODE>>                                                    \
   createOneToOne(const Teuchos::RCP<const Map<LO, GO, NODE>>& M,                                    \
-                 const Tpetra::Details::TieBreak<LO, GO>& tie_break);
+                 const Tpetra::Details::TieBreak<LO, GO>& tie_break);                               \
+                                                                                                    \
+  template Teuchos::RCP<const Map<LO, GO, NODE>>                                                    \
+  createOneToOneAndMakeOverlappingMapFitted(Teuchos::RCP<const Map<LO, GO, NODE>>& M);
 
 //! Explicit instantiation macro supporting the Map class, on the default node for specified ordinals.
 #define TPETRA_MAP_INSTANT_DEFAULTNODE(LO, GO)                                         \
