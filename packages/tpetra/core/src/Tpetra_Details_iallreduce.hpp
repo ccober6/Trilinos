@@ -28,6 +28,7 @@
 
 #include "TpetraCore_config.h"
 #include "Teuchos_EReductionType.hpp"
+#include "Tpetra_Details_Profiling.hpp"
 #ifdef HAVE_TPETRACORE_MPI
 #include "Tpetra_Details_extractMpiCommFromTeuchos.hpp"
 #include "Tpetra_Details_MpiTypeTraits.hpp"
@@ -106,6 +107,7 @@ struct MpiRequest : public CommRequest {
   /// avoiding deadlock.  This operation must also be idempotent.
   void wait() override {
     if (req != MPI_REQUEST_NULL) {
+      Details::ProfilingRegion pr("Tpetra::Details::MpiRequest::wait");
       const int err = MPI_Wait(&req, MPI_STATUS_IGNORE);
       TEUCHOS_TEST_FOR_EXCEPTION(err != MPI_SUCCESS, std::runtime_error,
                                  "MpiCommRequest::wait: MPI_Wait failed with error \""
@@ -288,9 +290,10 @@ iallreduce(const InputViewType& sendbuf,
   return Impl::iallreduceImpl<InputViewType, OutputViewType>(sendbuf, recvbuf, op, comm);
 }
 
+template <class ValueType>
 std::shared_ptr<CommRequest>
-iallreduce(const int localValue,
-           int& globalValue,
+iallreduce(const ValueType localValue,
+           ValueType& globalValue,
            const ::Teuchos::EReductionType op,
            const ::Teuchos::Comm<int>& comm);
 
