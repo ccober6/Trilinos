@@ -6823,7 +6823,8 @@ void CrsGraph<LocalOrdinal, GlobalOrdinal, Node>::
   if ((!reverseMode && xferAsImport != nullptr) ||
       (reverseMode && xferAsExport != nullptr)) {
     Import_Util::sortCrsEntries(CSR_rowptr(),
-                                CSR_colind_LID());
+                                CSR_colind_LID(),
+                                ::KokkosSparse::SortAlgorithm::DEFAULT);
   } else if ((!reverseMode && xferAsExport != nullptr) ||
              (reverseMode && xferAsImport != nullptr)) {
     Import_Util::sortAndMergeCrsEntries(CSR_rowptr(),

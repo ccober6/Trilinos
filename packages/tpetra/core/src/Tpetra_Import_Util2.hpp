@@ -75,20 +75,24 @@ namespace Import_Util {
 template <typename Scalar, typename Ordinal>
 void sortCrsEntries(const Teuchos::ArrayView<size_t>& CRS_rowptr,
                     const Teuchos::ArrayView<Ordinal>& CRS_colind,
-                    const Teuchos::ArrayView<Scalar>& CRS_vals);
+                    const Teuchos::ArrayView<Scalar>& CRS_vals,
+                    const ::KokkosSparse::SortAlgorithm option = ::KokkosSparse::SortAlgorithm::DEFAULT);
 
 template <typename Ordinal>
 void sortCrsEntries(const Teuchos::ArrayView<size_t>& CRS_rowptr,
-                    const Teuchos::ArrayView<Ordinal>& CRS_colind);
+                    const Teuchos::ArrayView<Ordinal>& CRS_colind,
+                    const ::KokkosSparse::SortAlgorithm option = ::KokkosSparse::SortAlgorithm::DEFAULT);
 
 template <typename rowptr_array_type, typename colind_array_type, typename vals_array_type>
 void sortCrsEntries(const rowptr_array_type& CRS_rowptr,
                     const colind_array_type& CRS_colind,
-                    const vals_array_type& CRS_vals);
+                    const vals_array_type& CRS_vals,
+                    const ::KokkosSparse::SortAlgorithm option = ::KokkosSparse::SortAlgorithm::DEFAULT);
 
 template <typename rowptr_array_type, typename colind_array_type>
 void sortCrsEntries(const rowptr_array_type& CRS_rowptr,
-                    const colind_array_type& CRS_colind);
+                    const colind_array_type& CRS_colind,
+                    const ::KokkosSparse::SortAlgorithm option = ::KokkosSparse::SortAlgorithm::DEFAULT);
 
 /// \brief Sort and merge the entries of the (raw CSR) matrix by
 ///   column index within each row.
@@ -104,9 +108,10 @@ void sortAndMergeCrsEntries(const Teuchos::ArrayView<size_t>& CRS_rowptr,
                             const Teuchos::ArrayView<Ordinal>& CRS_colind);
 
 template <class rowptr_view_type, class colind_view_type, class vals_view_type>
-void sortAndMergeCrsEntries(const rowptr_view_type& CRS_rowptr,
-                            const colind_view_type& CRS_colind,
-                            const vals_view_type& CRS_vals);
+void sortAndMergeCrsEntries(rowptr_view_type& CRS_rowptr,
+                            colind_view_type& CRS_colind,
+                            vals_view_type& CRS_vals,
+                            const ::KokkosSparse::SortAlgorithm option);
 
 /// \brief lowCommunicationMakeColMapAndReindex
 ///
@@ -453,32 +458,40 @@ void reverseNeighborDiscovery(const CrsMatrix<Scalar, LocalOrdinal, GlobalOrdina
 template <typename Scalar, typename Ordinal>
 void sortCrsEntries(const Teuchos::ArrayView<size_t>& CRS_rowptr,
                     const Teuchos::ArrayView<Ordinal>& CRS_colind,
-                    const Teuchos::ArrayView<Scalar>& CRS_vals) {
+                    const Teuchos::ArrayView<Scalar>& CRS_vals,
+                    const ::KokkosSparse::SortAlgorithm option) {
   auto rowptr_k = Kokkos::View<size_t*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(CRS_rowptr.data(), CRS_rowptr.size());
   auto colind_k = Kokkos::View<Ordinal*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(CRS_colind.data(), CRS_colind.size());
   auto vals_k   = Kokkos::View<Scalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(CRS_vals.data(), CRS_vals.size());
-  sortCrsEntries(rowptr_k, colind_k, vals_k);
+  sortCrsEntries(rowptr_k, colind_k, vals_k, option);
 }
 
 template <typename Ordinal>
 void sortCrsEntries(const Teuchos::ArrayView<size_t>& CRS_rowptr,
-                    const Teuchos::ArrayView<Ordinal>& CRS_colind) {
+                    const Teuchos::ArrayView<Ordinal>& CRS_colind,
+                    const ::KokkosSparse::SortAlgorithm option) {
   auto rowptr_k = Kokkos::View<size_t*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(CRS_rowptr.data(), CRS_rowptr.size());
   auto colind_k = Kokkos::View<Ordinal*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(CRS_colind.data(), CRS_colind.size());
-  sortCrsEntries(rowptr_k, colind_k);
+  sortCrsEntries(rowptr_k, colind_k, option);
 }
 
 template <typename rowptr_array_type, typename colind_array_type, typename vals_array_type>
 void sortCrsEntries(const rowptr_array_type& CRS_rowptr,
                     const colind_array_type& CRS_colind,
-                    const vals_array_type& CRS_vals) {
-  KokkosSparse::sort_crs_matrix(CRS_rowptr, CRS_colind, CRS_vals);
+                    const vals_array_type& CRS_vals,
+                    const ::KokkosSparse::SortAlgorithm option) {
+  KokkosSparse::sort_crs_matrix(CRS_rowptr, CRS_colind, CRS_vals,
+                                KokkosKernels::ArithTraits<typename colind_array_type::non_const_value_type>::max(),
+                                option);
 }
 
 template <typename rowptr_array_type, typename colind_array_type>
 void sortCrsEntries(const rowptr_array_type& CRS_rowptr,
-                    const colind_array_type& CRS_colind) {
-  KokkosSparse::sort_crs_graph(CRS_rowptr, CRS_colind);
+                    const colind_array_type& CRS_colind,
+                    const ::KokkosSparse::SortAlgorithm option) {
+  KokkosSparse::sort_crs_graph(CRS_rowptr, CRS_colind,
+                               KokkosKernels::ArithTraits<typename colind_array_type::non_const_value_type>::max(),
+                               option);
 }
 
 // Note: This should get merged with the other Tpetra sort routines eventually.
@@ -563,7 +576,8 @@ void sortAndMergeCrsEntries(const Teuchos::ArrayView<size_t>& CRS_rowptr,
 template <class rowptr_view_type, class colind_view_type, class vals_view_type>
 void sortAndMergeCrsEntries(rowptr_view_type& CRS_rowptr,
                             colind_view_type& CRS_colind,
-                            vals_view_type& CRS_vals) {
+                            vals_view_type& CRS_vals,
+                            const ::KokkosSparse::SortAlgorithm option) {
   using execution_space = typename vals_view_type::execution_space;
 
   auto CRS_rowptr_in = CRS_rowptr;
@@ -572,7 +586,9 @@ void sortAndMergeCrsEntries(rowptr_view_type& CRS_rowptr,
 
   KokkosSparse::sort_and_merge_matrix<execution_space, rowptr_view_type,
                                       colind_view_type, vals_view_type>(CRS_rowptr_in, CRS_colind_in, CRS_vals_in,
-                                                                        CRS_rowptr, CRS_colind, CRS_vals);
+                                                                        CRS_rowptr, CRS_colind, CRS_vals,
+                                                                        KokkosKernels::ArithTraits<typename colind_view_type::non_const_value_type>::max(),
+                                                                        option);
 }
 
 template <typename LocalOrdinal, typename GlobalOrdinal, typename Node>

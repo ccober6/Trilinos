@@ -40,7 +40,8 @@ class CrsMatrixUtils {
                              const Teuchos::ArrayView<Scalar>& CRS_vals,
                              const UnderlyingLib lib) {
     if (lib == Xpetra::UseTpetra) {
-      Tpetra::Import_Util::sortCrsEntries(CRS_rowptr, CRS_colind, CRS_vals);
+      Tpetra::Import_Util::sortCrsEntries(CRS_rowptr, CRS_colind, CRS_vals,
+                                          ::KokkosSparse::SortAlgorithm::DEFAULT);
     }
 
     return;

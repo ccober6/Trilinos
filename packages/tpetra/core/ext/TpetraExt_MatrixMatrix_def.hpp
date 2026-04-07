@@ -807,7 +807,7 @@ void add(const Scalar& alpha,
                          ConvertGlobalToLocalFunctor<LocalOrdinal, GlobalOrdinal,
                                                      col_inds_array, global_col_inds_array,
                                                      typename map_type::local_map_type>(localColinds, globalColinds, CcolMap->getLocalMap()));
-    KokkosSparse::sort_crs_matrix<exec_space, row_ptrs_array, col_inds_array, values_array>(rowptrs, localColinds, vals);
+    Import_Util::sortCrsEntries(rowptrs, localColinds, vals, ::KokkosSparse::SortAlgorithm::SHELL);
     C.setAllValues(rowptrs, localColinds, vals);
     C.fillComplete(CDomainMap, CRangeMap, params);
     if (!doFillComplete)
@@ -2099,8 +2099,10 @@ void KernelWrappers<Scalar, LocalOrdinal, GlobalOrdinal, Node, LocalOrdinalViewT
     Tpetra::Details::ProfilingRegion MM3("TpetraExt: MMM: Newmatrix Final Sort");
 
     // Final sort & set of CRS arrays
-    if (params.is_null() || params->get("sort entries", true))
-      Import_Util::sortCrsEntries(Crowptr, Ccolind, Cvals);
+    if (params.is_null() || params->get("sort entries", true)) {
+      // Tpetra's serial SpGEMM results in almost sorted matrices. Use shell sort.
+      Import_Util::sortCrsEntries(Crowptr, Ccolind, Cvals, ::KokkosSparse::SortAlgorithm::SHELL);
+    }
     C.setAllValues(Crowptr, Ccolind, Cvals);
   }
 
@@ -2717,8 +2719,10 @@ void KernelWrappers2<Scalar, LocalOrdinal, GlobalOrdinal, Node, LocalOrdinalView
     // TODO (mfh 27 Sep 2016) Will the thread-parallel "local" sparse
     // matrix-matrix multiply routine sort the entries for us?
     // Final sort & set of CRS arrays
-    if (params.is_null() || params->get("sort entries", true))
-      Import_Util::sortCrsEntries(Crowptr, Ccolind, Cvals);
+    if (params.is_null() || params->get("sort entries", true)) {
+      // Tpetra's serial SpGEMM results in almost sorted matrices. Use shell sort.
+      Import_Util::sortCrsEntries(Crowptr, Ccolind, Cvals, ::KokkosSparse::SortAlgorithm::SHELL);
+    }
     C.setAllValues(Crowptr, Ccolind, Cvals);
   }
   {
