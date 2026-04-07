@@ -7,10 +7,6 @@ on:
       timezone: "America/Denver"
       branches:
         - develop
-  pull_request:
-    types:
-      - opened
-      - synchronize
   workflow_dispatch:
 
 permissions:
