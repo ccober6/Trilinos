@@ -136,7 +136,8 @@ void lowCommunicationMakeColMapAndReindex(
     const Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& domainMapRCP,
     const Teuchos::ArrayView<const int>& owningPIDs,
     Teuchos::Array<int>& remotePIDs,
-    Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap);
+    Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap,
+    const Teuchos::RCP<Teuchos::ParameterList>& params = Teuchos::null);
 
 /// \brief lowCommunicationMakeColMapAndReindex
 ///
@@ -150,7 +151,8 @@ void lowCommunicationMakeColMapAndReindex(
     const Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& domainMapRCP,
     const Kokkos::View<const int*, typename Node::device_type> owningPIDs_view,
     Teuchos::Array<int>& remotePIDs,
-    Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap);
+    Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap,
+    const Teuchos::RCP<Teuchos::ParameterList>& params = Teuchos::null);
 
 /// \brief Generates an list of owning PIDs based on two transfer (aka import/export objects)
 /// Let:
@@ -598,7 +600,8 @@ void lowCommunicationMakeColMapAndReindexSerial(const Teuchos::ArrayView<const s
                                                 const Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& domainMapRCP,
                                                 const Teuchos::ArrayView<const int>& owningPIDs,
                                                 Teuchos::Array<int>& remotePIDs,
-                                                Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap) {
+                                                Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap,
+                                                const Teuchos::RCP<Teuchos::ParameterList>& params = Teuchos::null) {
   using Teuchos::rcp;
   typedef LocalOrdinal LO;
   typedef GlobalOrdinal GO;
@@ -697,9 +700,14 @@ void lowCommunicationMakeColMapAndReindexSerial(const Teuchos::ArrayView<const s
     }
   }
 
+  // Launch reduction to get global num entries in the column map
+  const LO numMyCols = NumLocalColGIDs + NumRemoteColGIDs;
+  GST numMyColsGST   = static_cast<GST>(numMyCols);
+  GST numGlobalCols;
+  auto req = Details::iallreduce(numMyColsGST, numGlobalCols, Teuchos::REDUCE_SUM, *domainMap.getComm());
+
   // Now build the array containing column GIDs
   // Build back end, containing remote GIDs, first
-  const LO numMyCols = NumLocalColGIDs + NumRemoteColGIDs;
   Teuchos::Array<GO> ColIndices;
   GO* RemoteColIndices = NULL;
   if (numMyCols > 0) {
@@ -797,9 +805,10 @@ void lowCommunicationMakeColMapAndReindexSerial(const Teuchos::ArrayView<const s
   }
 
   // Make column Map
-  const GST minus_one = Teuchos::OrdinalTraits<GST>::invalid();
-  colMap              = rcp(new map_type(minus_one, ColIndices, domainMap.getIndexBase(),
-                                         domainMap.getComm()));
+  req->wait();
+  colMap = rcp(new map_type(numGlobalCols, ColIndices, domainMap.getIndexBase(),
+                            domainMap.getComm(),
+                            params));
 
   // Low-cost reindex of the matrix
   for (size_t i = 0; i < numMyRows; ++i) {
@@ -827,7 +836,8 @@ void lowCommunicationMakeColMapAndReindex(
     const Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& domainMapRCP,
     const Teuchos::ArrayView<const int>& owningPIDs,
     Teuchos::Array<int>& remotePIDs,
-    Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap) {
+    Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap,
+    const Teuchos::RCP<Teuchos::ParameterList>& params) {
   using DT              = typename Node::device_type;
   using execution_space = typename DT::execution_space;
   execution_space exec;
@@ -842,7 +852,7 @@ void lowCommunicationMakeColMapAndReindex(
 
   typename decltype(colind_LID_view)::host_mirror_type colind_LID_host(colind_LID.getRawPtr(), colind_LID.size());
 
-  lowCommunicationMakeColMapAndReindex(rowptr_view, colind_LID_view, colind_GID_view, domainMapRCP, owningPIDs_view, remotePIDs, colMap);
+  lowCommunicationMakeColMapAndReindex(rowptr_view, colind_LID_view, colind_GID_view, domainMapRCP, owningPIDs_view, remotePIDs, colMap, params);
 
   // For now, we copy back into colind_LID_host (which also overwrites the colind_LID Teuchos array)
   // When colind_LID becomes a Kokkos View we can delete this
@@ -857,7 +867,8 @@ void lowCommunicationMakeColMapAndReindex(
     const Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& domainMapRCP,
     const Kokkos::View<const int*, typename Node::device_type> owningPIDs_view,
     Teuchos::Array<int>& remotePIDs,
-    Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap) {
+    Teuchos::RCP<const Tpetra::Map<LocalOrdinal, GlobalOrdinal, Node>>& colMap,
+    const Teuchos::RCP<Teuchos::ParameterList>& params) {
   using Teuchos::rcp;
   typedef LocalOrdinal LO;
   typedef GlobalOrdinal GO;
@@ -989,9 +1000,15 @@ void lowCommunicationMakeColMapAndReindex(
         numEnteredRemotes);
     TEUCHOS_ASSERT(numEnteredRemotes == NumRemoteColGIDs);
   }
+
+  // Launch reduction to get global num entries in the column map
+  const size_t numMyCols = NumLocalColGIDs + NumRemoteColGIDs;
+  GST numMyColsGST       = static_cast<GST>(numMyCols);
+  GST numGlobalCols;
+  auto req = Details::iallreduce(numMyColsGST, numGlobalCols, Teuchos::REDUCE_SUM, *domainMap.getComm());
+
   // Now build the array containing column GIDs
   // Build back end, containing remote GIDs, first
-  const size_t numMyCols = NumLocalColGIDs + NumRemoteColGIDs;
   Kokkos::View<GO*, DT> ColMapIndices(Kokkos::ViewAllocateWithoutInitializing("ColMapIndices"), numMyCols);
 
   // We don't need to load the back end of ColMapIndices or sort if there are no remote GIDs
@@ -1070,10 +1087,9 @@ void lowCommunicationMakeColMapAndReindex(
   }
 
   // Make column Map
-  const GST minus_one = Teuchos::OrdinalTraits<GST>::invalid();
-
-  colMap = rcp(new map_type(minus_one, ColMapIndices, domainMap.getIndexBase(),
-                            domainMap.getComm()));
+  req->wait();
+  colMap = rcp(new map_type(numGlobalCols, ColMapIndices, domainMap.getIndexBase(),
+                            domainMap.getComm(), params));
 
   // Fill out colind_LID using local map
   auto localColMap = colMap->getLocalMap();

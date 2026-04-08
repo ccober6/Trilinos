@@ -6795,7 +6795,8 @@ void CrsGraph<LocalOrdinal, GlobalOrdinal, Node>::
                                                     CSR_colind_GID(),
                                                     BaseDomainMap,
                                                     TargetPids, RemotePids,
-                                                    MyColMap);
+                                                    MyColMap,
+                                                    params);
 
   /*******************************************************/
   /**** 4) Second communicator restriction phase      ****/

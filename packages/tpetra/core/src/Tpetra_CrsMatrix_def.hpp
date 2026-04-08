@@ -8258,7 +8258,8 @@ void CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
                                                               BaseDomainMap,
                                                               TargetPids,
                                                               RemotePids,
-                                                              MyColMap);
+                                                              MyColMap,
+                                                              params);
     }
 
     if (verbose) {
@@ -8431,7 +8432,8 @@ void CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
                                                         BaseDomainMap,
                                                         TargetPids_d,
                                                         RemotePids,
-                                                        MyColMap);
+                                                        MyColMap,
+                                                        params);
     }
 
     if (verbose) {
