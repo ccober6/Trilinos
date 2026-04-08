@@ -23,9 +23,11 @@
 #include "MueLu_PerfUtils.hpp"
 #include "MueLu_Behavior.hpp"
 
+#ifdef HAVE_MUELU_BELOS
 #include <BelosLinearProblem.hpp>
 #include <BelosSolverFactory.hpp>
 #include <BelosXpetraAdapter.hpp>
+#endif
 
 namespace MueLu {
 
@@ -180,6 +182,7 @@ void EminPFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::BuildP(Level& fine
     solverType = "Pseudo Block GMRES";
 
   RCP<Matrix> P;
+#ifdef HAVE_MUELU_BELOS
   if (numIts > 0) {
     // Construct diagonal preconditioner
     RCP<const Vector> invDiagonal = Utilities::GetMatrixDiagonalInverse(*A);
@@ -238,6 +241,9 @@ void EminPFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::BuildP(Level& fine
   }
   if (P0->IsView("stridedMaps"))
     P->CreateView("stridedMaps", P0);
+#else
+  TEUCHOS_TEST_FOR_EXCEPTION(true, Exceptions::RuntimeError, "Energy minimization multigrid requires Belos to be enabled.");
+#endif
 
   if (Behavior::debug() && IsPrint(Statistics1)) {
     SubFactoryMonitor m2(*this, "Statistics", coarseLevel);

@@ -22,9 +22,11 @@
 #include "MueLu_BaseClass.hpp"
 #include "MueLu_ProductOperator_fwd.hpp"
 
+#ifdef HAVE_MUELU_BELOS
 #include <BelosLinearProblem.hpp>
 #include <BelosSolverFactory.hpp>
 #include <BelosXpetraAdapter.hpp>
+#endif
 
 namespace MueLu {
 
@@ -143,10 +145,12 @@ class Constraint
 
   std::string solverType_;
 
+#ifdef HAVE_MUELU_BELOS
   using MV = Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
   using OP = Belos::OperatorT<MV>;
   RCP<Belos::LinearProblem<Scalar, MV, OP>> problem_;
   RCP<Belos::SolverManager<Scalar, MV, OP>> solver_;
+#endif
 
   //! Prepare least-squares solve using Belos
   void PrepareLeastSquaresSolveBelos(bool detect_singular_blocks);
