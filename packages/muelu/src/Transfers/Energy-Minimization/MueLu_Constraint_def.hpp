@@ -245,7 +245,7 @@ class BlockInverseFunctor {
     // LU
     {
       // LU factorization: lclA = L * U
-      KokkosBatched::TeamLU<member_type, KokkosBlas::Algo::LU::Unblocked>::invoke(thread, lclA);
+      KokkosBatched::TeamLU<member_type, KokkosBlas::Algo::QR::Unblocked>::invoke(thread, lclA);
 
       // set lclInvA to identity matrix
       KokkosBatched::TeamSetIdentity<member_type>::invoke(thread, lclInvA);
@@ -345,7 +345,7 @@ template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void Constraint<Scalar, LocalOrdinal, GlobalOrdinal, Node>::PrepareLeastSquaresSolveBelos(const bool detect_singular_blocks) {
   Monitor m(*this, "PrepareLeastSquaresSolveBelos");
 
-  TEUCHOS_ASSERT(!detect_singular_blocks);
+  TEUCHOS_TEST_FOR_EXCEPTION(!detect_singular_blocks, Exceptions::RuntimeError, "The option \"emin: least squares solver type\" = \"Belos\" is currently only implemented for non-singular constraint solves");
 
   problem_ = rcp(new Belos::LinearProblem<Scalar, MV, OP>());
 

@@ -2179,6 +2179,9 @@ void ParameterListInterpreter<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 
   // Constraint
   auto constraintFactory = rcp(new ConstraintFactory());
+  Teuchos::ParameterList constraintParams;
+  test_and_set_param_2list<std::string>(paramList, defaultList, "emin: least squares solver type", constraintParams);
+  constraintParams.set("emin: constraint type", "nullspace");
   constraintFactory->SetFactory("Ppattern", manager.GetFactory("Ppattern"));
   constraintFactory->SetFactory("CoarseNullspace", manager.GetFactory("Ptent"));
   manager.SetFactory("Constraint", constraintFactory);
