@@ -343,6 +343,7 @@ const Teuchos::RCP<const Xpetra::Map<LocalOrdinal, GlobalOrdinal, Node>> Constra
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void Constraint<Scalar, LocalOrdinal, GlobalOrdinal, Node>::PrepareLeastSquaresSolveBelos(const bool detect_singular_blocks) {
+#ifdef HAVE_MUELU_BELOS
   Monitor m(*this, "PrepareLeastSquaresSolveBelos");
 
   TEUCHOS_TEST_FOR_EXCEPTION(!detect_singular_blocks, Exceptions::RuntimeError, "The option \"emin: least squares solver type\" = \"Belos\" is currently only implemented for non-singular constraint solves");
@@ -368,6 +369,9 @@ void Constraint<Scalar, LocalOrdinal, GlobalOrdinal, Node>::PrepareLeastSquaresS
 
   Belos::SolverFactory<Scalar, MV, OP> solverFactory;
   solver_ = solverFactory.create("Pseudo Block CG", belosList);
+#else
+  TEUCHOS_TEST_FOR_EXCEPTION(true, Exceptions::RuntimeError, "Energy minimization multigrid requires Belos to be enabled.");
+#endif
 }
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
@@ -595,13 +599,14 @@ void Constraint<Scalar, LocalOrdinal, GlobalOrdinal, Node>::PrepareLeastSquaresS
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void Constraint<Scalar, LocalOrdinal, GlobalOrdinal, Node>::LeastSquaresSolveBelos(const MultiVector& B, MultiVector& C) const {
   // Solve (X * X^T) * C = B
-
+#ifdef HAVE_MUELU_BELOS
   problem_->setLHS(rcpFromRef(C));
   problem_->setRHS(rcpFromRef(B));
   TEUCHOS_ASSERT(problem_->setProblem());
 
   solver_->setProblem(problem_);
   solver_->solve();
+#endif
 }
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
