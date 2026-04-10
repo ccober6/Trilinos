@@ -164,7 +164,9 @@ iallreduceImpl(const InputViewType& sendbuf,
                const ::Teuchos::Comm<int>& comm) {
   using Packet = typename InputViewType::non_const_value_type;
   if (comm.getSize() == 1) {
-    Kokkos::deep_copy(recvbuf, sendbuf);
+    // Avoid deep_copy precond violation if views are identical
+    if (recvbuf != sendbuf)
+      Kokkos::deep_copy(recvbuf, sendbuf);
     return emptyCommRequest();
   }
   Packet examplePacket;
