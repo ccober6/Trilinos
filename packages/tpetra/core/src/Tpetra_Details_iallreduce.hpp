@@ -221,7 +221,7 @@ iallreduceImpl(const InputViewType& sendbuf,
                const ::Teuchos::EReductionType,
                const ::Teuchos::Comm<int>&) {
   // Avoid deep_copy precond violation if views are identical
-  if (recvbuf !=  sendbuf)
+  if (recvbuf != sendbuf)
     Kokkos::deep_copy(recvbuf, sendbuf);
   return emptyCommRequest();
 }
