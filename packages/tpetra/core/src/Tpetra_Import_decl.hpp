@@ -158,6 +158,8 @@ class Import : public ::Tpetra::Details::Transfer<LocalOrdinal, GlobalOrdinal, N
   /// \param remotePIDs [in] Owning PIDs corresponding to the remoteGIDs.
   /// If this information is available one can reduce the cost of the Import
   /// constructor.
+  ///
+  /// \param plist [in/out] Optional list of parameters.
   Import(const Teuchos::RCP<const map_type>& source,
          const Teuchos::RCP<const map_type>& target,
          Teuchos::Array<int>& remotePIDs,

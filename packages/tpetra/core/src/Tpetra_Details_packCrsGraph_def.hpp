@@ -596,6 +596,8 @@ void do_pack(const LocalGraph& local_graph,
 /// \param constant_num_packets [out] Setting this to zero tells the caller
 ///   to expect a possibly /// different ("nonconstant") number of packets per local index
 ///   (i.e., a possibly different number of entries per row).
+///
+/// \param pack_pids [in] Whether to pack process IDs.
 template <typename LO, typename GO, typename NT>
 void packCrsGraph(const CrsGraph<LO, GO, NT>& sourceGraph,
                   Kokkos::DualView<

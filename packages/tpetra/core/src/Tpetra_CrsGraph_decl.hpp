@@ -392,6 +392,7 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
   ///   This constructor assumes it will alias the first N rows of the graph,
   ///   where N is the number of rows in rowMap.
   ///
+  /// \param originalGraph [in] The existing graph to view.
   /// \param rowMap [in] Distribution of rows of the graph.
   ///
   /// \param params [in/out] Optional list of parameters.  If not
@@ -771,8 +772,8 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
   ///   safest thing to do is not to change structure at all after
   ///   first fillComplete.
   ///
-  /// \post <tt>isFillActive() == true<tt>
-  /// \post <tt>isFillComplete() == false<tt>
+  /// \post <tt>isFillActive() == true</tt>
+  /// \post <tt>isFillComplete() == false</tt>
   ///
   /// This method must be called collectively (that is, like any MPI
   /// collective) over all processes in the graph's communicator.
@@ -1097,8 +1098,8 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
 
   /// \brief Get a copy of the given row, using local indices.
   ///
-  /// \param lclRow [in] Local index of the row.
-  /// \param lclColInds [out] On output: Local column indices.
+  /// \param gblRow [in] Global index of the row.
+  /// \param gblColInds [out] On output: Local column indices.
   /// \param numColInds [out] Number of indices returned.
   ///
   /// \pre <tt>hasColMap()</tt>
@@ -1455,8 +1456,8 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
   ///
   /// The Graph's Import object will be recomputed if needed.
   ///
-  /// \pre <tt>isFillComplete() == true<tt>
-  /// \pre <tt>isFillActive() == false<tt>
+  /// \pre <tt>isFillComplete() == true</tt>
+  /// \pre <tt>isFillActive() == false</tt>
   void
   replaceDomainMap(const Teuchos::RCP<const map_type>& newDomainMap);
 
@@ -1467,8 +1468,8 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
   /// \warning We make NO promises of backwards compatibility.
   ///   This method may change or disappear at any time.
   ///
-  /// \pre <tt>isFillComplete() == true<tt>
-  /// \pre <tt>isFillActive() == false<tt>
+  /// \pre <tt>isFillComplete() == true</tt>
+  /// \pre <tt>isFillActive() == false</tt>
   /// \pre Either the given Import object is null, or the target Map
   ///   of the given Import is the same as this graph's column Map.
   /// \pre Either the given Import object is null, or the source Map
@@ -1481,8 +1482,8 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
   ///
   /// The Graph's Export object will be recomputed if needed.
   ///
-  /// \pre <tt>isFillComplete() == true<tt>
-  /// \pre <tt>isFillActive() == false<tt>
+  /// \pre <tt>isFillComplete() == true</tt>
+  /// \pre <tt>isFillActive() == false</tt>
   void
   replaceRangeMap(const Teuchos::RCP<const map_type>& newRangeMap);
 
@@ -1493,8 +1494,8 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
   /// \warning We make NO promises of backwards compatibility.
   ///   This method may change or disappear at any time.
   ///
-  /// \pre <tt>isFillComplete() == true<tt>
-  /// \pre <tt>isFillActive() == false<tt>
+  /// \pre <tt>isFillComplete() == true</tt>
+  /// \pre <tt>isFillActive() == false</tt>
   /// \pre Either the given Export object is null, or the target Map
   ///   of the given Export is the same as this graph's Range Map.
   /// \pre Either the given Export object is null, or the source Map
@@ -1874,8 +1875,7 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
 
   /// \brief Insert global indices, using an input <i>local</i> row index.
   ///
-  /// \param rowInfo [in] Result of getRowInfo() on the row in which
-  ///   to insert.
+  /// \param lclRow [in] Local row index in which to insert.
   /// \param inputGblColInds [in] Input global column indices.
   /// \param numInputInds [in] The number of input global column
   ///   indices.
@@ -1893,6 +1893,7 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
   /// \param inputGblColInds [in] Input global column indices.
   /// \param numInputInds [in] The number of input global column
   ///   indices.
+  /// \param fun [in] Callback function called for each insertion.
   ///
   /// \return The number of indices inserted.
   size_t
@@ -1913,11 +1914,11 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
   /// This method does no insertion; it just finds indices and calls
   /// a callback for each found index
   ///
-  /// \param row [in] Row of interest
+  /// \param rowInfo [in] Row info of interest
   ///
   /// \param indices [in] Column indices to find in row
   ///
-  /// \param fun Call back function called at each found index.  Called as
+  /// \param fun [in] Call back function called at each found index.  Called as
   ///   fun(k, start, offset); where k is the index in to indices, start is
   ///   offset to the start of the row, and offset is the relative offset of
   ///   indices[k] in the graphs indices.
