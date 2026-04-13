@@ -87,7 +87,7 @@
 #include "../matlab/src/MueLu_SingleLevelMatlabFactory_def.hpp"
 #endif
 
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
 #include "MueLu_IntrepidPCoarsenFactory.hpp"
 #endif
 
@@ -808,7 +808,7 @@ void ParameterListInterpreter<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 
       setChebyshevSettings(preSmootherType, preSmootherParams);
 
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
       // Propagate P-coarsening for Topo smoothing
       if (multigridAlgo == "pcoarsen" && preSmootherType == "TOPOLOGICAL" &&
           defaultList.isParameter("pcoarsen: schedule") && defaultList.isParameter("pcoarsen: element")) {
@@ -857,7 +857,7 @@ void ParameterListInterpreter<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
       if (postSmootherType == preSmootherType && areSame(preSmootherParams, postSmootherParams))
         postSmoother = preSmoother;
       else {
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
         // Propagate P-coarsening for Topo smoothing
         if (multigridAlgo == "pcoarsen" && preSmootherType == "TOPOLOGICAL" &&
             defaultList.isParameter("pcoarsen: schedule") && defaultList.isParameter("pcoarsen: element")) {
@@ -2010,7 +2010,7 @@ template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void ParameterListInterpreter<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     UpdateFactoryManager_PCoarsen(ParameterList& paramList, const ParameterList& defaultList, FactoryManager& manager,
                                   int levelID, std::vector<keep_pair>& keeps) const {
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
   // This only makes sense to invoke from the default list.
   if (defaultList.isParameter("pcoarsen: schedule") && defaultList.isParameter("pcoarsen: element")) {
     // P-Coarsening by schedule (new interface)
@@ -2179,6 +2179,9 @@ void ParameterListInterpreter<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 
   // Constraint
   auto constraintFactory = rcp(new ConstraintFactory());
+  Teuchos::ParameterList constraintParams;
+  test_and_set_param_2list<std::string>(paramList, defaultList, "emin: least squares solver type", constraintParams);
+  constraintParams.set("emin: constraint type", "nullspace");
   constraintFactory->SetFactory("Ppattern", manager.GetFactory("Ppattern"));
   constraintFactory->SetFactory("CoarseNullspace", manager.GetFactory("Ptent"));
   manager.SetFactory("Constraint", constraintFactory);
