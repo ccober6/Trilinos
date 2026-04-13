@@ -388,7 +388,6 @@ makeOptimizedColMap(std::ostream& errStream,
 /// \param oldImport [in] Optional pointer to the "original
 ///   Import: an Import from \c domMap to \c colMap.  This is not
 ///   required, but if you supply this, this function may use it
-///   required, but if you supply this, this function may use it
 ///   to avoid some communication and/or work when setting up the
 ///   new Import object.
 ///

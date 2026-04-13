@@ -379,9 +379,9 @@ Teuchos::RCP<const ExecSpace> space_instance(int i = 0) {
 }
 #endif
 
-/*! \brief get a strong Teuchos::RCP to Tpetra-managed Kokkos execution space
-    instance \param i the index of the execution space instance
+/*! \brief get a strong Teuchos::RCP to Tpetra-managed Kokkos execution space instance
     \param priority the priority of the execution space instance
+    \param i the index of the execution space instance
      \tparam ExecSpace the type of Execution
      \returns a strong RCP<ExecSpace>
 */

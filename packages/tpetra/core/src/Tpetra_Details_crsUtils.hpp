@@ -551,7 +551,7 @@ size_t find_crs_indices_sorted(
 ///        column index (in the indices array) of row i.
 /// \param rowPtrEnd [in/out] rowPtrEnd[i] points to the last
 ///        column index (in the indices array) of row i.
-/// \param indices_wdv [in/out] array containing columns indices of nonzeros in
+/// \param indices_wdv [in/out] array containing column indices of nonzeros in
 ///        CRS representation.
 ///
 template <class RowPtr, class Indices, class Padding>

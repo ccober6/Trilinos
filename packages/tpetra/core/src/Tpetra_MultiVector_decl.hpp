@@ -1567,7 +1567,7 @@ class MultiVector : public DistObject<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   /// computes \f$y^* x = \bar{y}^T x = \sum_i \bar{y}_i \cdot x_i\f$.
   ///
   /// \param A [in] MultiVector with which to dot \c *this.
-  /// \param norms [out] Device View with getNumVectors() entries.
+  /// \param dots [out] Device View with getNumVectors() entries.
   ///
   /// \pre <tt>this->getNumVectors () == A.getNumVectors ()</tt>
   /// \pre <tt>dots.extent (0) == A.getNumVectors ()</tt>
@@ -1575,7 +1575,7 @@ class MultiVector : public DistObject<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   /// \post <tt>dots(j) == (this->getVector[j])->dot (* (A.getVector[j]))</tt>
   void
   dot(const MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>& A,
-      const Kokkos::View<dot_type*, Kokkos::HostSpace>& norms) const;
+      const Kokkos::View<dot_type*, Kokkos::HostSpace>& dots) const;
 
   template <class ViewType>
   void

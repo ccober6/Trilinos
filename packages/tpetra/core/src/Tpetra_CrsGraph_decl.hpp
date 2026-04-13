@@ -1098,14 +1098,14 @@ class CrsGraph : public RowGraph<LocalOrdinal, GlobalOrdinal, Node>,
 
   /// \brief Get a copy of the given row, using local indices.
   ///
-  /// \param gblRow [in] Global index of the row.
-  /// \param gblColInds [out] On output: Local column indices.
+  /// \param lclRow [in] Local index of the row.
+  /// \param lclColInds [out] On output: Local column indices.
   /// \param numColInds [out] Number of indices returned.
   ///
   /// \pre <tt>hasColMap()</tt>
   void
-  getLocalRowCopy(local_ordinal_type gblRow,
-                  nonconst_local_inds_host_view_type& gblColInds,
+  getLocalRowCopy(local_ordinal_type lclRow,
+                  nonconst_local_inds_host_view_type& lclColInds,
                   size_t& numColInds) const override;
 
   /// \brief Get a const view of the given global

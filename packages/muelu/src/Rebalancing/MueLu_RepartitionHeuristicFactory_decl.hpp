@@ -27,7 +27,7 @@
 namespace MueLu {
 
 /*!
-  @class RepartitionHeuristicFactory class.
+  @class RepartitionHeuristicFactory
   @brief Factory for determing the number of partitions for rebalancing
 
   Given the unrebalanced (coarse) matrix A and some user parameters we determine the number
