@@ -698,6 +698,23 @@ class TrilinosPRConfigurationTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(pr_config.arg_filename_subprojects))
 
 
+    def test_TrilinosPRConfigurationBase_prepare_test_all_enabled_skips_packageenables(self):
+        """
+        Test that the prepare_test method does not call the member function create_package_enables_file
+        if the GenConfig key would enable all packages (no need to decide which packages then).
+        """
+        args = self.dummy_args()
+        args.genconfig_build_name = "rhel8_sems-gnu-openmpi_release_static_no-kokkos-arch_no-asan_no-complex_no-fpic_mpi_no-pt_no-rdc_all"
+        pr_config = trilinosprhelpers.TrilinosPRConfigurationBase(args)
+
+        pr_config.create_package_enables_file = Mock()
+        pr_config.prepare_test()
+
+        pr_config.create_package_enables_file.assert_not_called()
+        self.assertTrue(os.path.isfile(pr_config.arg_filename_packageenables))
+        self.assertTrue(os.path.isfile(pr_config.arg_filename_subprojects))
+
+
     def test_TrilinosPRConfigurationBase_prepare_test_FAIL(self):
         """
         Test the prepare_test method where it would fail due to

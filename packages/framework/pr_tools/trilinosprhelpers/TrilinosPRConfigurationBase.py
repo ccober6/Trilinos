@@ -832,7 +832,7 @@ class TrilinosPRConfigurationBase(object):
         self.message("|   E N V I R O N M E N T   S E T   U P   C O M P L E T E")
         self.message("+" + "-"*68 + "+")
 
-        if self.arg_skip_create_packageenables:
+        if self.arg_skip_create_packageenables or self.arg_genconfig_build_name.endswith("_all"):
             self.message("+" + "-"*68 + "+")
             self.message("|   S K I P P I N G   `packageEnables.cmake`   G E N E R A T I O N")
             self.message("+" + "-"*68 + "+")
