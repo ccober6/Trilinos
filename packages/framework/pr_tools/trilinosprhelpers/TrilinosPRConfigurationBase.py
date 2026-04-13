@@ -322,14 +322,19 @@ class TrilinosPRConfigurationBase(object):
         """
         return self.args.pullrequest_build_name
 
+    @property
+    def arg_genconfig_build_name(self):
+        """
+        The key used for the GenConfig config_specs.ini mapping.
+        """
+        return self.args.genconfig_build_name
 
     @property
     def arg_pr_genconfig_job_name(self):
         """
-        The Jenkins job name that is executing this Pull Request test.
-        Default is to use the value in args.pullrequest_build_name.
+        Deprecated, left for backwards compatibility.
         """
-        return self.args.genconfig_build_name
+        return self.arg_genconfig_build_name
 
     @property
     def arg_dashboard_build_name(self):
@@ -524,11 +529,11 @@ class TrilinosPRConfigurationBase(object):
         if self.arg_dashboard_build_name:
             output = self.arg_dashboard_build_name
         elif "Pull Request" in self.arg_pullrequest_cdash_track:
-            output = f"PR-{self.arg_pullrequest_number}-test-{self.arg_pr_genconfig_job_name}"
+            output = f"PR-{self.arg_pullrequest_number}-test-{self.arg_genconfig_build_name}"
             if self.arg_jenkins_job_number:
                 output = f"{output}-{self.arg_jenkins_job_number}"
         else:
-            output = self.arg_pr_genconfig_job_name
+            output = self.arg_genconfig_build_name
         return output
 
 
@@ -749,7 +754,7 @@ class TrilinosPRConfigurationBase(object):
         self.message("--- arg_pr_env_config_file      = {}".format(self.arg_pr_env_config_file))
         self.message("--- arg_pr_gen_config_file      = {}".format(self.arg_pr_gen_config_file))
         self.message("--- arg_pr_jenkins_job_name     = {}".format(self.arg_pr_jenkins_job_name))
-        self.message("--- arg_pr_genconfig_job_name   = {}".format(self.arg_pr_genconfig_job_name))
+        self.message("--- arg_genconfig_build_name   = {}".format(self.arg_genconfig_build_name))
         self.message("--- arg_dashboard_build_name    = {}".format(self.arg_dashboard_build_name))
         self.message("--- arg_pullrequest_number      = {}".format(self.arg_pullrequest_number))
         self.message("--- arg_pullrequest_cdash_track = {}".format(self.arg_pullrequest_cdash_track))
@@ -776,7 +781,7 @@ class TrilinosPRConfigurationBase(object):
         self.message("+" + "-"*68 + "+")
         self.message("|   E N V I R O N M E N T   S E T   U P   S T A R T")
         self.message("+" + "-"*68 + "+")
-        tr_env = LoadEnv([self.arg_pr_genconfig_job_name, "--force"],
+        tr_env = LoadEnv([self.arg_genconfig_build_name, "--force"],
                          load_env_ini_file=Path(self.arg_pr_env_config_file))
         tr_env.load_set_environment()
 

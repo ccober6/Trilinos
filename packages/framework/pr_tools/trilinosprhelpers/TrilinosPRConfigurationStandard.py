@@ -43,7 +43,7 @@ class TrilinosPRConfigurationStandard(TrilinosPRConfigurationBase):
                              "--force",
                              "--cmake-fragment",
                              os.path.join(self.arg_workspace_dir, self.config_script),
-                             self.arg_pr_genconfig_job_name
+                             self.arg_genconfig_build_name
                              ]
 
         genconfig_inifile = Path(self.arg_pr_gen_config_file)
