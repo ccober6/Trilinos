@@ -836,7 +836,12 @@ class TrilinosPRConfigurationBase(object):
             self.message("+" + "-"*68 + "+")
             self.message("|   S K I P P I N G   `packageEnables.cmake`   G E N E R A T I O N")
             self.message("+" + "-"*68 + "+")
-
+            self.message("Creating dummy packageEnables.cmake and "
+                         "package_subproject_list.cmake for CTest drivers.")
+            with open(self.arg_filename_packageenables, 'w'):
+                pass
+            with open(self.arg_filename_subprojects, 'w'):
+                pass
         else:
             self.message("+" + "-"*68 + "+")
             self.message("|   G e n e r a t e   `packageEnables.cmake`   S T A R T I N G")
