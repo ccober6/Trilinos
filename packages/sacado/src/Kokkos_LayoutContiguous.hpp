@@ -203,7 +203,7 @@ namespace Impl {
   template <typename Layout, unsigned Stride, typename iType>
   KOKKOS_INLINE_FUNCTION LayoutContiguous<Layout,Stride>
   reconstructLayout(const LayoutContiguous<Layout,Stride>& layout, iType dynrank) {
-    return LayoutContiguous<Layout,Stride>(reconsructLayout(layout.base_layout(), dynrank));
+    return LayoutContiguous<Layout,Stride>(reconstructLayout(layout.base_layout(), dynrank));
   }
 
 } // namespace Impl
