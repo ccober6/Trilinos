@@ -84,16 +84,17 @@ struct inner_layout< LayoutContiguous<Layout, Stride> > {
   typedef Layout type;
 };
 
-// Specialize DynRankDimTraits for LayoutContiguous.
-// Weirdly, we need a full specialization on bool for the non-legacy View impl case
-// because of this code in Kokkos_DynRankView.hpp (around line 429):
-// #ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
-//   using drdtraits = Impl::DynRankDimTraits<typename view_type::specialize>;
-// #else
-//   using drdtraits = Impl::DynRankDimTraits<
-//       std::conditional_t<view_type::traits::impl_is_customized, bool, void>>;
-// #endif
 namespace Impl {
+
+  // Specialize DynRankDimTraits for LayoutContiguous.
+  // Weirdly, we need a full specialization on bool for the non-legacy View impl case
+  // because of this code in Kokkos_DynRankView.hpp (around line 429):
+  // #ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
+  //   using drdtraits = Impl::DynRankDimTraits<typename view_type::specialize>;
+  // #else
+  //   using drdtraits = Impl::DynRankDimTraits<
+  //       std::conditional_t<view_type::traits::impl_is_customized, bool, void>>;
+  // #endif
   template <>
 #ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   struct DynRankDimTraits<ViewSpecializeSacadoFadContiguous> {
@@ -197,6 +198,13 @@ namespace Impl {
       return drdtraits::createView(arg, N0, N1, N2, N3, N4, N5, N6, N7);
     }
   };
+
+  // Overload reconstructLayout for LayoutContiguous
+  template <typename Layout, unsigned Stride, typename iType>
+  KOKKOS_INLINE_FUNCTION LayoutContiguous<Layout,Stride>
+  reconstructLayout(const LayoutContiguous<Layout,Stride>& layout, iType dynrank) {
+    return LayoutContiguous<Layout,Stride>(reconsructLayout(layout.base_layout(), dynrank));
+  }
 
 } // namespace Impl
 
