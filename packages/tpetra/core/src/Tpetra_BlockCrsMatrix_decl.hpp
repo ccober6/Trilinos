@@ -691,6 +691,9 @@ class BlockCrsMatrix : virtual public ::Tpetra::RowMatrix<Scalar, LO, GO, Node>,
   ///   row index within a block, then the column index within a
   ///   block.
   ///
+  /// \param offsets [in] Precomputed offsets of diagonal entries,
+  ///   as returned by getLocalDiagOffsets().
+  ///
   /// This method uses the offsets of the diagonal entries, as
   /// precomputed by getLocalDiagOffsets(), to speed up copying the
   /// diagonal of the matrix.
@@ -1169,9 +1172,9 @@ class BlockCrsMatrix : virtual public ::Tpetra::RowMatrix<Scalar, LO, GO, Node>,
   /// \post <tt>indices.size () == getNumEntriesInGlobalRow (GlobalRow)</tt>
   ///
   /// \param GlobalRow [in] Global index of the row.
-  /// \param Indices [out] Global indices of the columns
+  /// \param indices [out] Global indices of the columns
   ///   corresponding to values.
-  /// \param Values [out] Matrix values.
+  /// \param values [out] Matrix values.
   ///
   /// If \c GlobalRow does not belong to this node, then \c indices
   /// is set to \c null.
