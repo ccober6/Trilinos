@@ -14,6 +14,7 @@
 //! @brief Various adapters that will create a MueLu preconditioner that is a Tpetra::Operator.
 
 #include <Teuchos_XMLParameterListHelpers.hpp>
+#include <Tpetra_CrsMatrix.hpp>
 #include <Tpetra_Operator.hpp>
 #include <Tpetra_RowMatrix.hpp>
 #include <Xpetra_TpetraBlockCrsMatrix.hpp>
@@ -194,6 +195,61 @@ Teuchos::RCP<MueLu::TpetraOperator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>
 CreateTpetraPreconditioner(const Teuchos::RCP<const Tpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>& inA) {
   Teuchos::ParameterList paramList;
   return CreateTpetraPreconditioner<Scalar, LocalOrdinal, GlobalOrdinal, Node>(inA, paramList);
+}
+
+/*!
+  @overload
+  @brief Disambiguates @c CreateTpetraPreconditioner for concrete matrix types.
+
+  A @c Teuchos::RCP<Tpetra::CrsMatrix> (or @c BlockCrsMatrix) converts implicitly both to
+  @c RCP<Tpetra::Operator> and to @c RCP<const Tpetra::Operator>, so overload resolution between
+  the non-const and const @c Operator entry points is ambiguous.  These overloads bind the
+  concrete matrix type and forward through @c RCP<Tpetra::Operator> to the original implementation.
+*/
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+Teuchos::RCP<MueLu::TpetraOperator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>
+CreateTpetraPreconditioner(const Teuchos::RCP<Tpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>& inA,
+                           Teuchos::ParameterList& inParamList) {
+  Teuchos::RCP<Tpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node>> op = inA;
+  return CreateTpetraPreconditioner<Scalar, LocalOrdinal, GlobalOrdinal, Node>(op, inParamList);
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+Teuchos::RCP<MueLu::TpetraOperator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>
+CreateTpetraPreconditioner(const Teuchos::RCP<Tpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>& inA,
+                           const std::string& xmlFileName) {
+  Teuchos::RCP<Tpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node>> op = inA;
+  return CreateTpetraPreconditioner<Scalar, LocalOrdinal, GlobalOrdinal, Node>(op, xmlFileName);
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+Teuchos::RCP<MueLu::TpetraOperator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>
+CreateTpetraPreconditioner(const Teuchos::RCP<Tpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>& inA) {
+  Teuchos::RCP<Tpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node>> op = inA;
+  return CreateTpetraPreconditioner<Scalar, LocalOrdinal, GlobalOrdinal, Node>(op);
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+Teuchos::RCP<MueLu::TpetraOperator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>
+CreateTpetraPreconditioner(const Teuchos::RCP<Tpetra::BlockCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>& inA,
+                           Teuchos::ParameterList& inParamList) {
+  Teuchos::RCP<Tpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node>> op = inA;
+  return CreateTpetraPreconditioner<Scalar, LocalOrdinal, GlobalOrdinal, Node>(op, inParamList);
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+Teuchos::RCP<MueLu::TpetraOperator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>
+CreateTpetraPreconditioner(const Teuchos::RCP<Tpetra::BlockCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>& inA,
+                           const std::string& xmlFileName) {
+  Teuchos::RCP<Tpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node>> op = inA;
+  return CreateTpetraPreconditioner<Scalar, LocalOrdinal, GlobalOrdinal, Node>(op, xmlFileName);
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+Teuchos::RCP<MueLu::TpetraOperator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>
+CreateTpetraPreconditioner(const Teuchos::RCP<Tpetra::BlockCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>& inA) {
+  Teuchos::RCP<Tpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node>> op = inA;
+  return CreateTpetraPreconditioner<Scalar, LocalOrdinal, GlobalOrdinal, Node>(op);
 }
 
 /*!

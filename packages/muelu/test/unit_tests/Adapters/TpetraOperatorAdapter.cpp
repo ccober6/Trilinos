@@ -497,6 +497,63 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, ReuseTpetraPreconditioner_Cons
 #endif
 }  // ReuseTpetraPreconditioner_ConstCrsMatrix
 
+// Regression: Teuchos::RCP<Tpetra::CrsMatrix> used to be ambiguous between the overloads taking
+// RCP<Tpetra::Operator> and RCP<const Tpetra::Operator> (e.g. Zoltan2 Sphynx).  The dedicated
+// RCP<CrsMatrix> overload must compile and agree with the RCP<Operator> entry point.
+TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_RcpCrsMatrixOverload, Scalar, LocalOrdinal, GlobalOrdinal, Node) {
+#include <MueLu_UseShortNames.hpp>
+  MUELU_TESTING_SET_OSTREAM;
+  MUELU_TESTING_LIMIT_SCOPE(Scalar, GlobalOrdinal, Node);
+  out << "version: " << MueLu::Version() << std::endl;
+
+#if defined(HAVE_MUELU_IFPACK2) && defined(HAVE_MUELU_AMESOS2)
+  typedef Tpetra::CrsMatrix<SC, LO, GO, NO> tpetra_crsmatrix_type;
+  typedef Tpetra::Operator<SC, LO, GO, NO> tpetra_operator_type;
+  typedef typename Teuchos::ScalarTraits<SC>::magnitudeType magnitude_type;
+
+  if (TestHelpers::Parameters::getLib() == Xpetra::UseTpetra) {
+    RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
+    RCP<Matrix> Op                     = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(6561 * comm->getSize());
+    RCP<tpetra_crsmatrix_type> tpA     = Xpetra::toTpetra(Op);
+
+    Teuchos::ParameterList mueluList;
+
+    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precFromCrs =
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(tpA, mueluList);
+
+    RCP<tpetra_operator_type> opOnly(tpA);
+    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precFromOp =
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opOnly, mueluList);
+
+    RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
+    RHS->setSeed(846930886);
+    RHS->randomize();
+    Teuchos::Array<magnitude_type> norms(1);
+    RHS->norm2(norms);
+    RHS->scale(1 / norms[0]);
+
+    RCP<MultiVector> Xcrs = MultiVectorFactory::Build(Op->getRowMap(), 1);
+    RCP<MultiVector> Xop  = MultiVectorFactory::Build(Op->getRowMap(), 1);
+    Xcrs->putScalar((SC)0.0);
+    Xop->putScalar((SC)0.0);
+
+    precFromCrs->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xcrs)));
+    precFromOp->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xop)));
+
+    RCP<MultiVector> diff = MultiVectorFactory::Build(Op->getRowMap(), 1);
+    diff->putScalar(0.0);
+    diff->update(1.0, *Xcrs, -1.0, *Xop, 0.0);
+    diff->norm2(norms);
+    out << "|| X_rcp_crs - X_rcp_op ||_2 = " << std::setiosflags(std::ios::fixed) << std::setprecision(10) << norms[0] << std::endl;
+    TEST_EQUALITY(norms[0] < 1e-10, true);
+  } else {
+    out << "This test is enabled only for linAlgebra=Tpetra." << std::endl;
+  }
+#else
+  out << "Skipping test because some required packages are not enabled (Tpetra, Ifpack2, Amesos2)." << std::endl;
+#endif
+}  // CreatePreconditioner_RcpCrsMatrixOverload
+
 #define MUELU_ETI_GROUP(Scalar, LocalOrdinal, GlobalOrdinal, Node)                                                                                    \
   TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(TpetraOperator, Apply, Scalar, LocalOrdinal, GlobalOrdinal, Node)                                              \
   TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(TpetraOperator, Getters, Scalar, LocalOrdinal, GlobalOrdinal, Node)                                            \
@@ -505,7 +562,8 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, ReuseTpetraPreconditioner_Cons
   TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(TpetraOperator, CreatePreconditioner_ConstOperator_SmallGrid, Scalar, LocalOrdinal, GlobalOrdinal, Node)       \
   TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(TpetraOperator, CreatePreconditioner_ConstOperator_HierarchyLevels, Scalar, LocalOrdinal, GlobalOrdinal, Node) \
   TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(TpetraOperator, CreatePreconditioner_ConstOperator_TwoVectors, Scalar, LocalOrdinal, GlobalOrdinal, Node)      \
-  TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(TpetraOperator, ReuseTpetraPreconditioner_ConstCrsMatrix, Scalar, LocalOrdinal, GlobalOrdinal, Node)
+  TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(TpetraOperator, ReuseTpetraPreconditioner_ConstCrsMatrix, Scalar, LocalOrdinal, GlobalOrdinal, Node)           \
+  TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT(TpetraOperator, CreatePreconditioner_RcpCrsMatrixOverload, Scalar, LocalOrdinal, GlobalOrdinal, Node)
 
 #include <MueLu_ETI_4arg.hpp>
 
