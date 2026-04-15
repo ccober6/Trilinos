@@ -173,6 +173,11 @@ CreateTpetraPreconditioner(const Teuchos::RCP<Tpetra::Operator<Scalar, LocalOrdi
 
   @note `Teuchos::RCP<T>` and `Teuchos::RCP<const T>` are different types, so a `RCP<const Tpetra::Operator>`
   does not match the overload taking `RCP<Tpetra::Operator>`.  This overload forwards to that implementation.
+
+  @note This is a convenience wrapper and an incremental step, not a complete const-correct solution.
+  In particular, this overload currently forwards via @c rcp_const_cast, so it does not remove the long-term
+  technical debt of supporting APIs that natively accept @c Teuchos::RCP<const ...> without casting or
+  duplicating overload sets.
 */
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 Teuchos::RCP<MueLu::TpetraOperator<Scalar, LocalOrdinal, GlobalOrdinal, Node>>
