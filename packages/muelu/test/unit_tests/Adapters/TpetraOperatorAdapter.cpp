@@ -189,12 +189,15 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
 
     // CreateTpetraPreconditioner takes ParameterList by non-const reference and fills defaults in-place.
     // Each build must receive a fresh copy of the user's list so const vs non-const paths start identical.
+    // Copies must be named lvalues: a temporary ParameterList cannot bind to non-const ParameterList&.
     Teuchos::ParameterList mueluList;
 
+    Teuchos::ParameterList paramListNonConst(mueluList);
+    Teuchos::ParameterList paramListConst(mueluList);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
 
     RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
     RHS->setSeed(846930886);
@@ -246,10 +249,12 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
     RCP<const tpetra_operator_type> opConst = Teuchos::rcp_implicit_cast<const tpetra_operator_type>(tpA);
 
     Teuchos::ParameterList mueluList;
+    Teuchos::ParameterList paramListNonConst(mueluList);
+    Teuchos::ParameterList paramListConst(mueluList);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
 
     RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
     RHS->setSeed(846930886);
@@ -303,10 +308,12 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
 
     Teuchos::ParameterList mueluList;
 
+    Teuchos::ParameterList paramListNonConst(mueluList);
+    Teuchos::ParameterList paramListConst(mueluList);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
 
     RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
     RHS->setSeed(123456789);
@@ -358,10 +365,12 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
 
     Teuchos::ParameterList mueluList;
 
+    Teuchos::ParameterList paramListNonConst(mueluList);
+    Teuchos::ParameterList paramListConst(mueluList);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
 
     const int levelsNC = precNonConst->GetHierarchy()->GetNumLevels();
     const int levelsC  = precConst->GetHierarchy()->GetNumLevels();
@@ -397,10 +406,12 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
 
     Teuchos::ParameterList mueluList;
 
+    Teuchos::ParameterList paramListNonConst(mueluList);
+    Teuchos::ParameterList paramListConst(mueluList);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
 
     const int numVec     = 2;
     RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), numVec);
@@ -463,10 +474,12 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, ReuseTpetraPreconditioner_Cons
 
     Teuchos::ParameterList mueluList;
 
+    Teuchos::ParameterList paramListNonConst(mueluList);
+    Teuchos::ParameterList paramListConst(mueluList);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
 
     // Same fine matrix, same reuse entry point: non-const vs const CrsMatrix handle.
     MueLu::ReuseTpetraPreconditioner(tpA, *precNonConst);
@@ -523,12 +536,14 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_RcpCrsMat
 
     Teuchos::ParameterList mueluList;
 
+    Teuchos::ParameterList paramListFromCrs(mueluList);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precFromCrs =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(tpA, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(tpA, paramListFromCrs);
 
     RCP<tpetra_operator_type> opOnly(tpA);
+    Teuchos::ParameterList paramListFromOp(mueluList);
     RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precFromOp =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opOnly, Teuchos::ParameterList(mueluList));
+        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opOnly, paramListFromOp);
 
     RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
     RHS->setSeed(846930886);
