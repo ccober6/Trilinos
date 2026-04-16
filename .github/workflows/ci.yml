@@ -17,7 +17,7 @@ on:
         description: 'Max cores allowed that is detected on the system.'
         required: false
         type: number
-        default: 12
+        default:
       ctest-drop-site:
         required: false
         type: string
@@ -35,21 +35,16 @@ on:
         description: 'Number of concurrent tests allowed in CTest.'
         required: false
         type: number
-        default: -1
+        default:
       slots-per-gpu:
         description: 'On a GPU machine, this is number of slots allowed per GPU. (e.g. 4 allows 4 MPI ranks per GPU)'
         required: false
         type: number
-        default: 0
+        default:
       extra-pr-driver-args:
         description: 'Extra arguments to be used when calling PullRequestLinuxDriverTest.py'
         required: false
         type: string
-
-# Cancels any in progress 'workflows' associated with this workflow ref
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build-test:
@@ -110,23 +105,23 @@ jobs:
           echo "image: ${AT2_IMAGE_FULLPATH:-${AT2_IMAGE:-unknown}}"
           type python
           python3 ${TRILINOS_DIR}/packages/framework/pr_tools/PullRequestLinuxDriverTest.py \
-            --target-branch-name ${{ inputs.target-branch }} \
             --genconfig-build-name ${{ inputs.genconfig-string }} \
-            --pullrequest-number ${{ github.event.pull_request.number }} \
+            ${{ inputs.target-branch && '--target-branch-name ' || '' }}${{ inputs.target-branch }} \
+            ${{ github.event.pull_request && '--pullrequest-number ' || '' }}${{ github.event.pull_request.number }} \
             --pullrequest-env-config-file ${TRILINOS_DIR}/packages/framework/pr_tools/trilinos_pr.ini \
             --pullrequest-gen-config-file ${TRILINOS_DIR}/packages/framework/GenConfig/src/gen-config.ini \
             --workspace-dir ${TRILINOS_DIR}/../ \
             --source-dir ${TRILINOS_DIR} \
             --build-dir ${BUILD_DIR} \
-            --dashboard-build-name=${{ inputs.dashboard-build-name }} \
+            ${{ inputs.dashboard-build-name && '--dashboard-build-name ' || '' }}${{ inputs.dashboard-build-name }} \
             --ctest-driver ${TRILINOS_DIR}/cmake/SimpleTesting/cmake/ctest-driver.cmake \
             --ctest-drop-site ${{ inputs.ctest-drop-site }} \
             --pullrequest-cdash-track ${{ inputs.cdash-track }} \
             --filename-subprojects ./package_subproject_list.cmake \
             --filename-packageenables ./packageEnables.cmake \
-            --max-cores-allowed=${{ inputs.max-cores-allowed }} \
-            --num-concurrent-tests=${{ inputs.num-concurrent-tests }} \
-            --slots-per-gpu=${{ inputs.slots-per-gpu }} \
+            ${{ inputs.max-cores-allowed && '--max-cores-allowed ' || '' }}${{ inputs.max-cores-allowed }} \
+            ${{ inputs.num-concurrent-tests && '--num-concurrent-tests ' || '' }}${{ inputs.num-concurrent-tests }} \
+            ${{ inputs.slots-per-gpu && '--slots-per-gpu ' || '' }}${{ inputs.slots-per-gpu }} \
             ${{ inputs.extra-pr-driver-args }}
       - name: Filtered build error logs
         if: success() || failure()
