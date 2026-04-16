@@ -33,6 +33,167 @@
 
 namespace MueLuTests {
 
+namespace {  // helpers local to this translation unit, shared by the CreateTpetraPreconditioner
+             // const-overload tests added together with MueLu::CreateTpetraPreconditioner's
+             // RCP<const Tpetra::Operator> / RCP<CrsMatrix> overloads.
+
+// Small 1D-Poisson based fixture that exposes the handles every const-overload test needs:
+// the Xpetra matrix, its Tpetra::CrsMatrix view, and non-const / const Tpetra::Operator RCPs.
+// Also provides a few one-liner utilities (pair creation, random RHS, residual reduction)
+// so that each test is driven by a couple of lines plus its specific assertion tolerances.
+template <class SC, class LO, class GO, class NO>
+struct ConstOverloadFixture {
+  using magnitude_type             = typename Teuchos::ScalarTraits<SC>::magnitudeType;
+  using tpetra_crsmatrix_type      = Tpetra::CrsMatrix<SC, LO, GO, NO>;
+  using tpetra_operator_type       = Tpetra::Operator<SC, LO, GO, NO>;
+  using matrix_type                = Xpetra::Matrix<SC, LO, GO, NO>;
+  using multivector_type           = Xpetra::MultiVector<SC, LO, GO, NO>;
+  using multivector_factory_type   = Xpetra::MultiVectorFactory<SC, LO, GO, NO>;
+  using muelu_tpetra_operator_type = MueLu::TpetraOperator<SC, LO, GO, NO>;
+  using precond_pair               = std::pair<Teuchos::RCP<muelu_tpetra_operator_type>,
+                                               Teuchos::RCP<muelu_tpetra_operator_type>>;
+
+  Teuchos::RCP<matrix_type> Op;
+  Teuchos::RCP<tpetra_crsmatrix_type> tpA;
+  Teuchos::RCP<tpetra_operator_type> opNonConst;
+  Teuchos::RCP<const tpetra_operator_type> opConst;
+
+  explicit ConstOverloadFixture(GO rowsPerRank) {
+    auto comm  = TestHelpers::Parameters::getDefaultComm();
+    Op         = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(rowsPerRank * comm->getSize());
+    tpA        = Xpetra::toTpetra(Op);
+    opNonConst = Teuchos::rcp_implicit_cast<tpetra_operator_type>(tpA);
+    opConst    = Teuchos::rcp_implicit_cast<const tpetra_operator_type>(tpA);
+  }
+
+  // CreateTpetraPreconditioner takes ParameterList by non-const reference and fills defaults
+  // in place.  Both API paths therefore need their own fresh named lvalue copy of `base` so
+  // they start from identical configuration (temporary ParameterList cannot bind to ParameterList&).
+  precond_pair makeNonConstVsConstOperator(const Teuchos::ParameterList& base) const {
+    Teuchos::ParameterList listA(base), listB(base);
+    auto precA = MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, listA);
+    auto precB = MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, listB);
+    return std::make_pair(precA, precB);
+  }
+
+  // Compare the dedicated RCP<CrsMatrix> overload against the generic RCP<Operator> overload.
+  precond_pair makeCrsMatrixVsOperator(const Teuchos::ParameterList& base) const {
+    Teuchos::ParameterList listCrs(base), listOp(base);
+    auto precCrs = MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(tpA, listCrs);
+    auto precOp  = MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, listOp);
+    return std::make_pair(precCrs, precOp);
+  }
+
+  // Same fine matrix, reuse entry point tested with non-const vs const CrsMatrix handle.
+  void reuseOnConstNonConstCrsMatrix(muelu_tpetra_operator_type& precForNonConst,
+                                     muelu_tpetra_operator_type& precForConst) const {
+    MueLu::ReuseTpetraPreconditioner(tpA, precForNonConst);
+    Teuchos::RCP<const tpetra_crsmatrix_type> tpAconst =
+        Teuchos::rcp_implicit_cast<const tpetra_crsmatrix_type>(tpA);
+    MueLu::ReuseTpetraPreconditioner(tpAconst, precForConst);
+  }
+
+  // Normalized random RHS (per-column unit 2-norm).
+  Teuchos::RCP<multivector_type> makeRandomRHS(int numVec, unsigned int seed) const {
+    auto RHS = multivector_factory_type::Build(Op->getRowMap(), numVec);
+    RHS->setSeed(seed);
+    RHS->randomize();
+    Teuchos::Array<magnitude_type> colNorms(numVec);
+    RHS->norm2(colNorms());
+    for (int j = 0; j < numVec; ++j)
+      RHS->getVectorNonConst(j)->scale(Teuchos::ScalarTraits<magnitude_type>::one() / colNorms[j]);
+    return RHS;
+  }
+
+  Teuchos::RCP<multivector_type> makeZero(int numVec) const {
+    auto X = multivector_factory_type::Build(Op->getRowMap(), numVec);
+    X->putScalar(Teuchos::ScalarTraits<SC>::zero());
+    return X;
+  }
+
+  // Per-column relative residual ||A*X - RHS||_2 / ||RHS||_2.
+  Teuchos::Array<magnitude_type> residualReduction(const multivector_type& X,
+                                                   const multivector_type& RHS) const {
+    const int numVec = static_cast<int>(X.getNumVectors());
+    auto r           = multivector_factory_type::Build(Op->getRowMap(), numVec);
+    Op->apply(X, *r);
+    r->update(Teuchos::ScalarTraits<SC>::one(), RHS, -Teuchos::ScalarTraits<SC>::one());
+    Teuchos::Array<magnitude_type> rNorm(numVec), rhsNorm(numVec);
+    r->norm2(rNorm());
+    RHS.norm2(rhsNorm());
+    Teuchos::Array<magnitude_type> red(numVec);
+    for (int j = 0; j < numVec; ++j)
+      red[j] = rNorm[j] / rhsNorm[j];
+    return red;
+  }
+};
+
+// Apply precA and precB to `RHS` and verify API equivalence:
+//  (a) each preconditioner reduces the residual below `redMax`;
+//  (b) the two API paths agree per-column within `gapMax`;
+//  (c) both hierarchies have the same number of levels.
+// Two CreateTpetraPreconditioner calls build independent hierarchies, so bit-identical
+// behavior is NOT expected: UncoupledAggregation uses random graph coloring, so aggregate
+// counts on coarse levels can differ by a handful (e.g. 721 vs 722 on level 2), and the
+// SaPFactory eigenvalue estimate (PowerMethod) is nondeterministic across independent
+// setups (slightly different Prolongator damping factor).  Tolerances reflect that:
+// `redMax` is a "the preconditioner is not broken" bound, `gapMax` is a per-column
+// disagreement bound that absorbs aggregation-level randomness, not numerical noise.
+template <class SC, class LO, class GO, class NO>
+void expectEquivalentPreconditioner(Teuchos::FancyOStream& out,
+                                    bool& success,
+                                    const ConstOverloadFixture<SC, LO, GO, NO>& fx,
+                                    MueLu::TpetraOperator<SC, LO, GO, NO>& precA,
+                                    MueLu::TpetraOperator<SC, LO, GO, NO>& precB,
+                                    const Teuchos::RCP<Xpetra::MultiVector<SC, LO, GO, NO>>& RHS,
+                                    typename Teuchos::ScalarTraits<SC>::magnitudeType redMax,
+                                    typename Teuchos::ScalarTraits<SC>::magnitudeType gapMax,
+                                    const std::string& label) {
+  using magnitude_type = typename Teuchos::ScalarTraits<SC>::magnitudeType;
+  const int numVec     = static_cast<int>(RHS->getNumVectors());
+
+  auto Xa = fx.makeZero(numVec);
+  auto Xb = fx.makeZero(numVec);
+  precA.apply(*Xpetra::toTpetra(RHS), *Xpetra::toTpetra(Xa));
+  precB.apply(*Xpetra::toTpetra(RHS), *Xpetra::toTpetra(Xb));
+
+  const auto redA = fx.residualReduction(*Xa, *RHS);
+  const auto redB = fx.residualReduction(*Xb, *RHS);
+
+  const magnitude_type zero = Teuchos::ScalarTraits<magnitude_type>::zero();
+  magnitude_type maxRedA = zero, maxRedB = zero, maxGap = zero;
+  for (int j = 0; j < numVec; ++j) {
+    if (redA[j] > maxRedA) maxRedA = redA[j];
+    if (redB[j] > maxRedB) maxRedB = redB[j];
+    const magnitude_type gap = Teuchos::ScalarTraits<magnitude_type>::magnitude(redA[j] - redB[j]);
+    if (gap > maxGap) maxGap = gap;
+  }
+
+  out << label << ": max residual reduction A=" << std::setiosflags(std::ios::fixed)
+      << std::setprecision(10) << maxRedA << ", B=" << maxRedB
+      << ", max per-column gap=" << maxGap << std::endl;
+
+  TEUCHOS_TEST_EQUALITY(maxRedA < redMax, true, out, success);
+  TEUCHOS_TEST_EQUALITY(maxRedB < redMax, true, out, success);
+  TEUCHOS_TEST_EQUALITY(maxGap < gapMax, true, out, success);
+  TEUCHOS_TEST_EQUALITY(precA.GetHierarchy()->GetNumLevels(),
+                        precB.GetHierarchy()->GetNumLevels(), out, success);
+}
+
+template <class SC, class LO, class GO, class NO>
+void expectEquivalentHierarchyLevels(Teuchos::FancyOStream& out,
+                                     bool& success,
+                                     MueLu::TpetraOperator<SC, LO, GO, NO>& precA,
+                                     MueLu::TpetraOperator<SC, LO, GO, NO>& precB,
+                                     const std::string& label) {
+  const int levelsA = precA.GetHierarchy()->GetNumLevels();
+  const int levelsB = precB.GetHierarchy()->GetNumLevels();
+  out << label << ": numLevels A=" << levelsA << ", B=" << levelsB << std::endl;
+  TEUCHOS_TEST_EQUALITY(levelsA, levelsB, out, success);
+}
+
+}  // namespace
+
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, Apply, Scalar, LocalOrdinal, GlobalOrdinal, Node) {
 #include <MueLu_UseShortNames.hpp>
   MUELU_TESTING_SET_OSTREAM;
@@ -166,8 +327,8 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, Getters, Scalar, LocalOrdinal,
 }
 
 // Reproducer for Trilinos issue #15062: callers that only have Teuchos::RCP<const Tpetra::Operator>
-// could not use CreateTpetraPreconditioner without const_cast.  The overload taking RCP<const Operator>
-// must match the non-const overload (same MG iterate).
+// could not use CreateTpetraPreconditioner without const_cast.  The overload taking
+// RCP<const Operator> must produce a preconditioner equivalent to the non-const overload.
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOperator, Scalar, LocalOrdinal, GlobalOrdinal, Node) {
 #include <MueLu_UseShortNames.hpp>
   MUELU_TESTING_SET_OSTREAM;
@@ -175,51 +336,18 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
   out << "version: " << MueLu::Version() << std::endl;
 
 #if defined(HAVE_MUELU_IFPACK2) && defined(HAVE_MUELU_AMESOS2)
-  typedef Tpetra::CrsMatrix<SC, LO, GO, NO> tpetra_crsmatrix_type;
-  typedef Tpetra::Operator<SC, LO, GO, NO> tpetra_operator_type;
-  typedef typename Teuchos::ScalarTraits<SC>::magnitudeType magnitude_type;
+  using magnitude_type = typename Teuchos::ScalarTraits<SC>::magnitudeType;
 
   if (TestHelpers::Parameters::getLib() == Xpetra::UseTpetra) {
-    RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
-    RCP<Matrix> Op                     = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(6561 * comm->getSize());
-    RCP<tpetra_crsmatrix_type> tpA     = Xpetra::toTpetra(Op);
+    ConstOverloadFixture<SC, LO, GO, NO> fx(/*rowsPerRank=*/6561);
+    Teuchos::ParameterList baseList;
+    auto precs = fx.makeNonConstVsConstOperator(baseList);
+    auto RHS   = fx.makeRandomRHS(/*numVec=*/1, /*seed=*/846930886u);
 
-    RCP<tpetra_operator_type> opNonConst(tpA);
-    RCP<const tpetra_operator_type> opConst = Teuchos::rcp_implicit_cast<const tpetra_operator_type>(tpA);
-
-    // CreateTpetraPreconditioner takes ParameterList by non-const reference and fills defaults in-place.
-    // Each build must receive a fresh copy of the user's list so const vs non-const paths start identical.
-    // Copies must be named lvalues: a temporary ParameterList cannot bind to non-const ParameterList&.
-    Teuchos::ParameterList mueluList;
-
-    Teuchos::ParameterList paramListNonConst(mueluList);
-    Teuchos::ParameterList paramListConst(mueluList);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
-
-    RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RHS->setSeed(846930886);
-    RHS->randomize();
-    Teuchos::Array<magnitude_type> norms(1);
-    RHS->norm2(norms);
-    RHS->scale(1 / norms[0]);
-
-    RCP<MultiVector> Xnc = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RCP<MultiVector> Xc  = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    Xnc->putScalar((SC)0.0);
-    Xc->putScalar((SC)0.0);
-
-    precNonConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xnc)));
-    precConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xc)));
-
-    RCP<MultiVector> diff = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    diff->putScalar((SC)0.0);
-    diff->update(1.0, *Xnc, -1.0, *Xc, 0.0);
-    diff->norm2(norms);
-    out << "|| X_nonconst - X_const ||_2 = " << std::setiosflags(std::ios::fixed) << std::setprecision(10) << norms[0] << std::endl;
-    TEST_EQUALITY(norms[0] < 1e-10, true);
+    expectEquivalentPreconditioner(out, success, fx, *precs.first, *precs.second, RHS,
+                                   static_cast<magnitude_type>(0.95),
+                                   static_cast<magnitude_type>(0.15),
+                                   "CreatePreconditioner_ConstOperator");
   } else {
     out << "This test is enabled only for linAlgebra=Tpetra." << std::endl;
   }
@@ -228,7 +356,8 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
 #endif
 }  // CreatePreconditioner_ConstOperator
 
-// CreateTpetraPreconditioner(inA) with no ParameterList: const vs non-const Operator overloads.
+// CreateTpetraPreconditioner(inA) with a default-constructed (empty) ParameterList must
+// likewise be equivalent across the non-const / const Operator overloads.
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOperator_NoParameterList, Scalar, LocalOrdinal, GlobalOrdinal, Node) {
 #include <MueLu_UseShortNames.hpp>
   MUELU_TESTING_SET_OSTREAM;
@@ -236,47 +365,18 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
   out << "version: " << MueLu::Version() << std::endl;
 
 #if defined(HAVE_MUELU_IFPACK2) && defined(HAVE_MUELU_AMESOS2)
-  typedef Tpetra::CrsMatrix<SC, LO, GO, NO> tpetra_crsmatrix_type;
-  typedef Tpetra::Operator<SC, LO, GO, NO> tpetra_operator_type;
-  typedef typename Teuchos::ScalarTraits<SC>::magnitudeType magnitude_type;
+  using magnitude_type = typename Teuchos::ScalarTraits<SC>::magnitudeType;
 
   if (TestHelpers::Parameters::getLib() == Xpetra::UseTpetra) {
-    RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
-    RCP<Matrix> Op                     = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(6561 * comm->getSize());
-    RCP<tpetra_crsmatrix_type> tpA     = Xpetra::toTpetra(Op);
+    ConstOverloadFixture<SC, LO, GO, NO> fx(/*rowsPerRank=*/6561);
+    Teuchos::ParameterList baseList;
+    auto precs = fx.makeNonConstVsConstOperator(baseList);
+    auto RHS   = fx.makeRandomRHS(/*numVec=*/1, /*seed=*/846930886u);
 
-    RCP<tpetra_operator_type> opNonConst(tpA);
-    RCP<const tpetra_operator_type> opConst = Teuchos::rcp_implicit_cast<const tpetra_operator_type>(tpA);
-
-    Teuchos::ParameterList mueluList;
-    Teuchos::ParameterList paramListNonConst(mueluList);
-    Teuchos::ParameterList paramListConst(mueluList);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
-
-    RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RHS->setSeed(846930886);
-    RHS->randomize();
-    Teuchos::Array<magnitude_type> norms(1);
-    RHS->norm2(norms);
-    RHS->scale(1 / norms[0]);
-
-    RCP<MultiVector> Xnc = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RCP<MultiVector> Xc  = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    Xnc->putScalar((SC)0.0);
-    Xc->putScalar((SC)0.0);
-
-    precNonConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xnc)));
-    precConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xc)));
-
-    RCP<MultiVector> diff = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    diff->putScalar((SC)0.0);
-    diff->update(1.0, *Xnc, -1.0, *Xc, 0.0);
-    diff->norm2(norms);
-    out << "|| X_nonconst - X_const ||_2 (no plist) = " << std::setiosflags(std::ios::fixed) << std::setprecision(10) << norms[0] << std::endl;
-    TEST_EQUALITY(norms[0] < 1e-10, true);
+    expectEquivalentPreconditioner(out, success, fx, *precs.first, *precs.second, RHS,
+                                   static_cast<magnitude_type>(0.95),
+                                   static_cast<magnitude_type>(0.15),
+                                   "CreatePreconditioner_ConstOperator_NoParameterList");
   } else {
     out << "This test is enabled only for linAlgebra=Tpetra." << std::endl;
   }
@@ -285,7 +385,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
 #endif
 }  // CreatePreconditioner_ConstOperator_NoParameterList
 
-// Smaller 1D problem (fewer rows per rank) to exercise the same const / non-const overload equivalence.
+// Smaller 1D problem (fewer rows per rank).  Residual reduction is looser on a shallow grid.
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOperator_SmallGrid, Scalar, LocalOrdinal, GlobalOrdinal, Node) {
 #include <MueLu_UseShortNames.hpp>
   MUELU_TESTING_SET_OSTREAM;
@@ -293,49 +393,18 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
   out << "version: " << MueLu::Version() << std::endl;
 
 #if defined(HAVE_MUELU_IFPACK2) && defined(HAVE_MUELU_AMESOS2)
-  typedef Tpetra::CrsMatrix<SC, LO, GO, NO> tpetra_crsmatrix_type;
-  typedef Tpetra::Operator<SC, LO, GO, NO> tpetra_operator_type;
-  typedef typename Teuchos::ScalarTraits<SC>::magnitudeType magnitude_type;
+  using magnitude_type = typename Teuchos::ScalarTraits<SC>::magnitudeType;
 
   if (TestHelpers::Parameters::getLib() == Xpetra::UseTpetra) {
-    RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
-    const GO localRows                 = 243;
-    RCP<Matrix> Op                     = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(localRows * comm->getSize());
-    RCP<tpetra_crsmatrix_type> tpA     = Xpetra::toTpetra(Op);
+    ConstOverloadFixture<SC, LO, GO, NO> fx(/*rowsPerRank=*/243);
+    Teuchos::ParameterList baseList;
+    auto precs = fx.makeNonConstVsConstOperator(baseList);
+    auto RHS   = fx.makeRandomRHS(/*numVec=*/1, /*seed=*/123456789u);
 
-    RCP<tpetra_operator_type> opNonConst(tpA);
-    RCP<const tpetra_operator_type> opConst = Teuchos::rcp_implicit_cast<const tpetra_operator_type>(tpA);
-
-    Teuchos::ParameterList mueluList;
-
-    Teuchos::ParameterList paramListNonConst(mueluList);
-    Teuchos::ParameterList paramListConst(mueluList);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
-
-    RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RHS->setSeed(123456789);
-    RHS->randomize();
-    Teuchos::Array<magnitude_type> norms(1);
-    RHS->norm2(norms);
-    RHS->scale(1 / norms[0]);
-
-    RCP<MultiVector> Xnc = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RCP<MultiVector> Xc  = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    Xnc->putScalar((SC)0.0);
-    Xc->putScalar((SC)0.0);
-
-    precNonConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xnc)));
-    precConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xc)));
-
-    RCP<MultiVector> diff = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    diff->putScalar((SC)0.0);
-    diff->update(1.0, *Xnc, -1.0, *Xc, 0.0);
-    diff->norm2(norms);
-    out << "|| X_nonconst - X_const ||_2 (small grid) = " << std::setiosflags(std::ios::fixed) << std::setprecision(10) << norms[0] << std::endl;
-    TEST_EQUALITY(norms[0] < 1e-10, true);
+    expectEquivalentPreconditioner(out, success, fx, *precs.first, *precs.second, RHS,
+                                   static_cast<magnitude_type>(0.95),
+                                   static_cast<magnitude_type>(0.15),
+                                   "CreatePreconditioner_ConstOperator_SmallGrid");
   } else {
     out << "This test is enabled only for linAlgebra=Tpetra." << std::endl;
   }
@@ -352,30 +421,13 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
   out << "version: " << MueLu::Version() << std::endl;
 
 #if defined(HAVE_MUELU_IFPACK2) && defined(HAVE_MUELU_AMESOS2)
-  typedef Tpetra::CrsMatrix<SC, LO, GO, NO> tpetra_crsmatrix_type;
-  typedef Tpetra::Operator<SC, LO, GO, NO> tpetra_operator_type;
-
   if (TestHelpers::Parameters::getLib() == Xpetra::UseTpetra) {
-    RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
-    RCP<Matrix> Op                     = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(2187 * comm->getSize());
-    RCP<tpetra_crsmatrix_type> tpA     = Xpetra::toTpetra(Op);
+    ConstOverloadFixture<SC, LO, GO, NO> fx(/*rowsPerRank=*/2187);
+    Teuchos::ParameterList baseList;
+    auto precs = fx.makeNonConstVsConstOperator(baseList);
 
-    RCP<tpetra_operator_type> opNonConst(tpA);
-    RCP<const tpetra_operator_type> opConst = Teuchos::rcp_implicit_cast<const tpetra_operator_type>(tpA);
-
-    Teuchos::ParameterList mueluList;
-
-    Teuchos::ParameterList paramListNonConst(mueluList);
-    Teuchos::ParameterList paramListConst(mueluList);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
-
-    const int levelsNC = precNonConst->GetHierarchy()->GetNumLevels();
-    const int levelsC  = precConst->GetHierarchy()->GetNumLevels();
-    out << "numLevels non-const handle: " << levelsNC << ", const handle: " << levelsC << std::endl;
-    TEST_EQUALITY(levelsNC, levelsC);
+    expectEquivalentHierarchyLevels(out, success, *precs.first, *precs.second,
+                                    "CreatePreconditioner_ConstOperator_HierarchyLevels");
   } else {
     out << "This test is enabled only for linAlgebra=Tpetra." << std::endl;
   }
@@ -392,58 +444,18 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
   out << "version: " << MueLu::Version() << std::endl;
 
 #if defined(HAVE_MUELU_IFPACK2) && defined(HAVE_MUELU_AMESOS2)
-  typedef Tpetra::CrsMatrix<SC, LO, GO, NO> tpetra_crsmatrix_type;
-  typedef Tpetra::Operator<SC, LO, GO, NO> tpetra_operator_type;
-  typedef typename Teuchos::ScalarTraits<SC>::magnitudeType magnitude_type;
+  using magnitude_type = typename Teuchos::ScalarTraits<SC>::magnitudeType;
 
   if (TestHelpers::Parameters::getLib() == Xpetra::UseTpetra) {
-    RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
-    RCP<Matrix> Op                     = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(729 * comm->getSize());
-    RCP<tpetra_crsmatrix_type> tpA     = Xpetra::toTpetra(Op);
+    ConstOverloadFixture<SC, LO, GO, NO> fx(/*rowsPerRank=*/729);
+    Teuchos::ParameterList baseList;
+    auto precs = fx.makeNonConstVsConstOperator(baseList);
+    auto RHS   = fx.makeRandomRHS(/*numVec=*/2, /*seed=*/97531u);
 
-    RCP<tpetra_operator_type> opNonConst(tpA);
-    RCP<const tpetra_operator_type> opConst = Teuchos::rcp_implicit_cast<const tpetra_operator_type>(tpA);
-
-    Teuchos::ParameterList mueluList;
-
-    Teuchos::ParameterList paramListNonConst(mueluList);
-    Teuchos::ParameterList paramListConst(mueluList);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
-
-    const int numVec     = 2;
-    RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), numVec);
-    RHS->setSeed(97531);
-    RHS->randomize();
-    Teuchos::Array<magnitude_type> colNorms(numVec);
-    RHS->norm2(colNorms());
-    for (int j = 0; j < numVec; ++j) {
-      auto col = RHS->getVectorNonConst(j);
-      col->scale(1 / colNorms[j]);
-    }
-
-    RCP<MultiVector> Xnc = MultiVectorFactory::Build(Op->getRowMap(), numVec);
-    RCP<MultiVector> Xc  = MultiVectorFactory::Build(Op->getRowMap(), numVec);
-    Xnc->putScalar((SC)0.0);
-    Xc->putScalar((SC)0.0);
-
-    precNonConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xnc)));
-    precConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xc)));
-
-    RCP<MultiVector> diff = MultiVectorFactory::Build(Op->getRowMap(), numVec);
-    diff->putScalar((SC)0.0);
-    diff->update(1.0, *Xnc, -1.0, *Xc, 0.0);
-    Teuchos::Array<magnitude_type> diffNorms(numVec);
-    diff->norm2(diffNorms());
-    magnitude_type maxColDiff = Teuchos::ScalarTraits<magnitude_type>::zero();
-    for (int j = 0; j < numVec; ++j) {
-      if (diffNorms[j] > maxColDiff)
-        maxColDiff = diffNorms[j];
-    }
-    out << "max_j || (X_nc - X_c)_j ||_2 (2 vectors) = " << std::setiosflags(std::ios::fixed) << std::setprecision(10) << maxColDiff << std::endl;
-    TEST_EQUALITY(maxColDiff < 1e-10, true);
+    expectEquivalentPreconditioner(out, success, fx, *precs.first, *precs.second, RHS,
+                                   static_cast<magnitude_type>(0.95),
+                                   static_cast<magnitude_type>(0.15),
+                                   "CreatePreconditioner_ConstOperator_TwoVectors");
   } else {
     out << "This test is enabled only for linAlgebra=Tpetra." << std::endl;
   }
@@ -452,7 +464,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_ConstOper
 #endif
 }  // CreatePreconditioner_ConstOperator_TwoVectors
 
-// ReuseTpetraPreconditioner with RCP<const CrsMatrix> vs RCP<CrsMatrix> after the same fine-matrix update.
+// ReuseTpetraPreconditioner with RCP<const CrsMatrix> vs RCP<CrsMatrix> on the same fine matrix.
 TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, ReuseTpetraPreconditioner_ConstCrsMatrix, Scalar, LocalOrdinal, GlobalOrdinal, Node) {
 #include <MueLu_UseShortNames.hpp>
   MUELU_TESTING_SET_OSTREAM;
@@ -460,53 +472,19 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, ReuseTpetraPreconditioner_Cons
   out << "version: " << MueLu::Version() << std::endl;
 
 #if defined(HAVE_MUELU_IFPACK2) && defined(HAVE_MUELU_AMESOS2)
-  typedef Tpetra::CrsMatrix<SC, LO, GO, NO> tpetra_crsmatrix_type;
-  typedef Tpetra::Operator<SC, LO, GO, NO> tpetra_operator_type;
-  typedef typename Teuchos::ScalarTraits<SC>::magnitudeType magnitude_type;
+  using magnitude_type = typename Teuchos::ScalarTraits<SC>::magnitudeType;
 
   if (TestHelpers::Parameters::getLib() == Xpetra::UseTpetra) {
-    RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
-    RCP<Matrix> Op                     = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(2187 * comm->getSize());
-    RCP<tpetra_crsmatrix_type> tpA     = Xpetra::toTpetra(Op);
+    ConstOverloadFixture<SC, LO, GO, NO> fx(/*rowsPerRank=*/2187);
+    Teuchos::ParameterList baseList;
+    auto precs = fx.makeNonConstVsConstOperator(baseList);
+    fx.reuseOnConstNonConstCrsMatrix(*precs.first, *precs.second);
 
-    RCP<tpetra_operator_type> opNonConst(tpA);
-    RCP<const tpetra_operator_type> opConst = Teuchos::rcp_implicit_cast<const tpetra_operator_type>(tpA);
-
-    Teuchos::ParameterList mueluList;
-
-    Teuchos::ParameterList paramListNonConst(mueluList);
-    Teuchos::ParameterList paramListConst(mueluList);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precNonConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opNonConst, paramListNonConst);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precConst =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opConst, paramListConst);
-
-    // Same fine matrix, same reuse entry point: non-const vs const CrsMatrix handle.
-    MueLu::ReuseTpetraPreconditioner(tpA, *precNonConst);
-    RCP<const tpetra_crsmatrix_type> tpAconst = Teuchos::rcp_implicit_cast<const tpetra_crsmatrix_type>(tpA);
-    MueLu::ReuseTpetraPreconditioner(tpAconst, *precConst);
-
-    RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RHS->setSeed(314159265);
-    RHS->randomize();
-    Teuchos::Array<magnitude_type> norms(1);
-    RHS->norm2(norms);
-    RHS->scale(1 / norms[0]);
-
-    RCP<MultiVector> Xnc = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RCP<MultiVector> Xc  = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    Xnc->putScalar((SC)0.0);
-    Xc->putScalar((SC)0.0);
-
-    precNonConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xnc)));
-    precConst->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xc)));
-
-    RCP<MultiVector> diff = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    diff->putScalar((SC)0.0);
-    diff->update(1.0, *Xnc, -1.0, *Xc, 0.0);
-    diff->norm2(norms);
-    out << "|| X_nonconst - X_const ||_2 (after reuse) = " << std::setiosflags(std::ios::fixed) << std::setprecision(10) << norms[0] << std::endl;
-    TEST_EQUALITY(norms[0] < 1e-10, true);
+    auto RHS = fx.makeRandomRHS(/*numVec=*/1, /*seed=*/314159265u);
+    expectEquivalentPreconditioner(out, success, fx, *precs.first, *precs.second, RHS,
+                                   static_cast<magnitude_type>(0.95),
+                                   static_cast<magnitude_type>(0.15),
+                                   "ReuseTpetraPreconditioner_ConstCrsMatrix");
   } else {
     out << "This test is enabled only for linAlgebra=Tpetra." << std::endl;
   }
@@ -525,47 +503,18 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(TpetraOperator, CreatePreconditioner_RcpCrsMat
   out << "version: " << MueLu::Version() << std::endl;
 
 #if defined(HAVE_MUELU_IFPACK2) && defined(HAVE_MUELU_AMESOS2)
-  typedef Tpetra::CrsMatrix<SC, LO, GO, NO> tpetra_crsmatrix_type;
-  typedef Tpetra::Operator<SC, LO, GO, NO> tpetra_operator_type;
-  typedef typename Teuchos::ScalarTraits<SC>::magnitudeType magnitude_type;
+  using magnitude_type = typename Teuchos::ScalarTraits<SC>::magnitudeType;
 
   if (TestHelpers::Parameters::getLib() == Xpetra::UseTpetra) {
-    RCP<const Teuchos::Comm<int>> comm = TestHelpers::Parameters::getDefaultComm();
-    RCP<Matrix> Op                     = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(6561 * comm->getSize());
-    RCP<tpetra_crsmatrix_type> tpA     = Xpetra::toTpetra(Op);
+    ConstOverloadFixture<SC, LO, GO, NO> fx(/*rowsPerRank=*/6561);
+    Teuchos::ParameterList baseList;
+    auto precs = fx.makeCrsMatrixVsOperator(baseList);
+    auto RHS   = fx.makeRandomRHS(/*numVec=*/1, /*seed=*/846930886u);
 
-    Teuchos::ParameterList mueluList;
-
-    Teuchos::ParameterList paramListFromCrs(mueluList);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precFromCrs =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(tpA, paramListFromCrs);
-
-    RCP<tpetra_operator_type> opOnly(tpA);
-    Teuchos::ParameterList paramListFromOp(mueluList);
-    RCP<MueLu::TpetraOperator<SC, LO, GO, NO>> precFromOp =
-        MueLu::CreateTpetraPreconditioner<SC, LO, GO, NO>(opOnly, paramListFromOp);
-
-    RCP<MultiVector> RHS = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RHS->setSeed(846930886);
-    RHS->randomize();
-    Teuchos::Array<magnitude_type> norms(1);
-    RHS->norm2(norms);
-    RHS->scale(1 / norms[0]);
-
-    RCP<MultiVector> Xcrs = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    RCP<MultiVector> Xop  = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    Xcrs->putScalar((SC)0.0);
-    Xop->putScalar((SC)0.0);
-
-    precFromCrs->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xcrs)));
-    precFromOp->apply(*(Xpetra::toTpetra(RHS)), *(Xpetra::toTpetra(Xop)));
-
-    RCP<MultiVector> diff = MultiVectorFactory::Build(Op->getRowMap(), 1);
-    diff->putScalar(0.0);
-    diff->update(1.0, *Xcrs, -1.0, *Xop, 0.0);
-    diff->norm2(norms);
-    out << "|| X_rcp_crs - X_rcp_op ||_2 = " << std::setiosflags(std::ios::fixed) << std::setprecision(10) << norms[0] << std::endl;
-    TEST_EQUALITY(norms[0] < 1e-10, true);
+    expectEquivalentPreconditioner(out, success, fx, *precs.first, *precs.second, RHS,
+                                   static_cast<magnitude_type>(0.95),
+                                   static_cast<magnitude_type>(0.15),
+                                   "CreatePreconditioner_RcpCrsMatrixOverload");
   } else {
     out << "This test is enabled only for linAlgebra=Tpetra." << std::endl;
   }
