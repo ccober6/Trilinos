@@ -17,7 +17,7 @@ on:
         description: 'Max cores allowed that is detected on the system.'
         required: false
         type: number
-        default:
+        default: 29
       ctest-drop-site:
         required: false
         type: string
