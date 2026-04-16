@@ -51,7 +51,7 @@ struct ConstOverloadFixture {
   using multivector_factory_type   = Xpetra::MultiVectorFactory<SC, LO, GO, NO>;
   using muelu_tpetra_operator_type = MueLu::TpetraOperator<SC, LO, GO, NO>;
   using precond_pair               = std::pair<Teuchos::RCP<muelu_tpetra_operator_type>,
-                                               Teuchos::RCP<muelu_tpetra_operator_type>>;
+                                 Teuchos::RCP<muelu_tpetra_operator_type>>;
 
   Teuchos::RCP<matrix_type> Op;
   Teuchos::RCP<tpetra_crsmatrix_type> tpA;
