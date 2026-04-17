@@ -273,25 +273,21 @@ class LinearSolver<Tpetra::MultiVector<Scalar, LO, GO, Node>,
                                                                                     "set yet.  You must call setMatrix() with a nonnull matrix before you may "
                                                                                     "call this method.");
 
-      // TODO: We should not have to cast away the constness here
-      // TODO: See bug 6462
       if (params_ != Teuchos::null)
-        solver_ = CreateTpetraPreconditioner(rcp_const_cast<Tpetra::Operator<Scalar, LO, GO, Node> >(A_), *params_);
+        solver_ = CreateTpetraPreconditioner(A_, *params_);
       else
-        solver_ = CreateTpetraPreconditioner(rcp_const_cast<Tpetra::Operator<Scalar, LO, GO, Node> >(A_));
+        solver_ = CreateTpetraPreconditioner(A_);
     } else if (changedA_) {
       TEUCHOS_TEST_FOR_EXCEPTION(A_ == Teuchos::null, std::runtime_error, prefix << "The matrix has not been "
                                                                                     "set yet.  You must call setMatrix() with a nonnull matrix before you may "
                                                                                     "call this method.");
 
-      // TODO: We should not have to cast away the constness here
-      // TODO: See bug 6462
       RCP<const Tpetra::CrsMatrix<Scalar, LO, GO, Node> > helperMat;
       helperMat = rcp_dynamic_cast<const Tpetra::CrsMatrix<Scalar, LO, GO, Node> >(A_);
       TEUCHOS_TEST_FOR_EXCEPTION(helperMat.is_null(), std::runtime_error, prefix << "MueLu requires "
                                                                                     "a Tpetra::CrsMatrix, but the matrix you provided is of a "
                                                                                     "different type.  Please provide a Tpetra::CrsMatrix instead.");
-      ReuseTpetraPreconditioner(rcp_const_cast<Tpetra::CrsMatrix<Scalar, LO, GO, Node> >(helperMat), *solver_);
+      ReuseTpetraPreconditioner(helperMat, *solver_);
     }
 
     changedA_      = false;
