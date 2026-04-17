@@ -17,7 +17,6 @@ on:
         description: 'Max cores allowed that is detected on the system.'
         required: false
         type: number
-        default: 12
       ctest-drop-site:
         required: false
         type: string
@@ -35,12 +34,10 @@ on:
         description: 'Number of concurrent tests allowed in CTest.'
         required: false
         type: number
-        default: -1
       slots-per-gpu:
         description: 'On a GPU machine, this is number of slots allowed per GPU. (e.g. 4 allows 4 MPI ranks per GPU)'
         required: false
         type: number
-        default: 0
       extra-pr-driver-args:
         description: 'Extra arguments to be used when calling PullRequestLinuxDriverTest.py'
         required: false
