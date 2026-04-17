@@ -804,12 +804,6 @@ void lowCommunicationMakeColMapAndReindexSerial(const Teuchos::ArrayView<const s
         std::runtime_error, prefix << "Local ID count test failed.");
   }
 
-  // Make column Map
-  req->wait();
-  colMap = rcp(new map_type(numGlobalCols, ColIndices, domainMap.getIndexBase(),
-                            domainMap.getComm(),
-                            params));
-
   // Low-cost reindex of the matrix
   for (size_t i = 0; i < numMyRows; ++i) {
     for (size_t j = rowptr[i]; j < rowptr[i + 1]; ++j) {
@@ -826,6 +820,12 @@ void lowCommunicationMakeColMapAndReindexSerial(const Teuchos::ArrayView<const s
       }
     }
   }
+
+  // Make column Map
+  req->wait();
+  colMap = rcp(new map_type(numGlobalCols, ColIndices, domainMap.getIndexBase(),
+                            domainMap.getComm(),
+                            params));
 }
 
 template <typename LocalOrdinal, typename GlobalOrdinal, typename Node>
