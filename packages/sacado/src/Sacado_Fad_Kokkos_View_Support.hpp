@@ -226,7 +226,7 @@ KOKKOS_INLINE_FUNCTION size_t allocation_size_from_mapping_and_accessor(
   return mapping.required_span_size() * element_size;
 }
 
-template <class StorageType> struct GeneralFad;
+template <class StorageType> class GeneralFad;
 
 template <class T, class LayoutType, class DeviceType, class MemoryTraits>
 KOKKOS_INLINE_FUNCTION constexpr auto customize_view_arguments(
