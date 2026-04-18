@@ -46,11 +46,6 @@ on:
         required: false
         type: string
 
-# Cancels any in progress 'workflows' associated with this workflow ref
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build-test:
     runs-on: ${{ fromJson(inputs.target-runner-labels) }}
@@ -110,23 +105,23 @@ jobs:
           echo "image: ${AT2_IMAGE_FULLPATH:-${AT2_IMAGE:-unknown}}"
           type python
           python3 ${TRILINOS_DIR}/packages/framework/pr_tools/PullRequestLinuxDriverTest.py \
-            --target-branch-name ${{ inputs.target-branch }} \
             --genconfig-build-name ${{ inputs.genconfig-string }} \
-            --pullrequest-number ${{ github.event.pull_request.number }} \
+            ${{ inputs.target-branch && '--target-branch-name ' || '' }}${{ inputs.target-branch }} \
+            ${{ github.event.pull_request && '--pullrequest-number ' || '' }}${{ github.event.pull_request.number }} \
             --pullrequest-env-config-file ${TRILINOS_DIR}/packages/framework/pr_tools/trilinos_pr.ini \
             --pullrequest-gen-config-file ${TRILINOS_DIR}/packages/framework/GenConfig/src/gen-config.ini \
             --workspace-dir ${TRILINOS_DIR}/../ \
             --source-dir ${TRILINOS_DIR} \
             --build-dir ${BUILD_DIR} \
-            --dashboard-build-name=${{ inputs.dashboard-build-name }} \
+            ${{ inputs.dashboard-build-name && '--dashboard-build-name ' || '' }}${{ inputs.dashboard-build-name }} \
             --ctest-driver ${TRILINOS_DIR}/cmake/SimpleTesting/cmake/ctest-driver.cmake \
             --ctest-drop-site ${{ inputs.ctest-drop-site }} \
             --pullrequest-cdash-track ${{ inputs.cdash-track }} \
             --filename-subprojects ./package_subproject_list.cmake \
             --filename-packageenables ./packageEnables.cmake \
-            --max-cores-allowed=${{ inputs.max-cores-allowed }} \
-            --num-concurrent-tests=${{ inputs.num-concurrent-tests }} \
-            --slots-per-gpu=${{ inputs.slots-per-gpu }} \
+            ${{ inputs.max-cores-allowed && '--max-cores-allowed ' || '' }}${{ inputs.max-cores-allowed }} \
+            ${{ inputs.num-concurrent-tests && '--num-concurrent-tests ' || '' }}${{ inputs.num-concurrent-tests }} \
+            ${{ inputs.slots-per-gpu && '--slots-per-gpu ' || '' }}${{ inputs.slots-per-gpu }} \
             ${{ inputs.extra-pr-driver-args }}
       - name: Filtered build error logs
         if: success() || failure()
@@ -148,7 +143,7 @@ jobs:
           cp ./genconfig_build_name.txt /home/runner/artifacts/
       - name: Upload artifacts
         if: success() || failure()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         env:
           NODE_USE_SYSTEM_CA: 1
         with:

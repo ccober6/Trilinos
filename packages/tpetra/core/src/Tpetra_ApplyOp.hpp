@@ -69,7 +69,7 @@ class ApplyOp : public Tpetra::Operator<Scalar,
 
   /// \brief Constructor
   ///
-  /// \param A [in] The Operator to wrap with a different Scalar type.
+  /// \param op [in] The Operator to wrap with a different Scalar type.
   ApplyOp(const Teuchos::RCP<const OperatorType>& op)
     : operator_(op) {}
 

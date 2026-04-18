@@ -547,11 +547,11 @@ size_t find_crs_indices_sorted(
 ///   insert new values if the number of new values exceeds the amount of free
 ///   space in the CRS arrays.
 ///
-/// \param [in/out] rowPtrBeg - rowPtrBeg[i] points to the first
+/// \param rowPtrBeg [in/out] rowPtrBeg[i] points to the first
 ///        column index (in the indices array) of row i.
-/// \param [in/out] rowPtrEnd - rowPtrEnd[i] points to the last
+/// \param rowPtrEnd [in/out] rowPtrEnd[i] points to the last
 ///        column index (in the indices array) of row i.
-/// \param [in/out] indices - array containing columns indices of nonzeros in
+/// \param indices_wdv [in/out] array containing column indices of nonzeros in
 ///        CRS representation.
 ///
 template <class RowPtr, class Indices, class Padding>
@@ -592,13 +592,12 @@ void padCrsArrays(
 /// \param curIndices [in/out] The current indices
 /// \param numAssigned [in/out] The number of currently assigned indices in row \c row
 /// \param newIndices [in] The indices to insert
-/// \param map [in] An optional function mapping newIndices[k] to its actual index
 /// \param cb [in] An optional callback function called on every insertion at the local
 ///     index and the offset in to the inserted location
 /// \return numInserted The number of indices inserted. If there is not
 ///     capacity in curIndices for newIndices, return -1;
 ///
-/// \bf Notes
+/// \b Notes
 /// \c curIndices is the current list of CRS indices. it is not assumed to be sorted, but
 /// entries are unique. For each \c newIndices[k], we look to see if the index exists in
 /// \c cur_indices. If it does, we do not insert it (no repeats). If it does not exist, we
@@ -672,14 +671,14 @@ insertCrsIndices(
 ///
 /// \param row [in] The row in which to insert
 /// \param rowPtrs [in] "Pointers" to beginning of each row
+/// \param curNumEntries [in] The number of currently assigned indices in row \c row
 /// \param curIndices [in] The current indices
-/// \param numAssigned [in] The number of currently assigned indices in row \c row
 /// \param newIndices [in] The indices to insert
 /// \param cb [in] An optional function called on every insertion at the local
 ///     index and the offset in to the inserted location
 /// \return numFound The number of indices found.
 ///
-/// \bf Notes
+/// \b Notes
 /// \c curIndices is the current list of CRS indices. it is not assumed to be sorted, but
 /// entries are unique. For each \c newIndices[k], we look to see if the index exists in
 /// \c curIndices. If it does, we do not insert it (no repeats). If it does not exist, we

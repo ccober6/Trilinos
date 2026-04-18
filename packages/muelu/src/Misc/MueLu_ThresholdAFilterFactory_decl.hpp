@@ -25,7 +25,7 @@
 namespace MueLu {
 
 /*!
-  @class ThresholdAFilterFactory class.
+  @class ThresholdAFilterFactory
   @brief Factory for building a thresholded operator.
 
 */
