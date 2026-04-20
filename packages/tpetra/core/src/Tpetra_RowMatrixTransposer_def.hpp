@@ -15,6 +15,7 @@
 #include "Tpetra_Export.hpp"
 #include "Tpetra_Details_computeOffsets.hpp"
 #include "Tpetra_Details_shortSort.hpp"
+#include "Tpetra_Import_Util2.hpp"
 #include "Teuchos_ParameterList.hpp"
 #include "Teuchos_TimeMonitor.hpp"
 #include "KokkosSparse_Utils.hpp"
@@ -127,8 +128,12 @@ RowMatrixTransposer<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 
   local_matrix_device_type lclMatrix          = crsMatrix->getLocalMatrixDevice();
   local_matrix_device_type lclTransposeMatrix = KokkosSparse::Impl::transpose_matrix(lclMatrix);
-  if (sort)
-    KokkosSparse::sort_crs_matrix(lclTransposeMatrix);
+  if (sort) {
+    if constexpr (Node::is_cpu)
+      Import_Util::sortCrsEntries(lclTransposeMatrix.graph.row_map, lclTransposeMatrix.graph.entries, lclTransposeMatrix.values, ::KokkosSparse::SortAlgorithm::SHELL);
+    else
+      Import_Util::sortCrsEntries(lclTransposeMatrix.graph.row_map, lclTransposeMatrix.graph.entries, lclTransposeMatrix.values);
+  }
 
   // Prebuild the importers and exporters the no-communication way,
   // flipping the importers and exporters around.
