@@ -348,7 +348,7 @@ as_scalar_view(const Kokkos::View<DataType, Properties...> &view) {
     using value_type = typename view_t::value_type::value_type;
     return Kokkos::View<value_type *, Properties...>(
         view.data(),
-        view.mapping().required_span_size() * view.accessor().fad_size());
+        view.mapping().required_span_size() * (view.accessor().fad_size()+1));
   } else {
     return view;
   }
