@@ -354,6 +354,12 @@ as_scalar_view(const Kokkos::View<DataType, Properties...> &view) {
   }
 }
 
+template <class... Args>
+KOKKOS_INLINE_FUNCTION auto
+as_scalar_view(const Kokkos::DynRankView<Args...> &dyn) {
+  return as_scalar_view(dyn.ConstDownCast());
+}
+
 KOKKOS_INLINE_FUNCTION size_t dimension_scalar() { return 0; }
 
 template <class View>
