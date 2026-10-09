@@ -16,7 +16,7 @@
 #include "Tpetra_Vector.hpp"
 #include "Tpetra_Export_decl.hpp"
 #include "Tpetra_Import_decl.hpp"
-#include "Kokkos_ArithTraits.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "Teuchos_Assert.hpp"
 #include <type_traits>
 #include "KokkosSparse_spmv_impl.hpp"
@@ -39,10 +39,10 @@ struct InverseDiagonalWithExtraction {
   using value_type      = typename AMatrix::non_const_value_type;
   using team_policy     = typename Kokkos::TeamPolicy<execution_space>;
   using team_member     = typename team_policy::member_type;
-  using ATV             = Kokkos::ArithTraits<value_type>;
+  using ATV             = KokkosKernels::ArithTraits<value_type>;
   // using IST = typename vector_type::impl_scalar_type;
   using magnitude_type = typename ATV::mag_type;
-  using MATV           = Kokkos::ArithTraits<magnitude_type>;
+  using MATV           = KokkosKernels::ArithTraits<magnitude_type>;
 
   DVector m_d;
   AMatrix m_A;

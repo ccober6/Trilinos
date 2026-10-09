@@ -33,9 +33,9 @@ removeSmallEntries(Teuchos::RCP<Tpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOr
   using col_idx_type = typename crs_matrix::local_graph_device_type::entries_type::non_const_type;
   using vals_type    = typename crs_matrix::local_matrix_device_type::values_type;
 
-  using ATS = Kokkos::ArithTraits<Scalar>;
+  using ATS = KokkosKernels::ArithTraits<Scalar>;
   using impl_SC  = typename ATS::val_type;
-  using impl_ATS = Kokkos::ArithTraits<impl_SC>;
+  using impl_ATS = KokkosKernels::ArithTraits<impl_SC>;
 
   auto lclA = A->getLocalMatrixDevice();
 
@@ -159,7 +159,7 @@ Teuchos::RCP<Thyra::LinearOpBase<double> > buildInterpolation(const Teuchos::RCP
   using Scalar = double;
 
   using STS = Teuchos::ScalarTraits<Scalar>;
-  using KAT = Kokkos::ArithTraits<Scalar>;
+  using KAT = KokkosKernels::ArithTraits<Scalar>;
   using OT  = Teuchos::OrdinalTraits<GlobalOrdinal>;
 
   using DeviceSpace = PHX::Device;

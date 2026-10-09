@@ -43,8 +43,6 @@
 namespace stk {
 namespace balance {
 
-std::string construct_output_file_name(const std::string& outputDirectory, const std::string& inputFile);
-std::string construct_generic_parallel_file_name(const std::string& inputFile, unsigned numProcs);
 
 struct OptionNames
 {
@@ -59,6 +57,7 @@ struct OptionNames
   const std::string faceSearchRelTol = "face-search-rel-tol";
   const std::string contactSearch = "contact-search";
   const std::string fixSpiders = "fix-spiders";
+  const std::string groupSpiderLegs = "group-spider-legs";
   const std::string fixMechanisms = "fix-mechanisms";
   const std::string decompMethod = "decomp-method";
   const std::string vertexWeightBlockMultiplier = "block-weights";
@@ -106,6 +105,7 @@ private:
   void set_app_type_defaults(BalanceSettings& settings) const;
   void set_contact_search(BalanceSettings& settings) const;
   void set_fix_spiders(BalanceSettings& settings) const;
+  void set_group_spider_legs(BalanceSettings& settings) const;
   void set_fix_mechanisms(BalanceSettings& settings) const;
   void set_contact_search_tolerance(BalanceSettings& settings) const;
   void set_decomp_method(BalanceSettings& settings) const;

@@ -17,6 +17,7 @@ pipeline {
                         docker {
                           image 'ubuntu:22.04'
                           label 'docker'
+                          registryCredentialsId 'dockerhub'
                         }
                     }
                     steps {
@@ -35,19 +36,20 @@ pipeline {
                           rm -rf spack && \
                           git clone https://github.com/spack/spack.git && \
                           . ./spack/share/spack/setup-env.sh && \
-                          spack install --only=dependencies kokkos@develop+tests && \
-                          spack install --only=package ${CDASH_ARGS} kokkos@develop+tests && \
+                          spack install -v --only=dependencies kokkos@develop+tests && \
+                          spack install -v --only=package ${CDASH_ARGS} kokkos@develop+tests cxxstd=20 && \
                           spack load cmake && \
                           spack test run ${CDASH_ARGS} kokkos && \
                           spack test results -l
                           '''
-                    }      
-                }   
+                    }
+                }
                 stage('spack-cuda') {
                     agent {
                         docker {
-                          image 'nvidia/cuda:12.1.0-devel-ubuntu22.04'
+                          image 'nvidia/cuda:12.9.0-devel-ubuntu24.04'
                           label 'nvidia-docker && ampere'
+                          registryCredentialsId 'dockerhub'
                         }
                     }
                     steps {
@@ -58,6 +60,7 @@ pipeline {
                           wget \
                           git \
                           bc \
+                          libxml2 \
                           python3-dev \
                           gfortran \
                           && \
@@ -65,24 +68,23 @@ pipeline {
 
                           export CDASH_ARGS="${SPACK_CDASH_ARGS} --cdash-build=spack-cuda"
                           rm -rf spack && \
-                          git clone https://github.com/spack/spack.git && \
+                          git clone https://github.com/spack/spack.git --depth=1 && \
                           . ./spack/share/spack/setup-env.sh && \
-                          spack install --only=dependencies kokkos@develop+cuda+wrapper+tests cuda_arch=80 ^cuda@12.1.0 && \
-                          spack install --only=package ${CDASH_ARGS} kokkos@develop+cuda+wrapper+tests cuda_arch=80 ^cuda@12.1.0 && \
+                          spack install -v --only=dependencies kokkos@develop+cuda+wrapper+tests cuda_arch=80 ^cuda@12.9.0 && \
+                          spack install -v --only=package ${CDASH_ARGS} kokkos@develop+cuda+wrapper+tests cuda_arch=80 ^cuda@12.9.0 && \
                           spack load cmake  && \
                           spack load kokkos-nvcc-wrapper && \
                           spack load cuda && \
-                          spack load kokkos && \
-                          spack test run ${CDASH_ARGS} kokkos && \
-                          spack test results -l
+                          spack load kokkos
                           '''
-                    }      
-                }   
+                    }
+                }
                 stage('GCC-15-CXX26') {
                     agent {
                         docker {
                             image 'gcc:15.1'
                             label 'docker'
+                            registryCredentialsId 'dockerhub'
                         }
                     }
                     steps {
@@ -101,6 +103,7 @@ pipeline {
                           export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_EXAMPLES=ON" && \
                           export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_TESTS=ON" && \
                           export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_DEPRECATED_CODE_4=ON" && \
+                          export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_DEPRECATED_CODE_5=ON" && \
                           export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_SERIAL=ON" && \
                           ctest -VV -D CDASH_MODEL="Nightly" -D CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS}" -S scripts/CTestRun.cmake -D CTEST_SITE="ornl-jenkins" -D CTEST_BUILD_NAME="GCC-15-CXX26"
                           '''
@@ -111,19 +114,16 @@ pipeline {
                         }
                     }
                 }
-                stage('HIP-ROCM-6.4-MI100-RDC-CXX20') {
+                stage('HIP-ROCM-7.0-MI100-RDC-CXX20') {
                     agent {
                         dockerfile {
                             filename 'Dockerfile.hipcc'
                             dir 'scripts/docker'
-                            additionalBuildArgs '--build-arg BASE=rocm/dev-ubuntu-24.04:6.4.1-complete'
+                            additionalBuildArgs '--build-arg BASE=rocm/dev-ubuntu-24.04:7.0-complete'
                             label 'rocm-docker && AMD_Radeon_Instinct_MI100'
+                            registryCredentialsId 'dockerhub'
                             args '-v /tmp/ccache.kokkos:/tmp/ccache --device=/dev/kfd --device=/dev/dri --security-opt seccomp=unconfined --group-add video --env HIP_VISIBLE_DEVICES=$HIP_VISIBLE_DEVICES'
                         }
-                    }
-                    environment {
-                        // FIXME Test returns a wrong value
-                        GTEST_FILTER = '-hip_hostpinned.view_allocation_large_rank'
                     }
                     steps {
                         sh 'ccache --zero-stats'
@@ -133,15 +133,17 @@ pipeline {
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DCMAKE_CXX_COMPILER=hipcc" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DCMAKE_CXX_STANDARD=20" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DCMAKE_CXX_FLAGS='-Werror -Wno-unused-command-line-argument'" && \
+                              export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DCMAKE_PREFIX_PATH='/opt/rocm'" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_HIP_RELOCATABLE_DEVICE_CODE=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ARCH_NATIVE=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_COMPILER_WARNINGS=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_DEPRECATED_CODE_4=ON" && \
+                              export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_DEPRECATED_CODE_5=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_TESTS=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_BENCHMARKS=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_EXAMPLES=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_HIP=ON" && \
-                              ctest -VV -D CDASH_MODEL="Nightly" -D CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS}" -S scripts/CTestRun.cmake -D CTEST_SITE="ornl-jenkins" -D CTEST_BUILD_NAME="HIP-ROCM-6.4-MI100-RDC-CXX20"
+                              ctest -VV -D CDASH_MODEL="Nightly" -D CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS}" -S scripts/CTestRun.cmake -D CTEST_SITE="ornl-jenkins" -D CTEST_BUILD_NAME="HIP-ROCM-7.0-MI100-RDC-CXX20"
                               '''
                     }
                     post {
@@ -151,19 +153,16 @@ pipeline {
                         }
                     }
                 }
-                stage('HIP-ROCM-6.4-MI210-CXX23') {
+                stage('HIP-ROCM-7.2.3-MI210-CXX23') {
                     agent {
                         dockerfile {
                             filename 'Dockerfile.hipcc'
                             dir 'scripts/docker'
-                            additionalBuildArgs '--build-arg BASE=rocm/dev-ubuntu-24.04:6.4.1-complete --build-arg CMAKE_VERSION=3.31.3'
+                            additionalBuildArgs '--build-arg BASE=rocm/dev-ubuntu-24.04:7.2.3-complete --build-arg CMAKE_VERSION=3.31.3'
                             label 'rocm-docker && AMD_Radeon_Instinct_MI210'
+                            registryCredentialsId 'dockerhub'
                             args '-v /tmp/ccache.kokkos:/tmp/ccache --device=/dev/kfd --device=/dev/dri --security-opt seccomp=unconfined --group-add video --env HIP_VISIBLE_DEVICES=$HIP_VISIBLE_DEVICES'
                         }
-                    }
-                    environment {
-                        // FIXME Test returns a wrong value
-                        GTEST_FILTER = '-hip_hostpinned.view_allocation_large_rank'
                     }
                     steps {
                         sh 'ccache --zero-stats'
@@ -173,14 +172,16 @@ pipeline {
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DCMAKE_CXX_COMPILER=hipcc" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DCMAKE_CXX_STANDARD=23" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DCMAKE_CXX_FLAGS='-Werror -Wno-unused-command-line-argument'" && \
+                              export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DCMAKE_PREFIX_PATH='/opt/rocm'" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ARCH_NATIVE=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_COMPILER_WARNINGS=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_DEPRECATED_CODE_4=ON" && \
+                              export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_DEPRECATED_CODE_5=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_TESTS=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_BENCHMARKS=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_EXAMPLES=ON" && \
                               export ENV_CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS};-DKokkos_ENABLE_HIP=ON" && \
-                              ctest -VV -D CDASH_MODEL="Nightly" -D CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS}" -S scripts/CTestRun.cmake -D CTEST_SITE="ornl-jenkins" -D CTEST_BUILD_NAME="HIP-ROCM-6.4-MI210-CXX23"
+                              ctest -VV -D CDASH_MODEL="Nightly" -D CMAKE_OPTIONS="${ENV_CMAKE_OPTIONS}" -S scripts/CTestRun.cmake -D CTEST_SITE="ornl-jenkins" -D CTEST_BUILD_NAME="HIP-ROCM-7.0-MI210-CXX23"
                               '''
                     }
                     post {

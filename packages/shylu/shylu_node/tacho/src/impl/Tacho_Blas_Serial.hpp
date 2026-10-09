@@ -23,9 +23,9 @@ template <typename T> struct BlasSerial {
 
   // GEMV
   inline static void gemv(const char trans, int m, int n,
-                         const T alpha, const T *A, int lda,
-                                        const T *x, int incx,
-                         const T beta,  /* */ T *y, int incy) {
+                          const T alpha, const T *A, int lda,
+                                         const T *x, int incx,
+                          const T beta,  /* */ T *y, int incy) {
 
     typedef ArithTraits<T> arith_traits;
     const T one(1), zero(0);
@@ -50,14 +50,178 @@ template <typename T> struct BlasSerial {
           y[i*incy] += (A[i + j*lda] * val);
         }
       }
-    } else {
+    } else if (trans == 'C' || trans == 'c') {
       for (int j = 0; j < n; j++) {
-        T val = 0.0;
+        T val = zero;
         for (int i = 0; i < m; i++) {
           val += (arith_traits::conj(A[i + j*lda]) * x[i*incx]);
         }
         y[j*incy] += alpha * val;
       }
+    } else {
+      for (int j = 0; j < n; j++) {
+        T val = zero;
+        for (int i = 0; i < m; i++) {
+          val += (A[i + j*lda] * x[i*incx]);
+        }
+        y[j*incy] += alpha * val;
+      }
+    }
+  }
+
+  // TRMV (TODO: not the same interface as BLAS interface, A is m-by-n)
+  inline static void trmv(const char uplo, const char trans, const char diag,
+                          int m, int n,
+                          const T alpha, const T *A, int lda,
+                                         const T *x, int incx,
+                          const T beta,  /* */ T *y, int incy) {
+
+    typedef ArithTraits<T> arith_traits;
+    const T one(1), zero(0);
+
+    {
+      int mt = (trans == 'N' || trans == 'n' ?  m : n);
+      if (beta == zero) {
+        for (int i = 0; i < mt; i++) y[i*incy] = zero;
+      } else if (beta != one) {
+        for (int i = 0; i < mt; i++) y[i*incy] *= beta;
+      }
+    }
+    if (alpha == zero)
+      return;
+    if (n <= 0 || m <= 0)
+      return;
+
+    int mn = (m < n ? m : n);
+    if (trans == 'N' || trans == 'n') {
+      // y = A x
+      if (uplo == 'U' || uplo == 'u') {
+        // upper
+        for (int j = 0; j < n; j++) {
+          T val = alpha*x[j*incx] ;
+          if (j < mn) {
+            // diagonal A(j,j)
+            if (diag == 'U' || diag == 'u')
+              y[j*incy] += val;
+            else
+              y[j*incy] += (A[j + j*lda] * val);
+
+            // upper off-diagonals of A(:,j)
+            for (int i = 0; i < j; i++) {
+              y[i*incy] += (A[i + j*lda] * val);
+            }
+          } else {
+            for (int i = 0; i < m; i++) {
+              y[i*incy] += (A[i + j*lda] * val);
+            }
+          }
+        }
+      } else {
+        // lower
+        for (int j = 0; j < mn; j++) {
+          T val = alpha*x[j*incx] ;
+
+          // diagonal A(j,j)
+          if (diag == 'U' || diag == 'u')
+            y[j*incy] += val;
+          else
+            y[j*incy] += (A[j + j*lda] * val);
+
+          // off-diagonals of A(:,j)
+          for (int i = j+1; i < m; i++) {
+            y[i*incy] += (A[i + j*lda] * val);
+          }
+        }
+      }
+    } else if (trans == 'C' || trans == 'c') {
+      if (uplo == 'U' || uplo == 'u') {
+        // upper
+        for (int j = 0; j < n; j++) {
+          T val = zero;
+          if (j < mn) {
+            // diagonal A(j,j)
+            val = x[j*incx];
+            if (diag != 'U' && diag != 'u')
+              val *= (arith_traits::conj(A[j + j*lda]));
+
+            // off-diagonals of A(:,j)
+            for (int i = 0; i < j; i++) {
+              val += (arith_traits::conj(A[i + j*lda]) * x[i*incx]);
+            }
+          } else {
+            for (int i = 0; i < m; i++) {
+              val += (arith_traits::conj(A[i + j*lda]) * x[i*incx]);
+            }
+          }
+          y[j*incy] += alpha * val;
+        }
+      } else {
+        for (int j = 0; j < mn; j++) {
+          // diagonal A(j,j)
+          T val = x[j*incx];
+          if (diag != 'U' && diag != 'u')
+            val *= (arith_traits::conj(A[j + j*lda]));
+
+          // off-diagonals of A(:,j)
+          for (int i = j+1; i < m; i++) {
+            val += (arith_traits::conj(A[i + j*lda]) * x[i*incx]);
+          }
+          y[j*incy] += alpha * val;
+        }
+      }
+    } else {
+      if (uplo == 'U' || uplo == 'u') {
+        // upper
+        for (int j = 0; j < n; j++) {
+          T val = zero;
+          if (j < mn) {
+            // diagonal A(j,j)
+            val = x[j*incx];
+            if (diag != 'U' && diag != 'u')
+              val *= (A[j + j*lda]);
+
+            // off-diagonals of A(:,j)
+            for (int i = 0; i < j; i++) {
+              val += (A[i + j*lda] * x[i*incx]);
+            }
+          } else {
+            for (int i = 0; i < m; i++) {
+              val += (A[i + j*lda] * x[i*incx]);
+            }
+          }
+          y[j*incy] += alpha * val;
+        }
+      } else {
+        for (int j = 0; j < mn; j++) {
+          // diagonal A(j,j)
+          T val = x[j*incx];
+          if (diag != 'U' && diag != 'u')
+            val *= (A[j + j*lda]);
+
+          // off-diagonals of A(:,j)
+          for (int i = j+1; i < m; i++) {
+            val += (A[i + j*lda] * x[i*incx]);
+          }
+          y[j*incy] += alpha * val;
+        }
+      }
+    }
+  }
+
+  // TRMM (NOTE: calling TRMV on each B & C column)
+  inline static void trmm(const char uplo, const char trans, const char diag,
+                          int m, int n, int k,
+                          const T alpha, const T *A, int lda,
+                                         const T *B, int ldb,
+                          const T beta,  /* */ T *C, int ldc) {
+
+    // C is m-by-n
+    // if trans, A is k-by-m
+    // else,     A is m-by-k
+    int mA = (trans == 'N' || trans == 'n' ? m : k);
+    int nA = (trans == 'N' || trans == 'n' ? k : m);
+    for (int j = 0; j < n; j++) {
+      trmv(uplo, trans, diag, mA, nA, alpha, A, lda, &B[j*ldb], 1, beta, &C[j*ldc], 1);
     }
   }
 
@@ -67,8 +231,8 @@ template <typename T> struct BlasSerial {
                                          const T *B, int ldb,
                           const T beta,  /* */ T *C, int ldc) {
 
+    typedef ArithTraits<T> arith_traits;
     const T one(1), zero(0);
-
     if (alpha == zero) {
       if (beta == zero) {
         for (int j = 0; j < n; j++) {
@@ -103,6 +267,24 @@ template <typename T> struct BlasSerial {
         } else {
           Kokkos::abort("gemm: transb is not valid");
         }
+      } else if (transa == 'C' || transa == 'c') {
+        if (transb == 'N' || transb == 'n') {
+          for (int j = 0; j < n; j++) {
+            if (beta == zero) {
+              for (int i = 0; i < m; i++) C[i + j*ldc] = zero;
+            } else if (beta != one) {
+              for (int i = 0; i < m; i++) C[i + j*ldc] *= beta;
+            }
+            for (int l = 0; l < k; l++) {
+              T val = alpha * B[l + j*ldb] ;
+              for (int i = 0; i < m; i++) {
+                C[i + j*ldc] += arith_traits::conj(A[l + i*lda]) * val;
+              }
+            }
+          }
+        } else {
+          Kokkos::abort("gemm: transb is not valid");
+        }
       } else {
         if (transb == 'N' || transb == 'n') {
           for (int j = 0; j < n; j++) {
@@ -119,7 +301,7 @@ template <typename T> struct BlasSerial {
             }
           }
         } else {
-          Kokkos::abort("gemm: transa is not valid");
+          Kokkos::abort("gemm: transb is not valid");
         }
       }
     }
@@ -158,7 +340,7 @@ template <typename T> struct BlasSerial {
           }
         }
       } else if (trans == 'C' || trans == 'c') {
-        // C = alpha * (A^T * A) + beta * C
+        // C = alpha * (A^H * A) + beta * C
         for (int j = 0; j < n; j++) {
           for (int i = 0; i <= j; i++) {
             // update
@@ -230,7 +412,7 @@ template <typename T> struct BlasSerial {
                 B[i + j*ldb] -= arith_traits::conj(A[l + i*lda]) * B[l + j*ldb];
               }
               if (diag != 'U' && diag != 'u') {
-                B[i + j*ldb] /= A[i + i*lda];
+                B[i + j*ldb] /= arith_traits::conj(A[i + i*lda]);
               }
             }
           }
@@ -290,6 +472,98 @@ template <typename T> struct BlasSerial {
       } else if (uplo == 'L' || uplo == 'l') {
         Kokkos::abort("trsm(Right): uplo is not valid");
       }
+    }
+  }
+
+  // TRSM with zero pivot
+  inline static void trsm_defs(const char side, const char uplo, const char transa, const char diag,
+                               int m, int n, const T alpha, const T *A, int lda,
+                                                            /* */ T *B, int ldb) {
+    const T one(1.0), zero(0.0);
+
+    if (alpha == zero) {
+      for (int j = 0; j < n; j++) {
+        for (int i = 0; i < m; i++) {
+          B[i + j*ldb] = zero;
+        }
+      }
+      return;
+    } else if (alpha != one) {
+      for (int j = 0; j < n; j++) {
+        for (int i = 0; i < m; i++) {
+          B[i + j*ldb] *= alpha;
+        }
+      }
+    }
+
+    ///
+    /// side left
+    ///
+    if (side == 'L' || side == 'l') {
+      if (uplo == 'U' || uplo == 'u') {
+        if (transa == 'T' || transa == 't') {
+          // Transpose-solve with Upper-triangular matrix from Left, U^{-T} * B
+          for (int i = 0; i < m; i++) {
+            if (A[i + i*lda] == zero) { // for either unit or non-unit diag
+              // zero-out off-diagonal
+              for (int j = 0; j < n; j++) {
+                B[i + j*ldb] = zero;
+              }
+            } else {
+              for (int j = 0; j < n; j++) {
+                if (B[i + j*ldb] != zero) {
+                  // scale
+                  if (diag != 'U' && diag != 'u') {
+                    B[i + j*ldb] /= A[i + i*lda];
+                  }
+                  // update
+                  for (int l = i+1; l < m; l++) {
+                    B[l + j*ldb] -= A[i + l*lda] * B[i + j*ldb];
+                  }
+                }
+              }
+            }
+          }
+        } else if (transa == 'C' || transa == 'c') {
+          // Conjugate-solve with Upper-triangular matrix from Left, U^{-T} * B
+          for (int i = 0; i < m; i++) {
+            if (A[i + i*lda] == zero) { //// for either unit or non-unit diag
+              // zero-out off-diagonal
+              for (int j = 0; j < n; j++) {
+                B[i + j*ldb] = zero;
+              }
+            } else {
+              for (int j = 0; j < n; j++) {
+                // scale
+                if (diag != 'U' && diag != 'u') {
+                  B[i + j*ldb] /= ArithTraits<T>::conj(A[i + i*lda]);
+                }
+                // update
+                for (int l = i+1; l < m; l++) {
+                  B[l + j*ldb] -= ArithTraits<T>::conj(A[i + l*lda]) * B[i + j*ldb];
+                }
+              }
+            }
+          }
+        } else {
+          Kokkos::abort("trsm_def(NoTrans): is not valid");
+        }
+      } else {
+        Kokkos::abort("trsm_def(Lower): is not valid");
+      }
+    }
+    ///
+    /// side right
+    ///
+    else if (side == 'R' || side == 'r') {
+      Kokkos::abort("trsm_def(Right): is not valid");
+    }
+  }
+
+  inline static void reset_zero_diags(int m, T *A, int lda) {
+    const T one(1.0), zero(0.0);
+    for (int i = 0; i < m; i++) {
+      if (A[i + i*lda] == zero) A[i + i*lda] = one;
     }
   }
 };

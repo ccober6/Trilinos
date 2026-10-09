@@ -20,6 +20,8 @@ This is essentially a fusion of LocalFilter, AdditiveSchwarzFilter and Singleton
 
 #include "Ifpack2_ConfigDefs.hpp"
 #include "Ifpack2_Details_RowMatrix.hpp"
+#include "Tpetra_computeRowAndColumnOneNorms.hpp"
+#include "Tpetra_leftAndOrRightScaleCrsMatrix.hpp"
 #include "Ifpack2_OverlappingRowMatrix.hpp"
 
 namespace Ifpack2 {
@@ -28,7 +30,7 @@ template <typename MatrixType>
 class AdditiveSchwarzFilter : public Ifpack2::Details::RowMatrix<MatrixType> {
  public:
   typedef typename MatrixType::scalar_type scalar_type;
-  typedef typename Kokkos::ArithTraits<scalar_type>::val_type impl_scalar_type;
+  typedef typename KokkosKernels::ArithTraits<scalar_type>::val_type impl_scalar_type;
   typedef typename MatrixType::local_ordinal_type local_ordinal_type;
   typedef typename MatrixType::global_ordinal_type global_ordinal_type;
   typedef typename MatrixType::node_type node_type;
@@ -69,11 +71,7 @@ class AdditiveSchwarzFilter : public Ifpack2::Details::RowMatrix<MatrixType> {
   typedef typename row_map_type::host_mirror_type host_row_map_type;
   typedef typename entries_type::host_mirror_type host_entries_type;
   typedef typename values_type::host_mirror_type host_values_type;
-#if KOKKOS_VERSION >= 40799
   typedef typename local_matrix_type::host_mirror_type host_local_matrix_type;
-#else
-  typedef typename local_matrix_type::HostMirror host_local_matrix_type;
-#endif
 
   static_assert(std::is_same<MatrixType, row_matrix_type>::value, "Ifpack2::AdditiveSchwarzFilter: The template parameter MatrixType must be a Tpetra::RowMatrix specialization.  Please don't use Tpetra::CrsMatrix (a subclass of Tpetra::RowMatrix) here anymore.  The constructor can take either a RowMatrix or a CrsMatrix just fine.");
 
@@ -94,6 +92,8 @@ class AdditiveSchwarzFilter : public Ifpack2::Details::RowMatrix<MatrixType> {
   /// \param perm [in] Forward permutation of A's rows and columns.
   /// \param reverseperm [in] Reverse permutation of A's rows and columns.
   /// \param filterSingletons [in] If true, remove rows that have no local neighbors.
+  /// \param useEquilibration [in] If true, apply row/column 1-norm equilibration to the matrix.
+  ///                              This may improve the numerical stability of the subdomain solver.
   ///
   /// It must make sense to apply the given permutation to both the
   /// rows and columns.  This means that the row and column Maps must
@@ -107,7 +107,8 @@ class AdditiveSchwarzFilter : public Ifpack2::Details::RowMatrix<MatrixType> {
   AdditiveSchwarzFilter(const Teuchos::RCP<const row_matrix_type>& A,
                         const Teuchos::ArrayRCP<local_ordinal_type>& perm,
                         const Teuchos::ArrayRCP<local_ordinal_type>& reverseperm,
-                        bool filterSingletons);
+                        bool filterSingletons,
+                        bool useEquilibration);
 
   //! Update the filtered matrix in response to A's values changing (A's structure isn't allowed to change, though)
   void updateMatrixValues();
@@ -257,7 +258,7 @@ class AdditiveSchwarzFilter : public Ifpack2::Details::RowMatrix<MatrixType> {
     \param Indices  - (Out) Global column indices corresponding to values.
     \param Values   - (Out) Row values
     \pre <tt>isGloballyIndexed() == false</tt>
-    \post <tt>indices.size() == getNumEntriesInDropRow(LocalRow)</tt>
+    \post <tt>indices.size() == getNumEntriesInLocalRow(LocalRow)</tt>
 
     Note: If \c LocalRow does not belong to this node, then \c indices is set to null.
   */
@@ -348,13 +349,23 @@ class AdditiveSchwarzFilter : public Ifpack2::Details::RowMatrix<MatrixType> {
   void setup(const Teuchos::RCP<const row_matrix_type>& A_unfiltered,
              const Teuchos::ArrayRCP<local_ordinal_type>& perm,
              const Teuchos::ArrayRCP<local_ordinal_type>& reverseperm,
-             bool filterSingletons);
+             bool filterSingletons,
+             bool useEquilibration);
 
   /// \brief Fill the entries/values in the local matrix, and from that construct A_.
   ///
   /// Requires that the structure of A_unfiltered_ has not changed since this was constructed.
   /// Used by both the constructor and updateMatrixValues().
   void fillLocalMatrix(local_matrix_type localMatrix);
+
+  //! Scale the reduced reordered right-hand side in place before the inner solve.
+  void scaleReducedRHS(mv_type& B) const;
+
+  //! Undo solution scaling in place after the inner solve.
+  void unscaleReducedLHS(mv_type& Y) const;
+
+  //! Whether row/column 1-norm equilibration is enabled.
+  bool isEquilibrated() const { return UseEquilibration_; };
 
   //@}
 
@@ -382,6 +393,9 @@ class AdditiveSchwarzFilter : public Ifpack2::Details::RowMatrix<MatrixType> {
   static bool
   mapPairsAreFitted(const row_matrix_type& A);
 
+  //! Compute row/column 1-norm scaling factors for \c A_ and scale \c A_ in place.
+  void computeAndApplyEquilibration();
+
   //! Pointer to the matrix to be preconditioned.
   Teuchos::RCP<const row_matrix_type> A_unfiltered_;
   //! Filtered and reordered matrix.
@@ -402,6 +416,13 @@ class AdditiveSchwarzFilter : public Ifpack2::Details::RowMatrix<MatrixType> {
 
   //! Row, col, domain and range map of this locally filtered matrix (it's square and non-distributed)
   Teuchos::RCP<const map_type> localMap_;
+
+  //! Whether to apply row/column 1-norm equilibration to the filtered local matrix \c A_.
+  bool UseEquilibration_;
+
+  //! Cached row/column 1-norm scaling data for the current filtered local matrix \c A_.
+  decltype(Tpetra::computeRowAndColumnOneNorms(
+      std::declval<const crs_matrix_type&>(), false)) equilResult_;
 };
 
 }  // namespace Details

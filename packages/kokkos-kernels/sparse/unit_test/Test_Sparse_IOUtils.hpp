@@ -1,21 +1,8 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #include "KokkosSparse_IOUtils.hpp"
 #include "KokkosSparse_Utils.hpp"
-#include "Test_vector_fixtures.hpp"
+#include "KokkosKernels_TestMatrixUtils.hpp"
 
 #include <fstream>
 
@@ -37,17 +24,28 @@ struct TestIOUtils {
   using sp_matrix_type = KokkosSparse::CrsMatrix<scalar_t, lno_t, host_device, void, size_type>;
 
   static std::vector<std::vector<scalar_t>> get_sym_fixture() {
+    // clang-format off
     std::vector<std::vector<scalar_t>> A = {
-        {11.00, 12.00, 13.00, 14.00, 15.00, 16.00}, {12.00, 2.00, 0.00, 0.00, 0.00, 0.00},
-        {13.00, 0.00, 0.00, 0.00, 0.00, 0.00},      {14.00, 0.00, 0.00, 4.00, 0.00, 0.00},
-        {15.00, 0.00, 0.00, 0.00, 5.00, 0.00},      {16.00, 0.00, 0.00, 0.00, 0.00, 6.00}};
+        {11.00, 12.00, 13.00, 14.00, 15.00, 16.00},
+        {12.00,  2.00,  0.00,  0.00,  0.00,  0.00},
+        {13.00,  0.00,  0.00,  0.00,  0.00,  0.00},
+        {14.00,  0.00,  0.00,  4.00,  0.00,  0.00},
+        {15.00,  0.00,  0.00,  0.00,  5.00,  0.00},
+        {16.00,  0.00,  0.00,  0.00,  0.00,  6.00}};
+    // clang-format on
     return A;
   }
 
   static std::vector<std::vector<scalar_t>> get_asym_fixture() {
-    std::vector<std::vector<scalar_t>> A = {{1.00, 0.00, 0.00, 9.00, 0.00, 0.00}, {0.00, 2.00, 0.00, 0.00, 0.00, 0.00},
-                                            {0.00, 0.00, 0.00, 0.00, 0.00, 8.00}, {0.00, 0.00, 0.00, 4.00, 0.00, 0.00},
-                                            {0.00, 7.00, 0.00, 0.00, 5.00, 0.00}, {0.00, 0.00, 0.00, 0.00, 0.00, 6.00}};
+    // clang-format off
+    std::vector<std::vector<scalar_t>> A = {
+        {1.00, 0.00, 0.00, 9.00, 0.00, 0.00},
+        {0.00, 2.00, 0.00, 0.00, 0.00, 0.00},
+        {0.00, 0.00, 0.00, 0.00, 0.00, 8.00},
+        {0.00, 0.00, 0.00, 4.00, 0.00, 0.00},
+        {0.00, 7.00, 0.00, 0.00, 5.00, 0.00},
+        {0.00, 0.00, 0.00, 0.00, 0.00, 6.00}};
+    // clang-format on
     return A;
   }
 

@@ -25,6 +25,9 @@
 #include "BelosStatusTestCombo.hpp"
 #include "BelosStatusTestOutputFactory.hpp"
 #include "BelosOutputManager.hpp"
+#include "BelosTeuchosDenseAdapter.hpp"
+#include "BelosKokkosDenseAdapter.hpp"
+
 #ifdef BELOS_TEUCHOS_TIME_MONITOR
 #include "Teuchos_TimeMonitor.hpp"
 #endif
@@ -77,11 +80,11 @@ namespace Belos {
   /// of linear equations."  SIAM J. Numer. Anal., vol. 12, pp. 617-629,
   /// 1975.
   ///
-  template<class ScalarType, class MV, class OP>
-  class MinresSolMgr : public SolverManager<ScalarType,MV,OP> {
+  template<class ScalarType, class MV, class OP, class DM = DefaultDenseMatrix<int,ScalarType>>
+  class MinresSolMgr : public SolverManager<ScalarType,MV,OP,DM> {
 
   private:
-    typedef MultiVecTraits<ScalarType,MV> MVT;
+    typedef MultiVecTraits<ScalarType,MV,DM> MVT;
     typedef OperatorTraits<ScalarType,MV,OP> OPT;
     typedef Teuchos::ScalarTraits<ScalarType> SCT;
     typedef typename Teuchos::ScalarTraits<ScalarType>::magnitudeType MagnitudeType;
@@ -146,15 +149,15 @@ namespace Belos {
     /// other Belos solvers, but ignore it, since it is not relevant
     /// to MINRES.  ("Num Blocks" specifies the restart length, but
     /// our MINRES implementation does not restart.)
-    MinresSolMgr (const Teuchos::RCP<LinearProblem< ScalarType, MV, OP> > &problem,
+    MinresSolMgr (const Teuchos::RCP<LinearProblem< ScalarType, MV, OP, DM> > &problem,
                   const Teuchos::RCP<Teuchos::ParameterList> &params);
 
     //! Destructor.
     virtual ~MinresSolMgr() {};
 
     //! clone for Inverted Injection (DII)
-    Teuchos::RCP<SolverManager<ScalarType, MV, OP> > clone () const override {
-      return Teuchos::rcp(new MinresSolMgr<ScalarType,MV,OP>);
+    Teuchos::RCP<SolverManager<ScalarType, MV, OP, DM> > clone () const override {
+      return Teuchos::rcp(new MinresSolMgr<ScalarType,MV,OP,DM>);
     }
     //@}
 
@@ -162,7 +165,7 @@ namespace Belos {
     //@{
 
     //! Return the linear problem to be solved.
-    const LinearProblem<ScalarType,MV,OP>& getProblem() const override {
+    const LinearProblem<ScalarType,MV,OP,DM>& getProblem() const override {
       return *problem_;
     }
 
@@ -219,13 +222,25 @@ namespace Belos {
     //@{
 
     void
-    setProblem (const Teuchos::RCP<LinearProblem<ScalarType, MV, OP> > &problem) override
+    setProblem (const Teuchos::RCP<LinearProblem<ScalarType, MV, OP, DM> > &problem) override
     {
       problem_ = problem;
     }
 
     void
     setParameters (const Teuchos::RCP<Teuchos::ParameterList>& params) override;
+
+    //! Set a debug status test, OR-combined into the top-level status test.
+    void
+    setDebugStatusTest (const Teuchos::RCP<StatusTest<ScalarType, MV, OP, DM> >& debugStatusTest) override
+    {
+      debugStatusTest_ = debugStatusTest;
+      // Force the full status-test tree (including this debug test) to be
+      // rebuilt on the next solve().  MINRES has no single isSTSet_-style flag,
+      // so we drop sTest_ and clear parametersSet_ to trigger a rebuild.
+      sTest_ = Teuchos::null;
+      parametersSet_ = false;
+    }
 
     //@}
 
@@ -274,7 +289,7 @@ namespace Belos {
 
   private:
     //! Linear problem to solve
-    Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > problem_;
+    Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > problem_;
 
     //! Output manager.
     Teuchos::RCP<OutputManager<ScalarType> > printer_;
@@ -286,33 +301,38 @@ namespace Belos {
     /// you reallocate either of these, you have to give them to
     /// sTest_ again.  If you reallocate sTest_, you have to tell
     /// outputTest_.
-    Teuchos::RCP<StatusTest<ScalarType,MV,OP> > sTest_;
+    Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > sTest_;
 
     /// \brief The status test for maximum iteration count.
     ///
     /// If you reallocate this, sTest_ needs the new RCP.
-    Teuchos::RCP<StatusTestMaxIters<ScalarType,MV,OP> > maxIterTest_;
+    Teuchos::RCP<StatusTestMaxIters<ScalarType,MV,OP,DM> > maxIterTest_;
 
     /// \brief The combined status test for convergence.
     ///
     /// If you reallocate this, sTest_ needs the new RCP.
-    Teuchos::RCP<StatusTest<ScalarType,MV,OP> > convTest_;
+    Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > convTest_;
 
     /// \brief The implicit (a.k.a. "recursive") residual norm test.
     ///
     /// If you reallocate this, convTest_ needs the new RCP.
-    Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP> > impConvTest_;
+    Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP,DM> > impConvTest_;
 
     /// \brief The explicit residual norm test.
     ///
     /// If you reallocate this, convTest_ needs the new RCP.
-    Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP> > expConvTest_;
+    Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP,DM> > expConvTest_;
 
     /// \brief The "status test" that handles output.
     ///
     /// This object keeps a pointer to printer_ and sTest_.  If you
     /// reallocate either of them, outputTest_ needs to know.
-    Teuchos::RCP<StatusTestOutput<ScalarType,MV,OP> > outputTest_;
+    Teuchos::RCP<StatusTestOutput<ScalarType,MV,OP,DM> > outputTest_;
+
+    /// \brief Debug status test (e.g. a wall-clock time limit).
+    ///
+    /// If nonnull, this is OR-combined into sTest_.
+    Teuchos::RCP<StatusTest<ScalarType, MV, OP, DM> > debugStatusTest_;
 
     /// \brief List of default parameters.
     ///
@@ -361,13 +381,13 @@ namespace Belos {
     /// informative message) if the problem is null or its essential
     /// components are null.
     static void
-    validateProblem (const Teuchos::RCP<LinearProblem<ScalarType, MV, OP> >& problem);
+    validateProblem (const Teuchos::RCP<LinearProblem<ScalarType, MV, OP, DM> >& problem);
   };
 
 
-  template<class ScalarType, class MV, class OP>
+  template<class ScalarType, class MV, class OP, class DM>
   Teuchos::RCP<const Teuchos::ParameterList>
-  MinresSolMgr<ScalarType, MV, OP>::defaultParameters()
+  MinresSolMgr<ScalarType, MV, OP, DM>::defaultParameters()
   {
     using Teuchos::ParameterList;
     using Teuchos::parameterList;
@@ -418,8 +438,8 @@ namespace Belos {
   //
   // Empty Constructor
   //
-  template<class ScalarType, class MV, class OP>
-  MinresSolMgr<ScalarType,MV,OP>::MinresSolMgr () :
+  template<class ScalarType, class MV, class OP, class DM>
+  MinresSolMgr<ScalarType,MV,OP,DM>::MinresSolMgr () :
     convtol_(0.0),
     achievedTol_(0.0),
     maxIters_(0),
@@ -434,9 +454,9 @@ namespace Belos {
   //
   // Primary constructor (use this one)
   //
-  template<class ScalarType, class MV, class OP>
-  MinresSolMgr<ScalarType, MV, OP>::
-  MinresSolMgr (const Teuchos::RCP<LinearProblem<ScalarType, MV, OP> > &problem,
+  template<class ScalarType, class MV, class OP, class DM>
+  MinresSolMgr<ScalarType, MV, OP, DM>::
+  MinresSolMgr (const Teuchos::RCP<LinearProblem<ScalarType, MV, OP, DM> > &problem,
                 const Teuchos::RCP<Teuchos::ParameterList>& params) :
     problem_ (problem),
     numIters_ (0),
@@ -449,10 +469,9 @@ namespace Belos {
     setParameters (params);
   }
 
-  template<class ScalarType, class MV, class OP>
-  void
-  MinresSolMgr<ScalarType, MV, OP>::
-  validateProblem (const Teuchos::RCP<LinearProblem<ScalarType, MV, OP> >& problem)
+  template<class ScalarType, class MV, class OP, class DM>
+  void MinresSolMgr<ScalarType, MV, OP, DM>::
+  validateProblem (const Teuchos::RCP<LinearProblem<ScalarType, MV, OP, DM> >& problem)
   {
     TEUCHOS_TEST_FOR_EXCEPTION(problem.is_null(),
       MinresSolMgrLinearProblemFailure,
@@ -471,9 +490,8 @@ namespace Belos {
       "must first call the linear problem's setProblem() method.");
   }
 
-  template<class ScalarType, class MV, class OP>
-  void
-  MinresSolMgr<ScalarType, MV, OP>::
+  template<class ScalarType, class MV, class OP, class DM>
+  void MinresSolMgr<ScalarType, MV, OP, DM>::
   setParameters (const Teuchos::RCP<Teuchos::ParameterList>& params)
   {
     using Teuchos::ParameterList;
@@ -542,8 +560,8 @@ namespace Belos {
     //
     // Set up the convergence tests
     //
-    typedef StatusTestGenResNorm<ScalarType, MV, OP> res_norm_type;
-    typedef StatusTestCombo<ScalarType, MV, OP> combo_type;
+    typedef StatusTestGenResNorm<ScalarType, MV, OP, DM> res_norm_type;
+    typedef StatusTestCombo<ScalarType, MV, OP, DM> combo_type;
 
     // Do we need to allocate at least one of the implicit or explicit
     // residual norm convergence tests?
@@ -591,7 +609,7 @@ namespace Belos {
     // exceeded.  Initialize it if we haven't yet done so, otherwise
     // tell it the new maximum number of iterations.
     if (maxIterTest_.is_null()) {
-      maxIterTest_ = rcp (new StatusTestMaxIters<ScalarType,MV,OP> (maxIters_));
+      maxIterTest_ = rcp (new StatusTestMaxIters<ScalarType,MV,OP,DM> (maxIters_));
       needToRecreateFullStatusTest = true;
     } else {
       maxIterTest_->setMaxIters (maxIters_);
@@ -609,12 +627,20 @@ namespace Belos {
       sTest_ = rcp (new combo_type (combo_type::OR, maxIterTest_, convTest_));
     }
 
+    // Add a debug status test if one was provided (e.g. a wall-clock time
+    // limit). OR-combining it into the top-level test lets it stop the solve;
+    // the dispatch in solve() treats such a stop as an unconverged
+    // (recoverable) termination.
+    if (Teuchos::nonnull(debugStatusTest_)) {
+      sTest_ = rcp (new combo_type (combo_type::OR, sTest_, debugStatusTest_));
+    }
+
     // If necessary, create the status test output class.  This class
     // manages and formats the output from the status test.  We have
     // to recreate the output test if we had to (re)allocate either
     // printer_ or sTest_.
     if (outputTest_.is_null() || needToRecreateFullStatusTest || recreatedPrinter) {
-      StatusTestOutputFactory<ScalarType,MV,OP> stoFactory (outputStyle_);
+      StatusTestOutputFactory<ScalarType,MV,OP,DM> stoFactory (outputStyle_);
       outputTest_ = stoFactory.create (printer_, sTest_, outputFreq_,
                                        Passed+Failed+Undefined);
     } else {
@@ -636,13 +662,15 @@ namespace Belos {
   }
 
 
-  template<class ScalarType, class MV, class OP>
-  ReturnType MinresSolMgr<ScalarType,MV,OP>::solve()
+  template<class ScalarType, class MV, class OP, class DM>
+  ReturnType MinresSolMgr<ScalarType,MV,OP,DM>::solve()
   {
     using Teuchos::RCP;
     using Teuchos::rcp;
     using Teuchos::rcp_const_cast;
     using std::endl;
+
+    ReturnType retType = Undetermined;
 
     if (! parametersSet_) {
       setParameters (params_);
@@ -666,7 +694,7 @@ namespace Belos {
 
     // Create MINRES iteration object.  Pass along the solver
     // manager's parameters, which have already been validated.
-    typedef MinresIter<ScalarType, MV, OP> iter_type;
+    typedef MinresIter<ScalarType, MV, OP, DM> iter_type;
     RCP<iter_type> minres_iter =
       rcp (new iter_type (problem_, printer_, outputTest_, *params_));
 
@@ -717,12 +745,24 @@ namespace Belos {
           }
           // Now check for max # of iterations
           else if (maxIterTest_->getStatus() == Passed) {
+            retType = MaxItersReached;
             dbg << "---- Did not converge after " << maxIterTest_->getNumIters()
                 << " iterations" << endl;
             // This right-hand side didn't converge!
             notConverged.push_back (currentRHS);
             break;
+          }
+          // Now check whether a debug status test stopped the iteration.
+          else if (Teuchos::nonnull(debugStatusTest_) &&
+                   debugStatusTest_->getStatus() == Passed) {
+            // A debug status test (e.g. a wall-clock time limit) stopped the
+            // iteration. Treat as an unconverged termination rather than an
+            // inconsistent state.
+            retType = Unconverged;
+            notConverged.push_back (currentRHS);
+            break;
           } else {
+            retType = InconsistentState;
             // If we get here, we returned from iterate(), but none of
             // our status tests Passed.  Something is wrong, and it is
             // probably our fault.
@@ -734,14 +774,16 @@ namespace Belos {
         }
         catch (const StatusTestNaNError& e) {
           // A NaN was detected in the solver.  Set the solution to zero and return unconverged.
+          retType = NaNDetected;
           achievedTol_ = MST::one();
           Teuchos::RCP<MV> X = problem_->getLHS();
           MVT::MvInit( *X, SCT::zero() );
           printer_->stream(Warnings) << "Belos::MinresSolMgr::solve(): Warning! NaN has been detected!" 
                                      << std::endl;
-          return Unconverged; 
+          return retType; 
         }
         catch (const std::exception &e) {
+          retType = NonspecificException;
           printer_->stream (Errors)
             << "Error! Caught std::exception in MinresIter::iterate() at "
             << "iteration " << minres_iter->getNumIters() << endl
@@ -803,15 +845,15 @@ namespace Belos {
     }
 
     if (notConverged.size() > 0) {
-      return Unconverged;
+      return retType;
     } else {
       return Converged;
     }
   }
 
   //  This method requires the solver manager to return a std::string that describes itself.
-  template<class ScalarType, class MV, class OP>
-  std::string MinresSolMgr<ScalarType,MV,OP>::description() const
+  template<class ScalarType, class MV, class OP, class DM>
+  std::string MinresSolMgr<ScalarType,MV,OP,DM>::description() const
   {
     std::ostringstream oss;
     oss << "Belos::MinresSolMgr< "
@@ -824,5 +866,18 @@ namespace Belos {
   }
 
 } // end Belos namespace
+
+#ifdef HAVE_BELOS_TPETRA
+#include "BelosTpetraETIHelpers.hpp"
+
+#define BELOS_TPETRA_MINRESSOLMGR_NOEXTERN_CALL(SC, LO, GO, NT)            \
+  BELOS_TPETRA_CALL(Belos::MinresSolMgr, SC, LO, GO, NT)
+
+#define BELOS_TPETRA_MINRESSOLMGR_EXTERN_CALL(SC, LO, GO, NT)              \
+  BELOS_TPETRA_EXTERN_CALL(Belos::MinresSolMgr, SC, LO, GO, NT)
+
+TPETRA_INSTANTIATE_SLGN_NO_ORDINAL_SCALAR(BELOS_TPETRA_MINRESSOLMGR_EXTERN_CALL)
+#endif
+
 
 #endif /* BELOS_MINRES_SOLMGR_HPP */

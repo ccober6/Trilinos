@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
@@ -61,57 +48,80 @@ struct SptrsvTest {
 
   using range_policy_t = Kokkos::RangePolicy<execution_space>;
 
+  // clang autoformatting makes the vector fixures look bad, so disable
+
+  // clang-format off
   static std::vector<std::vector<scalar_t>> get_5x5_ut_ones_fixture() {
-    std::vector<std::vector<scalar_t>> A = {{1.00, 0.00, 1.00, 0.00, 0.00},
-                                            {0.00, 1.00, 0.00, 0.00, 1.00},
-                                            {0.00, 0.00, 1.00, 1.00, 1.00},
-                                            {0.00, 0.00, 0.00, 1.00, 1.00},
-                                            {0.00, 0.00, 0.00, 0.00, 1.00}};
+
+    std::vector<std::vector<scalar_t>> A = {
+      {1.00, 0.00, 1.00, 0.00, 0.00},
+      {0.00, 1.00, 0.00, 0.00, 1.00},
+      {0.00, 0.00, 1.00, 1.00, 1.00},
+      {0.00, 0.00, 0.00, 1.00, 1.00},
+      {0.00, 0.00, 0.00, 0.00, 1.00}
+    };
     return A;
   }
 
   static std::vector<std::vector<scalar_t>> get_6x6_ut_ones_fixture() {
-    std::vector<std::vector<scalar_t>> A = {{1.00, 1.00, 0.00, 0.00, 0.00, 0.00}, {0.00, 1.00, 0.00, 0.00, 0.00, 1.00},
-                                            {0.00, 0.00, 1.00, 1.00, 0.00, 1.00}, {0.00, 0.00, 0.00, 1.00, 0.00, 1.00},
-                                            {0.00, 0.00, 0.00, 0.00, 1.00, 1.00}, {0.00, 0.00, 0.00, 0.00, 0.00, 1.00}};
+    std::vector<std::vector<scalar_t>> A = {
+      {1.00, 1.00, 0.00, 0.00, 0.00, 0.00},
+      {0.00, 1.00, 0.00, 0.00, 0.00, 1.00},
+      {0.00, 0.00, 1.00, 1.00, 0.00, 1.00},
+      {0.00, 0.00, 0.00, 1.00, 0.00, 1.00},
+      {0.00, 0.00, 0.00, 0.00, 1.00, 1.00},
+      {0.00, 0.00, 0.00, 0.00, 0.00, 1.00}
+    };
     return A;
   }
 
   static std::vector<std::vector<scalar_t>> get_5x5_ut_fixture() {
     const auto KZ                        = KEEP_ZERO<scalar_t>();
-    std::vector<std::vector<scalar_t>> A = {{5.00, 1.00, 1.00, 0.00, KZ},
-                                            {KZ, 5.00, KZ, 0.00, 1.00},
-                                            {0.00, 0.00, 5.00, 1.00, 1.00},
-                                            {0.00, 0.00, 0.00, 5.00, 1.00},
-                                            {0.00, 0.00, 0.00, 0.00, 5.00}};
+    std::vector<std::vector<scalar_t>> A = {
+      {5.00, 1.00, 1.00, 0.00,  KZ},
+      {  KZ, 5.00,  KZ, 0.00, 1.00},
+      {0.00, 0.00, 5.00, 1.00, 1.00},
+      {0.00, 0.00, 0.00, 5.00, 1.00},
+      {0.00, 0.00, 0.00, 0.00, 5.00}
+    };
     return A;
   }
 
   static std::vector<std::vector<scalar_t>> get_5x5_lt_fixture() {
     const auto KZ                        = KEEP_ZERO<scalar_t>();
-    std::vector<std::vector<scalar_t>> A = {{5.00, KZ, 0.00, 0.00, 0.00},
-                                            {2.00, 5.00, 0.00, 0.00, 0.00},
-                                            {1.00, KZ, 5.00, 0.00, 0.00},
-                                            {0.00, 0.00, 1.00, 5.00, 0.00},
-                                            {KZ, 1.00, 1.00, 1.00, 5.00}};
+    std::vector<std::vector<scalar_t>> A = {
+      {5.00,   KZ, 0.00, 0.00, 0.00},
+      {2.00, 5.00, 0.00, 0.00, 0.00},
+      {1.00,   KZ, 5.00, 0.00, 0.00},
+      {0.00, 0.00, 1.00, 5.00, 0.00},
+      {  KZ, 1.00, 1.00, 1.00, 5.00}
+    };
     return A;
   }
 
   static std::vector<std::vector<scalar_t>> get_5x5_lt_ones_fixture() {
-    std::vector<std::vector<scalar_t>> A = {{1.00, 0.00, 0.00, 0.00, 0.00},
-                                            {0.00, 1.00, 0.00, 0.00, 0.00},
-                                            {1.00, 0.00, 1.00, 0.00, 0.00},
-                                            {0.00, 0.00, 1.00, 1.00, 0.00},
-                                            {0.00, 1.00, 1.00, 1.00, 1.00}};
+    std::vector<std::vector<scalar_t>> A = {
+      {1.00, 0.00, 0.00, 0.00, 0.00},
+      {0.00, 1.00, 0.00, 0.00, 0.00},
+      {1.00, 0.00, 1.00, 0.00, 0.00},
+      {0.00, 0.00, 1.00, 1.00, 0.00},
+      {0.00, 1.00, 1.00, 1.00, 1.00}
+    };
     return A;
   }
 
   static std::vector<std::vector<scalar_t>> get_6x6_lt_ones_fixture() {
-    std::vector<std::vector<scalar_t>> A = {{1.00, 0.00, 0.00, 0.00, 0.00, 0.00}, {1.00, 1.00, 0.00, 0.00, 0.00, 0.00},
-                                            {0.00, 0.00, 1.00, 0.00, 0.00, 0.00}, {0.00, 0.00, 0.00, 1.00, 0.00, 0.00},
-                                            {0.00, 0.00, 0.00, 1.00, 1.00, 0.00}, {0.00, 1.00, 1.00, 1.00, 1.00, 1.00}};
+    std::vector<std::vector<scalar_t>> A = {
+      {1.00, 0.00, 0.00, 0.00, 0.00, 0.00},
+      {1.00, 1.00, 0.00, 0.00, 0.00, 0.00},
+      {0.00, 0.00, 1.00, 0.00, 0.00, 0.00},
+      {0.00, 0.00, 0.00, 1.00, 0.00, 0.00},
+      {0.00, 0.00, 0.00, 1.00, 1.00, 0.00},
+      {0.00, 1.00, 1.00, 1.00, 1.00, 1.00}
+    };
     return A;
   }
+  // clang-format on
 
   static bool do_cusparse() {
 #ifdef KOKKOSKERNELS_ENABLE_TPL_CUSPARSE
@@ -195,7 +205,7 @@ struct SptrsvTest {
     for (auto alg : algs) {
       // FIXME CUDA+Clang+Complex seems to expose a compiler bug
 #if defined(__clang__) && defined(KOKKOS_ENABLE_CUDA)
-      if (alg == SPTRSVAlgorithm::SEQLVLSCHD_TP1 && Kokkos::ArithTraits<scalar_t>::isComplex &&
+      if (alg == SPTRSVAlgorithm::SEQLVLSCHD_TP1 && KokkosKernels::ArithTraits<scalar_t>::isComplex &&
           std::is_same_v<execution_space, Kokkos::Cuda> && block_size != 0) {
         std::cerr << "Skipping TP1 alg test for blocked mtx. There's a compiler bug "
                   << "for clang+CUDA+complex" << std::endl;

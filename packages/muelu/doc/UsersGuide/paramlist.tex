@@ -54,24 +54,28 @@
           
 \cbb{aggregation: type}{string}{"uncoupled"}{Aggregation scheme. Possible values: see Table~\ref{t:aggregation}.}
           
-\cbb{aggregation: mode}{string}{"uncoupled"}{Controls whether aggregates are allowed to cross processor boundaries. Possible values: "coupled" aggregates can cross processor boundaries, "uncoupled" aggregates cannot cross processor boundaries.}
+\cbb{aggregation: mode}{string}{"uncoupled"}{Controls whether aggregates are allowed to cross processor boundaries. Possible values: "uncoupled" aggregates cannot cross processor boundaries.}
           
 \cbb{aggregation: ordering}{string}{"natural"}{Node ordering strategy. Possible values: "natural" (local index order), "graph" (filtered graph breadth-first order), "random" (random local index order).}
           
 \cbb{aggregation: phase 1 algorithm}{string}{"Distance2"}{Look at distance2 hops when aggregating.}
           
-\cbb{aggregation: symmetrize graph after dropping}{bool}{false}{Symmetrize the graph used for aggregation.}
+\cbb{aggregation: symmetrize graph after dropping}{string}{"no symmetrization"}{Symmetrize the graph used for aggregation.}
+          
+\cbb{aggregation: symmetrize color graph}{string}{"strong wins"}{Symmetrize graph used for coloring when "aggregation: coloring: use color graph" is set. Possible values: "strong wins" ( (i,j) kept if unsymmetrized (j,i) is kept) or "weak wins" ( (i,j) dropped if unsymmetrized (j,i) dropped),}
           
 \cbb{aggregation: use blocking}{bool}{false}{Drop connections between different blocks. Blocks are given by a vector "BlockNumber" of scalar type LocalOrdinal that is passed via the "user data" list.}
           
 \cbb{aggregation: drop scheme}{string}{"classical"}{Connectivity dropping scheme for a graph used in
       aggregation. Possible values: "point-wise" and "cut-drop". "signed classical sa", "classical", "distance laplacian", "signed classical", "block diagonal", "block diagonal classical", "block diagonal distance laplacian", "block diagonal signed classical", "block diagonal colored signed classical", "signed classical distance laplacian", "signed classical sa distance laplacian" are also allowed, but discouraged. Instead, the corresponding combination of "aggregation: strength-of-connection: matrix", "aggregation: strength-of-connection: measure" and "aggregation: drop scheme" should be used.}
           
-\cbb{aggregation: strength-of-connection: matrix}{string}{"A"}{The matrix that is used for constructing the graph used for aggregation. Possible values: "A" (meaning the level matrix itself) and "distance laplacian".}
+\cbb{aggregation: strength-of-connection: matrix}{string}{"A"}{The matrix that is used for constructing the graph used for aggregation. Possible values: "A" (meaning the level matrix itself), "distance laplacian", and "MinvA".}
           
 \cbb{aggregation: strength-of-connection: measure}{string}{"smoothed aggregation"}{The strength measure used for constructing the graph. Possible values: "smoothed aggregation", "signed smoothed aggregation", "signed ruge-stueben", "unscaled".}
           
 \cbb{aggregation: distance laplacian metric}{string}{unweighted}{Metric used to compute the distance Laplacian. Possible values: "unweighted", "material"}
+          
+\cbb{aggregation: Minv scheme}{string}{fsai}{Algorithm used to approximate inverse mass matrix when using MinvA scheme for strength-of-connection matrix. Possible values: "fsai", "spai"}
           
 \cbb{aggregation: drop tol}{double}{0.0}{Connectivity dropping threshold for a graph used in aggregation.}
           
@@ -169,6 +173,11 @@
       \textit{rowmap\_X\_level.mm}; c) its column map (for matrices) is saved in
       \textit{colmap\_X\_level.mm}.}
           
+\cba{project auxiliary matrices}{\parameterlist}{Fine level matrices that will be projected down the hierarchy.
+      Currently, the list can contain any of the following parameter names
+      (``M'', ``Minv'', ``MinvA'') of type \texttt{string} and value
+      (``NoFactory'' or ``CoalesceDrop'') indicating factory which creates data.}
+          
 \cbb{print initial parameters}{bool}{true}{Print parameters provided for a hierarchy construction.}
           
 \cbb{print unused parameters}{bool}{true}{Print parameters unused during a hierarchy construction.}
@@ -184,6 +193,8 @@
 \cbb{use kokkos refactor}{bool}{false}{Switch on the new \kokkos based version for on-node parallelism.}
           
 \cbb{rap: triple product}{bool}{false}{Use all-at-once triple matrix product kernel}
+
+\cbb{rap: prebuild coarse graph}{bool}{false}{Prebuild the coarse graph and pass it to the triple matrix product kernel.}
           
 \cbb{multigrid algorithm}{string}{"sa"}{Multigrid method. Possible values: see Table~\ref{t:mgs}.}
           
@@ -199,6 +210,8 @@
           
 \cbb{sa: use filtered matrix}{bool}{true}{Matrix to use for smoothing the tentative prolongator. The two options are: to use the original matrix, and to use the filtered matrix with filtering based on filtered graph used for aggregation.}
           
+\cbb{sa: use edge matrix for smoothing}{bool}{false}{If true, smooth the edge prolongator with the edge matrix (mass + curl curl). In general this does violate the commuting relationship. If false smooth with the user provided CurlCurl matrix.}
+          
 \cbb{interp: build coarse coordinates}{bool}{true}{If false, skip the calculation of coarse coordinates.}
           
 \cbb{filtered matrix: use lumping}{bool}{true}{Lump (add to diagonal) dropped entries during the construction of a filtered matrix. This allows user to preserve constant nullspace.}
@@ -212,7 +225,7 @@
           
 \cbb{filtered matrix: reuse eigenvalue}{bool}{true}{Skip eigenvalue calculation during the construction of a filtered matrix by reusing eigenvalue estimate from the original matrix. This allows us to skip heavy computation, but may lead to poorer convergence.}
           
-\cbb{emin: iterative method}{string}{"cg"}{Iterative method to use for energy minimization of initial prolongator in energy-minimization. Possible values: "cg" (conjugate gradient), "gmres" (generalized minimum residual), "sd" (steepest descent).}
+\cbb{emin: iterative method}{string}{"cg"}{Iterative method to use for energy minimization of initial prolongator in energy-minimization. Possible values: "cg" (conjugate gradient), "gmres" (generalized minimum residual).}
           
 \cbb{emin: num iterations}{int}{2}{Number of iterations to minimize initial prolongator energy in energy-minimization.}
           
@@ -223,6 +236,10 @@
 \cbb{emin: pattern order}{int}{1}{Matrix order for the "AkPtent" pattern.}
           
 \cbb{emin: use filtered matrix}{bool}{true}{Matrix to use for smoothing for energy minimization. The two options are: to use the original matrix, and to use the filtered matrix with filtering based on filtered graph used for aggregation.}
+          
+\cbb{emin: constraint type}{string}{nullspace}{Type of constraint to enforce. Valid values are "nullspace" and "maxwell".}
+          
+\cbb{emin: least squares solver type}{string}{direct}{Type of solver to use for least squares problem. Valid values are "direct" and "Belos". "Belos" only works for nullspace constraints.}
           
 \cbb{repartition: enable}{bool}{false}{Rebalancing on/off switch.}
           
@@ -257,6 +274,8 @@
 \cba{maxwell1: 22list}{\parameterlist}{Specifies the multigrid solver for the 22 block}
           
 \cbb{maxwell1: dump matrices}{bool}{false}{Dump matrices to disk.}
+          
+\cbb{maxwell1: check and fix D0 scaling}{bool}{false}{Check that D0 is scaled appropriately and rescale if necessary.}
           
 \cbb{maxwell1: nodal smoother fix zero diagonal threshold}{double}{1e-10}{Specifies the fix zero diagonals threshold to be used for the nodal smoothing matrices.}
           

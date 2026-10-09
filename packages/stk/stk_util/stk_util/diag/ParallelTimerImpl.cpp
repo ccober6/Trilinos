@@ -1,3 +1,4 @@
+#include "stk_util/stk_config.h"
 #include "ParallelTimerImpl.hpp"
 #include "stk_util/util/Marshal.hpp"
 
@@ -12,7 +13,6 @@ ParallelTimer::ParallelTimer()
     m_wallTime(),
     m_MPICount(),
     m_MPIByteCount(),
-    m_heapAlloc(),
     m_subtimerList()
 {}
 
@@ -25,7 +25,6 @@ ParallelTimer::ParallelTimer(const ParallelTimer &parallel_timer)
     m_wallTime(parallel_timer.m_wallTime),
     m_MPICount(parallel_timer.m_MPICount),
     m_MPIByteCount(parallel_timer.m_MPIByteCount),
-    m_heapAlloc(parallel_timer.m_heapAlloc),
     m_subtimerList(parallel_timer.m_subtimerList)
 {}
 
@@ -37,7 +36,6 @@ ParallelTimer &ParallelTimer::operator=(const ParallelTimer &parallel_timer) {
   m_cpuTime = parallel_timer.m_cpuTime;
   m_wallTime = parallel_timer.m_wallTime;
   m_MPICount = parallel_timer.m_MPICount;
-  m_heapAlloc = parallel_timer.m_heapAlloc;
   m_subtimerList = parallel_timer.m_subtimerList;
 
   return *this;
@@ -56,7 +54,6 @@ ParallelTimer::dump(Writer &dout) const {
     dout << "m_wallTime " << m_wallTime << dendl;
     dout << "m_MPICount " << m_MPICount << dendl;
     dout << "m_MPIByteCount " << m_MPIByteCount << dendl;
-    dout << "m_heapAlloc " << m_heapAlloc << dendl;
     dout << "m_subtimerList " << m_subtimerList << dendl;
     dout << pop;
   }
@@ -76,8 +73,6 @@ merge_parallel_timer(
   p0.m_wallTime.accumulate(p1.m_wallTime, checkpoint);
   p0.m_MPICount.accumulate(p1.m_MPICount, checkpoint);
   p0.m_MPIByteCount.accumulate(p1.m_MPIByteCount, checkpoint);
-  p0.m_heapAlloc.accumulate(p1.m_heapAlloc, checkpoint);
-
 
   for (std::list<ParallelTimer>::const_iterator p1_it = p1.m_subtimerList.begin(); p1_it != p1.m_subtimerList.end(); ++p1_it) {
     std::list<ParallelTimer>::iterator p0_it = std::find_if(p0.m_subtimerList.begin(), p0.m_subtimerList.end(), finder((*p1_it).m_name));
@@ -101,8 +96,7 @@ stk::Marshal &operator>>(stk::Marshal &min, ParallelTimer &t) {
       >> t.m_MPICount.m_checkpoint
       >> t.m_MPIByteCount.m_value
       >> t.m_MPIByteCount.m_checkpoint
-      >> t.m_heapAlloc.m_value
-      >> t.m_heapAlloc.m_checkpoint;
+      ;
 
   min >> t.m_subtimerList;
 

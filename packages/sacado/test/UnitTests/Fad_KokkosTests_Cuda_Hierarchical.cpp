@@ -12,8 +12,8 @@
 #include "Teuchos_GlobalMPISession.hpp"
 
 // Re-test cuda with hierarchical cuda parallelism turned on (experimental)
-#define SACADO_VIEW_CUDA_HIERARCHICAL 1
-#define SACADO_VIEW_CUDA_HIERARCHICAL_DFAD_STRIDED 1
+#define SACADO_GPU_HIERARCHICAL 1
+#define SACADO_GPU_HIERARCHICAL_DFAD_STRIDED 1
 #define SACADO_KOKKOS_USE_MEMORY_POOL 1
 
 #include "Kokkos_Macros.hpp"
@@ -22,8 +22,8 @@
 
 #include "Fad_KokkosTests.hpp"
 
-typedef Kokkos::LayoutContiguous<Kokkos::LayoutLeft,32> LeftContiguous32;
-typedef Kokkos::LayoutContiguous<Kokkos::LayoutRight,32> RightContiguous32;
+typedef Sacado::LayoutContiguous<Kokkos::LayoutLeft,32> LeftContiguous32;
+typedef Sacado::LayoutContiguous<Kokkos::LayoutRight,32> RightContiguous32;
 #undef VIEW_FAD_TESTS_FDC
 #define VIEW_FAD_TESTS_FDC( F, D )                                      \
   VIEW_FAD_TESTS_FLD( F, LeftContiguous32, D )                          \

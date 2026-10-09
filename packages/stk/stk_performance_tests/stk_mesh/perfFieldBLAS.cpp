@@ -71,7 +71,7 @@ protected:
 
   void verify_result(const stk::mesh::Field<double>& field, double expectedResult)
   {
-    auto fieldData = field.data<stk::mesh::ReadOnly>();
+    auto fieldData = field.data();
     stk::mesh::BucketVector buckets = get_bulk().buckets(stk::topology::ELEM_RANK);
 
     for (stk::mesh::Bucket* bucket : buckets) {
@@ -86,7 +86,7 @@ protected:
 
   void verify_result(const stk::mesh::Field<double>& field, const std::array<double, 3>& expectedResult)
   {
-    auto fieldData = field.data<stk::mesh::ReadOnly>();
+    auto fieldData = field.data();
     stk::mesh::BucketVector buckets = get_bulk().buckets(stk::topology::ELEM_RANK);
 
     for (stk::mesh::Bucket* bucket : buckets) {
@@ -142,6 +142,38 @@ TEST_F(FieldBLAS, field_axpy)
   batchTimer.print_batch_timing(NUM_ITERS);
 }
 
+TEST_F(FieldBLAS, field_axpy_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double a = 2.0;
+  const double initX = 1.0;
+  const double initY = 0.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initY, fieldY);
+    double expected = initY;
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_axpy<stk::ngp::DeviceSpace>(a, fieldX, fieldY);
+      expected = a*initX + expected;
+    }
+    batchTimer.stop_batch_timer();
+
+    verify_result(fieldY, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
 //------------------------------------------------------------------------------
 // field_axpby: y[i] = a*x[i] + b*y[i]
 //
@@ -173,6 +205,108 @@ TEST_F(FieldBLAS, field_axpby)
     batchTimer.stop_batch_timer();
 
     verify_result(fieldY, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+TEST_F(FieldBLAS, field_axpby_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double a = 2.0;
+  const double b = 1.001;
+  const double initX = 1.0;
+  const double initY = 0.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initY, fieldY);
+    double expected = initY;
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_axpby<stk::ngp::DeviceSpace>(a, fieldX, b, fieldY);
+      expected = a*initX + b*expected;
+    }
+    batchTimer.stop_batch_timer();
+
+    verify_result(fieldY, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+//------------------------------------------------------------------------------
+// field_axpbyz: z[i] = a*x[i] + b*y[i]
+//
+TEST_F(FieldBLAS, field_axpbyz)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 500;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::mesh::Field<double>& fieldZ = declare_element_vector_field("fieldZ");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double a = 2.0;
+  const double b = 1.001;
+  const double initX = 5.0;
+  const double initY = 10.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill(initX, fieldX);
+    stk::mesh::field_fill(initY, fieldY);
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_axpbyz(a, fieldX, b, fieldY, fieldZ);
+    }
+    batchTimer.stop_batch_timer();
+
+    double expected = a*initX + b*initY;
+    verify_result(fieldZ, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+TEST_F(FieldBLAS, field_axpbyz_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::mesh::Field<double>& fieldZ = declare_element_vector_field("fieldZ");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double a = 2.0;
+  const double b = 1.001;
+  const double initX = 5.0;
+  const double initY = 10.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initY, fieldY);
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_axpbyz<stk::ngp::DeviceSpace>(a, fieldX, b, fieldY, fieldZ);
+    }
+    batchTimer.stop_batch_timer();
+
+    double expected = a*initX + b*initY;
+    verify_result(fieldZ, expected);
   }
 
   batchTimer.print_batch_timing(NUM_ITERS);
@@ -212,6 +346,37 @@ TEST_F(FieldBLAS, field_product)
   batchTimer.print_batch_timing(NUM_ITERS);
 }
 
+TEST_F(FieldBLAS, field_product_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::mesh::Field<double>& fieldZ = declare_element_vector_field("fieldZ");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double initX = 2.0;
+  const double initY = 3.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initY, fieldY);
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_product<stk::ngp::DeviceSpace>(fieldX, fieldY, fieldZ);
+    }
+    batchTimer.stop_batch_timer();
+
+    double expected = initX * initY;
+    verify_result(fieldZ, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
 //------------------------------------------------------------------------------
 // field_copy: y[i] = x[i]
 //
@@ -235,6 +400,36 @@ TEST_F(FieldBLAS, field_copy)
     batchTimer.start_batch_timer();
     for (int iter = 0; iter < NUM_ITERS; ++iter) {
       stk::mesh::field_copy(fieldX, fieldY);
+    }
+    batchTimer.stop_batch_timer();
+
+    double expected = initX;
+    verify_result(fieldY, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+TEST_F(FieldBLAS, field_copy_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double initX = 10.0;
+  const double initY = 0.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initY, fieldY);
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_copy<stk::ngp::DeviceSpace>(fieldX, fieldY);
     }
     batchTimer.stop_batch_timer();
 
@@ -281,6 +476,39 @@ TEST_F(FieldBLAS, field_dot)
   batchTimer.print_batch_timing(NUM_ITERS);
 }
 
+TEST_F(FieldBLAS, field_dot_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+  const size_t numElems = 100*100*100;
+
+  const double initX = 1.01;
+  const double initY = 1.02;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initY, fieldY);
+    double expected = 0.0;
+
+    batchTimer.start_batch_timer();
+    double result  = 0.0;
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_dot<stk::ngp::DeviceSpace>(result, fieldX, fieldY);
+    }
+    batchTimer.stop_batch_timer();
+
+    expected = numElems*(initX*initY + initX*initY + initX*initY);
+    EXPECT_NEAR(result, expected, 1.e-6);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
 //------------------------------------------------------------------------------
 // field_nrm2: sqrt( global_sum( sum_i( x[i]*x[i] )))
 //
@@ -304,6 +532,36 @@ TEST_F(FieldBLAS, field_nrm2)
     double result  = 0.0;
     for (int iter = 0; iter < NUM_ITERS; ++iter) {
       result = stk::mesh::field_nrm2(fieldX);
+    }
+    batchTimer.stop_batch_timer();
+
+    expected = std::sqrt(numElems*(initX*initX + initX*initX + initX*initX));
+    EXPECT_NEAR(result, expected, 1.e-6);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+TEST_F(FieldBLAS, field_nrm2_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+  const size_t numElems = 100*100*100;
+
+  const double initX = 1.01;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    double expected = 0.0;
+
+    batchTimer.start_batch_timer();
+    double result  = 0.0;
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_nrm2<stk::ngp::DeviceSpace>(result, fieldX);
     }
     batchTimer.stop_batch_timer();
 
@@ -346,6 +604,35 @@ TEST_F(FieldBLAS, field_scale)
   batchTimer.print_batch_timing(NUM_ITERS);
 }
 
+TEST_F(FieldBLAS, field_scale_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double alpha = 1.01;
+  const double initX = 1.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    double expected = initX;
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_scale<stk::ngp::DeviceSpace>(alpha, fieldX);
+      expected *= alpha;
+    }
+    batchTimer.stop_batch_timer();
+
+    verify_result(fieldX, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
 //------------------------------------------------------------------------------
 // field_fill: x[i] = alpha
 //
@@ -372,6 +659,106 @@ TEST_F(FieldBLAS, field_fill)
 
     double expected = alpha;
     verify_result(fieldX, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+TEST_F(FieldBLAS, field_fill_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double alpha = 5.0;
+  const double initX = 0.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_fill<stk::ngp::DeviceSpace>(alpha, fieldX);
+    }
+    batchTimer.stop_batch_timer();
+
+    double expected = alpha;
+    verify_result(fieldX, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+TEST_F(FieldBLAS, field_fill_multiple_small_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldW = declare_element_vector_field("fieldW");
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::mesh::Field<double>& fieldZ = declare_element_vector_field("fieldZ");
+  const auto fields = std::vector<const stk::mesh::FieldBase*>{&fieldW, &fieldX, &fieldY, &fieldZ};
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double alpha = 5.0;
+  const double initX = 0.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fields);
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_fill<stk::ngp::DeviceSpace>(alpha, fields);
+    }
+    batchTimer.stop_batch_timer();
+
+    double expected = alpha;
+    verify_result(fieldW, expected);
+    verify_result(fieldX, expected);
+    verify_result(fieldY, expected);
+    verify_result(fieldZ, expected);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+TEST_F(FieldBLAS, field_fill_multiple_large_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldV = declare_element_vector_field("fieldV");
+  stk::mesh::Field<double>& fieldW = declare_element_vector_field("fieldW");
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::mesh::Field<double>& fieldZ = declare_element_vector_field("fieldZ");
+  const auto fields = std::vector<const stk::mesh::FieldBase*>{&fieldV, &fieldW, &fieldX, &fieldY, &fieldZ};
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double alpha = 5.0;
+  const double initX = 0.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fields);
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_fill<stk::ngp::DeviceSpace>(alpha, fields);
+    }
+    batchTimer.stop_batch_timer();
+
+    double expected = alpha;
+    verify_result(fieldV, expected);
+    verify_result(fieldW, expected);
+    verify_result(fieldX, expected);
+    verify_result(fieldY, expected);
+    verify_result(fieldZ, expected);
   }
 
   batchTimer.print_batch_timing(NUM_ITERS);
@@ -440,6 +827,36 @@ TEST_F(FieldBLAS, field_swap)
   batchTimer.print_batch_timing(NUM_ITERS);
 }
 
+TEST_F(FieldBLAS, field_swap_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10001;  // Odd number so that the final is different from initial
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::mesh::Field<double>& fieldY = declare_element_vector_field("fieldY");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+
+  const double initX = 1.0;
+  const double initY = 2.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initY, fieldY);
+
+    batchTimer.start_batch_timer();
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_swap<stk::ngp::DeviceSpace>(fieldX, fieldY);
+    }
+    batchTimer.stop_batch_timer();
+
+    verify_result(fieldX, initY);
+    verify_result(fieldY, initX);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
 //------------------------------------------------------------------------------
 // field_asum: global_sum( sum( abs(x[i]) ) )
 //
@@ -462,6 +879,35 @@ TEST_F(FieldBLAS, field_asum)
     double result  = 0.0;
     for (int iter = 0; iter < NUM_ITERS; ++iter) {
       result = stk::mesh::field_asum(fieldX);
+    }
+    batchTimer.stop_batch_timer();
+
+    const double expected = numElems*(std::abs(initX) + std::abs(initX) + std::abs(initX));
+    EXPECT_NEAR(result, expected, 1.e-6);
+  }
+
+  batchTimer.print_batch_timing(NUM_ITERS);
+}
+
+TEST_F(FieldBLAS, field_asum_device)
+{
+  if (get_parallel_size() != 1) GTEST_SKIP();
+  const int NUM_ITERS = 10000;
+
+  setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
+  stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
+  stk::io::fill_mesh("generated:100x100x100", get_bulk());
+  const size_t numElems = 100*100*100;
+
+  const double initX = -1.0;
+
+  for (int run = 0; run < NUM_RUNS; ++run) {
+    stk::mesh::field_fill<stk::ngp::DeviceSpace>(initX, fieldX);
+
+    batchTimer.start_batch_timer();
+    double result  = 0.0;
+    for (int iter = 0; iter < NUM_ITERS; ++iter) {
+      stk::mesh::field_asum<stk::ngp::DeviceSpace>(result, fieldX);
     }
     batchTimer.stop_batch_timer();
 
@@ -503,36 +949,29 @@ TEST_F(FieldBLAS, field_amax)
   batchTimer.print_batch_timing(NUM_ITERS);
 }
 
-//------------------------------------------------------------------------------
-// field_eamax: Entity(loc:global_max( max_i( abs(x[i]) ) ))
-//
-TEST_F(FieldBLAS, field_eamax)
+TEST_F(FieldBLAS, field_amax_device)
 {
   if (get_parallel_size() != 1) GTEST_SKIP();
-  const int NUM_ITERS = 500;
+  const int NUM_ITERS = 10000;
 
   setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
   stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
   stk::io::fill_mesh("generated:100x100x100", get_bulk());
 
   const std::array<double, 3> initX { -1.0, -2.0, -3.0 };
-  const double maxValue = -3.05;
 
   for (int run = 0; run < NUM_RUNS; ++run) {
     stk::mesh::field_fill_component(initX.data(), fieldX);
-    stk::mesh::Entity targetEntity = (*get_bulk().buckets(stk::topology::ELEM_RANK).front())[42];  // Random Entity in first Bucket
-    auto dataX = fieldX.data();
-    auto entityValues = dataX.entity_values(targetEntity);
-    entityValues(1_comp) = maxValue;
 
     batchTimer.start_batch_timer();
-    stk::mesh::Entity result;
+    double result  = 0.0;
     for (int iter = 0; iter < NUM_ITERS; ++iter) {
-      result = stk::mesh::field_eamax(fieldX);
+      stk::mesh::field_amax<stk::ngp::DeviceSpace>(result, fieldX);
     }
     batchTimer.stop_batch_timer();
 
-    EXPECT_EQ(result, targetEntity);
+    const double expected = std::max({std::abs(initX[0]), std::abs(initX[1]), std::abs(initX[2])});
+    EXPECT_NEAR(result, expected, 1.e-6);
   }
 
   batchTimer.print_batch_timing(NUM_ITERS);
@@ -569,41 +1008,32 @@ TEST_F(FieldBLAS, field_amin)
   batchTimer.print_batch_timing(NUM_ITERS);
 }
 
-//------------------------------------------------------------------------------
-// field_eamin: Entity(loc:global_min( min_i( abs(x[i]) ) ))
-//
-TEST_F(FieldBLAS, field_eamin)
+TEST_F(FieldBLAS, field_amin_device)
 {
   if (get_parallel_size() != 1) GTEST_SKIP();
-  const int NUM_ITERS = 500;
+  const int NUM_ITERS = 10000;
 
   setup_empty_mesh(stk::mesh::BulkData::NO_AUTO_AURA);
   stk::mesh::Field<double>& fieldX = declare_element_vector_field("fieldX");
   stk::io::fill_mesh("generated:100x100x100", get_bulk());
 
   const std::array<double, 3> initX { -1.0, -2.0, -3.0 };
-  const double minValue = -0.05;
 
   for (int run = 0; run < NUM_RUNS; ++run) {
     stk::mesh::field_fill_component(initX.data(), fieldX);
-    stk::mesh::Entity targetEntity = (*get_bulk().buckets(stk::topology::ELEM_RANK).front())[42];  // Random Entity in first Bucket
-    auto dataX = fieldX.data();
-    auto entityValues = dataX.entity_values(targetEntity);
-    entityValues(1_comp) = minValue;
 
     batchTimer.start_batch_timer();
-    stk::mesh::Entity result;
+    double result  = 0.0;
     for (int iter = 0; iter < NUM_ITERS; ++iter) {
-      result = stk::mesh::field_eamin(fieldX);
+      stk::mesh::field_amin<stk::ngp::DeviceSpace>(result, fieldX);
     }
     batchTimer.stop_batch_timer();
 
-    EXPECT_EQ(result, targetEntity);
+    const double expected = std::min({std::abs(initX[0]), std::abs(initX[1]), std::abs(initX[2])});
+    EXPECT_NEAR(result, expected, 1.e-6);
   }
 
   batchTimer.print_batch_timing(NUM_ITERS);
 }
-
-
 
 }

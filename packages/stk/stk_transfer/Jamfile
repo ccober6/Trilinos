@@ -43,8 +43,6 @@ if $(RTenv-arg) = "user" {
 project votd
   : requirements
     $(sierra-warnings)
-    <define>STK_BUILT_FOR_SIERRA
-    <define>STK_BUILT_WITH_BJAM
     <include>$(stk_transfer-root-inc)
   : usage-requirements
     <include>$(stk_transfer-root-inc)
@@ -225,6 +223,7 @@ exe stk_transfer_utest
     stk_transfer_lib
     stk_transfer_test_lib
     /sierra/stk_unit_test_utils//stk_transfer_fixtures
+    /sierra/stk_coupling//stk_coupling
   : <tag>@sierra-exec-tag
     <include>$(stk_transfer-root-inc)
   ;

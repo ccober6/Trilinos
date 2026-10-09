@@ -32,15 +32,16 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
-#ifndef STK_STK_SEARCH_UTIL_STK_SEARCH_UTIL_MOCKSEARCHHEX8MASTERELEMENTPROVIDER_HPP_
-#define STK_STK_SEARCH_UTIL_STK_SEARCH_UTIL_MOCKSEARCHHEX8MASTERELEMENTPROVIDER_HPP_
+#ifndef STK_UNIT_TEST_UTILS_MOCKMASTERELEMENTPROVIDER_HPP_
+#define STK_UNIT_TEST_UTILS_MOCKMASTERELEMENTPROVIDER_HPP_
 
 // #######################  Start Clang Header Tool Managed Headers ########################
 // clang-format off
-#include "Legendre.hpp"
-#include "MockMasterElementLine2.hpp"
-#include "MockMasterElementQuad4.hpp"
-#include "MockMasterElementHex8.hpp"
+#include "stk_unit_test_utils/Legendre.hpp"
+#include "stk_unit_test_utils/MockMasterElementLine2.hpp"
+#include "stk_unit_test_utils/MockMasterElementQuad4.hpp"
+#include "stk_unit_test_utils/MockMasterElementHex8.hpp"
+#include "stk_unit_test_utils/MockMasterElementQuad4_2D.hpp"
 #include "stk_search/Box.hpp"                         // for Box
 #include "stk_search/Point.hpp"                       // for Point
 #include "stk_search/Sphere.hpp"                      // for Sphere
@@ -67,20 +68,20 @@ namespace unit_test_util {
 class MasterElementProvider : public stk::search::MasterElementProviderInterface {
  public:
   MasterElementProvider(const unsigned integrationOrder)
-  : m_integrationOrder(MasterElement::get_integration_order(integrationOrder))
-  {
-    m_line2MasterElement = std::make_shared<MasterElementLine2>(m_integrationOrder);
-    m_quad4MasterElement = std::make_shared<MasterElementQuad4>(m_integrationOrder);
-    m_hex8MasterElement  = std::make_shared<MasterElementHex8>(m_integrationOrder);
-  }
+  : m_integrationOrder(MasterElement::get_integration_order(integrationOrder)),
+    m_line2MasterElement(std::make_shared<MasterElementLine2>(m_integrationOrder)),
+    m_quad4MasterElement_2D(std::make_shared<MasterElementQuad4_2D>(m_integrationOrder)),
+    m_quad4MasterElement(std::make_shared<MasterElementQuad4>(m_integrationOrder)),
+    m_hex8MasterElement (std::make_shared<MasterElementHex8>(m_integrationOrder))
+  {}
 
   MasterElementProvider()
-  : m_integrationOrder(MasterElement::get_integration_order(0))
-  {
-    m_line2MasterElement = std::make_shared<MasterElementLine2>(m_integrationOrder);
-    m_quad4MasterElement = std::make_shared<MasterElementQuad4>(m_integrationOrder);
-    m_hex8MasterElement  = std::make_shared<MasterElementHex8>(m_integrationOrder);
-  }
+  : m_integrationOrder(MasterElement::get_integration_order(0)),
+    m_line2MasterElement(std::make_shared<MasterElementLine2>(m_integrationOrder)),
+    m_quad4MasterElement_2D(std::make_shared<MasterElementQuad4_2D>(m_integrationOrder)),
+    m_quad4MasterElement(std::make_shared<MasterElementQuad4>(m_integrationOrder)),
+    m_hex8MasterElement (std::make_shared<MasterElementHex8>(m_integrationOrder))
+  {}
 
   unsigned num_integration_points(const stk::search::SearchTopology& meTopo) const override;
 
@@ -158,11 +159,11 @@ class MasterElementProvider : public stk::search::MasterElementProviderInterface
  private:
   unsigned m_integrationOrder{2};
 
-  std::shared_ptr<MasterElementLine2> m_line2MasterElement;
-  std::shared_ptr<MasterElementQuad4> m_quad4MasterElement;
-  std::shared_ptr<MasterElementHex8>  m_hex8MasterElement;
+  std::shared_ptr<MasterElementLine2>   m_line2MasterElement;
+  std::shared_ptr<MasterElementQuad4_2D> m_quad4MasterElement_2D;
+  std::shared_ptr<MasterElementQuad4>   m_quad4MasterElement;
+  std::shared_ptr<MasterElementHex8>    m_hex8MasterElement;
 
-  void check_consistent_topology(const stk::search::SearchTopology& meTopo) const;
   const MasterElement* get_master_element(const stk::search::SearchTopology& meTopo) const;
 };
 

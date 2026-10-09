@@ -1,5 +1,3 @@
-ASSERT_DEFINED(${PACKAGE_NAME}_ENABLE_Triutils)
-
 TRIBITS_ADD_EXECUTABLE_AND_TEST(
   Tpetra_BiCGStab_diag
   SOURCES test_bicgstab_diag.cpp
@@ -7,22 +5,54 @@ TRIBITS_ADD_EXECUTABLE_AND_TEST(
   STANDARD_PASS_OUTPUT
 )
 
-IF (${PACKAGE_NAME}_ENABLE_Triutils)
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
+  Tpetra_BiCGStab_hb
+  SOURCES test_bicgstab_hb.cpp
+  COMM serial mpi
+  ARGS "--verbose --max-iters=10"
+       "--verbose --max-iters=10 --tol=1e-10"
+       "--verbose --max-iters=10 --num-rhs=2"
+  STANDARD_PASS_OUTPUT
+  )
 
-  TRIBITS_ADD_EXECUTABLE_AND_TEST(
-    Tpetra_BiCGStab_hb
-    SOURCES test_bicgstab_hb.cpp
+ASSERT_DEFINED(Tpetra_INST_COMPLEX_DOUBLE)
+IF (Tpetra_INST_COMPLEX_DOUBLE)
+
+  BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
+    Tpetra_BiCGStab_complex_hb_test
+    SOURCES test_bicgstab_complex_hb.cpp
+    ARGS "--verbose"
     COMM serial mpi
-    ARGS "--verbose --max-iters=10"
-         "--verbose --max-iters=10 --tol=1e-10"
-         "--verbose --max-iters=10 --num-rhs=2"
-    STANDARD_PASS_OUTPUT
-    )
+  )
 
-  TRIBITS_COPY_FILES_TO_BINARY_DIR(Tpetra_CopyTestBiCGSTABFiles
-    SOURCE_DIR ${${PACKAGE_NAME}_SOURCE_DIR}/testmatrices
-    SOURCE_FILES cage4.hb
-    EXEDEPS Tpetra_BiCGStab_hb
+  TRIBITS_COPY_FILES_TO_BINARY_DIR(
+    Tpetra_BiCGStab_complex_hb_CopyFiles
+    SOURCE_DIR ${Belos_SOURCE_DIR}/testmatrices
+    SOURCE_FILES mhd1280b.cua
+    EXEDEPS Tpetra_BiCGStab_complex_hb_test
+  )
+
+ENDIF()
+
+TRIBITS_COPY_FILES_TO_BINARY_DIR(Tpetra_CopyTestBiCGSTABFiles
+  SOURCE_DIR ${${PACKAGE_NAME}_SOURCE_DIR}/testmatrices
+  SOURCE_FILES cage4.hb
+  EXEDEPS Tpetra_BiCGStab_hb
+  )
+
+IF (Tpetra_INST_COMPLEX_DOUBLE)
+
+    BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
+      Tpetra_BiCGStab_complex_hb
+      SOURCES test_bicgstab_complex_hb.cpp
+      ARGS
+        "--verbose --filename=mhd1280b.cua"
+      )
+
+    TRIBITS_COPY_FILES_TO_BINARY_DIR(CopyTpetraBiCGStabComplexFiles
+      SOURCE_DIR ${Belos_SOURCE_DIR}/testmatrices
+      SOURCE_FILES mhd1280b.cua
+      EXEDEPS Tpetra_BiCGStab_complex_hb
     )
 
 ENDIF()

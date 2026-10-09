@@ -55,22 +55,26 @@
 #cmakedefine HAS_C99_TR1_CMATH
 
 /* Define to enable hierarchical parallelism support */
-#if !defined(SACADO_VIEW_CUDA_HIERARCHICAL) && !defined(SACADO_VIEW_CUDA_HIERARCHICAL_DFAD)
-#cmakedefine SACADO_VIEW_CUDA_HIERARCHICAL
+#if !defined(SACADO_GPU_HIERARCHICAL) && !defined(SACADO_GPU_HIERARCHICAL_DFAD)
+#cmakedefine SACADO_GPU_HIERARCHICAL
 #endif
 
 /* Define to enable hierarchical parallelism support specific to DFad */
-#if !defined(SACADO_VIEW_CUDA_HIERARCHICAL) && !defined(SACADO_VIEW_CUDA_HIERARCHICAL_DFAD)
-#cmakedefine SACADO_VIEW_CUDA_HIERARCHICAL_DFAD
+#if !defined(SACADO_GPU_HIERARCHICAL) && !defined(SACADO_GPU_HIERARCHICAL_DFAD)
+#cmakedefine SACADO_GPU_HIERARCHICAL_DFAD
 #endif
+
+/* Narrowest vector width a SYCL team launch can deliver.  Sacado sizes
+   partitioned Fad storage for this width; see Sacado_Fad_Kokkos_ThreadLocalScalar.hpp */
+#cmakedefine SACADO_SYCL_MIN_VECTOR_LENGTH @SACADO_SYCL_MIN_VECTOR_LENGTH@
 
 /* Define to enable Kokkos memory pool in Sacado */
 #ifndef SACADO_KOKKOS_USE_MEMORY_POOL
 #cmakedefine SACADO_KOKKOS_USE_MEMORY_POOL
 #endif
 
-/* Define if want to make the new Fad design the default, replacing the old one */
-#cmakedefine SACADO_NEW_FAD_DESIGN_IS_DEFAULT
-
 /* Force SFad (in the new design) to initialize value and derivative components in the default constructor (adds additional runtime cost, but protects against uninitialized use). */
 #cmakedefine SACADO_SFAD_INIT_DEFAULT_CONSTRUCTOR
+
+/* Define whether Sacado enables deprecated code at compile time. */
+#cmakedefine SACADO_ENABLE_DEPRECATED_CODE

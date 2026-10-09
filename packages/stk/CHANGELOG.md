@@ -1,5 +1,112 @@
 # CHANGELOG
 
+5.31.4    (STK_VERSION 5310400) 10/1/2026
+  stk_mesh: various developments in DeviceMesh (GPU support) including
+            fixing compile-warnings for AMD/HIP/ROCm
+            new public method DeviceMesh::batch_change_entity_parts is
+            ready for public testing, but note that the companion
+            method DeviceMesh::update_bulk_data() (for updating the host
+            mesh after device mesh-mod) doesn't support MPI-parallel yet.
+  stk_mesh: fix user-reported seg-fault in get_updated_ngp_mesh when reading
+            a mesh decomposition that leaves at least 1 mpi rank empty.
+  stk_mesh: fixed array-bounds-read in host/cpu path through parallel_sum
+  stk_util: fix 32-bit limit in parallel_vector_concat
+  stk_search: fix hang for certain scenarios with high-aspect elements
+  stk_transfer: fix issue with selecting model coords vs current coords
+  stk_block_extractor: fix to work with assemblies
+
+5.31.3    (STK_VERSION 5310300)
+  stk_util: Deprecate 'double_complex_sum_op()' in MPI.hpp and rename
+            internal supporting function in MPI.cc (to avoid duplicate
+            symbol error with empire/xyce linking).
+  cmake:    Allow Intrepid2 to be an optional dependency of stk_search_util
+            (Fixes an issue where stk_search_util failed to compile if
+             Intrepid2 was not enabled.)
+
+5.31.2    (STK_VERSION 5310200)
+  stk_mesh:     improve behavior of for_each_entity_run when OpenMP is enabled
+  stk_transfer: enable transfers between 2D and 3D mesh, as well as 
+                axisymmetric transfers
+  stk_mesh:     make field_blas functions work on Rocm when unified memory is
+                enabled
+  stk_transfer: enable stk_transfer executable to use Intrepid2 master elements
+  stk_mesh:     move DeviceMesh connectivity data out of buckets and into
+                separate data structure
+  stk_mesh:     change DeviceMesh to sort the entities in the same order
+                as BulkData
+  stk_transfer: add optional coordinate transform to receive mesh
+                wrapper to enable transfers between similar but
+                not identical meshes
+  stk_mesh:     make field state rotation work on device for fields
+                where some states do not have device data
+  stk_transfer: enable transfers to repeat the search when directed
+                by the user mesh wrappers.  Makes stk_transfer
+                usable for adaptive mesh refinement.
+  stk_mesh:     reduce size of FieldData objects and improve the
+                performance of creating them         
+  
+ 
+5.27.4    (STK_VERSION 5270400)  1/6/26
+  stk_mesh: parallel_sum/min/max and '_including_ghosts' versions
+            now use single consolidated code-path for both CPU and
+            GPU builds. Also fixes a Kokkos 5 build error related
+            to '::HostMirror' vs '::host_mirror_type'.
+  stk_mesh: Reduced size of device FieldData objects.
+  stk_mesh: Fixed the 'STK_USE_DEVICE_MESH' build (which is used for
+            debugging device code-paths in a non-GPU build).
+
+5.27.3    (STK_VERSION 5270300) 12/16/25
+  stk_mesh: initial GPU Mesh mod: NgpMesh::batch_change_entity_parts
+            and NgpMesh::update_bulk_data
+  stk_mesh: Fixed behavior of multi-state field rotation. Now gives
+            correct behavior even for persistent copies of NgpField
+            and FieldData instances.
+  stk_mesh: Field-BLAS: deprecate field_eamin and field_eamax
+  stk_util: For MPI operations that use device-aware MPI, such as the
+            stk-mesh parallel_sum and friends, an environment variable
+            allows users to explicitly override and use host MPI:
+            $ export STK_USE_HOST_MPI_OVERRIDE=true
+  all tests: fixes related to googletest being removed from Trilinos
+            Users need to separately install googletest
+            Use -DGTest_DIR=/path/to/googletest-installation
+            Also use -DTPL_ENABLE_gtest
+  all:      Requiring/using c++20
+
+5.27.2-02    (STK_VERSION 5270202) 11/14/25
+  stk_util: deprecate STK_FUNCTION/STK_INLINE_FUNCTION; prefer direct usage
+            of KOKKOS_FUNCTION/KOKKOS_INLINE_FUNCTION
+  stk_mesh: Change default access tag for Field::data<>() to ReadOnly.
+            Also misc bug fixes related to shell-edge connectivity,
+            multi-state field initialization, etc.
+
+5.27.2-01    (STK_VERSION 5270201) 11/05/25
+  stk_doc_tests: fix build error when Seacas/Ioss is on but MPI is off
+  stk_mesh: add GPU-compatible APIs for parallel_sum and friends.
+  stk_util: add Default constructor for MPITag.
+
+5.27.2       (STK_VERSION 5270200) 11/04/25
+  stk_expreval: fix Nvidia/cuda compile warning: "calling a constexpr __host__ function("min")
+           from a __host__ __device__ function("time_space_normal") is not allowed. "
+  stk_mesh: restore ability to build with -DSTK_USE_DEVICE_MESH on non-GPU builds
+            (very useful for debugging)
+
+5.27.1-01    (STK_VERSION 5270101) 10/24/25
+  stk_unit_test_utils: Fix missing-header build-error encountered by Albany
+
+5.27.1    (STK_VERSION 5270100) 10/21/25
+  stk_util: deprecate unused/unimplemented 'malloc_used()' and also the
+            HeapAlloc specialization of stk::diag::MetricTraits.
+  stk_mesh: Added ability to rename Part (MetaData::rename)
+
+5.25.7    (STK_VERSION 5250700) 9/15/2025
+  stk_util: add missing include of <cstdlib> in stk_util/util/AlignedAllocator.hpp
+            add missing include of <cstddef> in stk_util/parallel/CommBuffer.hpp
+            fix error in stk_expreval/Function.hpp, replacing DBL_MIN with
+            std::numeric_limits<double>::min()
+  stk_mesh: add optional (off by default) STK_UNIFIED_MEMORY which allows for using
+            the same memory allocation, host and device, for field data. This is
+            targeted at the ATS-4 platform.
+
 5.25.6-01 (STK_VERSION 5250601) 8/25/2025
   stk_mesh: mostly minor refinements to the new Field Data API
             most stk sub-modules now converted to new Field APIs

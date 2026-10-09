@@ -30,9 +30,11 @@
 #include "Intrepid2_FunctionSpaceTools.hpp"
 
 #include "Thyra_SpmdVectorBase.hpp"
+#include "Panzer_BlockedDOFManager.hpp"
+#include "Thyra_ProductVectorBase.hpp"
 #include "Teuchos_ArrayRCP.hpp"
 
-#include "Kokkos_ViewFactory.hpp"
+#include "Sacado_Fad_Kokkos_ViewFactory.hpp"
 
 namespace panzer {
 
@@ -94,6 +96,38 @@ postRegistrationSetup(typename Traits::SetupData sd,
     if (haveProbe_)
       break;
   }
+}
+
+template<typename EvalT, typename Traits, typename LO, typename GO>
+int ResponseScatterEvaluator_ProbeBase<EvalT,Traits,LO,GO>::
+getProductVectorBlockIndex() const
+{
+  auto blockedDOFManager =
+    Teuchos::rcp_dynamic_cast<const panzer::BlockedDOFManager>(globalIndexer_);
+
+  if (Teuchos::is_null(blockedDOFManager))
+    return 0;
+
+  const std::string field = (fieldName_=="" ? responseName_ : fieldName_);
+  const int fieldNum = blockedDOFManager->getFieldNum(field);
+  TEUCHOS_TEST_FOR_EXCEPTION(fieldNum < 0,std::logic_error,
+    "ResponseScatterEvaluator_Probe: field \"" << field << "\" was not found "
+    "in the blocked DOF manager.");
+
+  return blockedDOFManager->getFieldBlock(fieldNum);
+}
+
+template<typename EvalT, typename Traits, typename LO, typename GO>
+int ResponseScatterEvaluator_ProbeBase<EvalT,Traits,LO,GO>::
+getDerivativeOffset(const std::string& blockId) const
+{
+  auto blockedDOFManager =
+    Teuchos::rcp_dynamic_cast<const panzer::BlockedDOFManager>(globalIndexer_);
+
+  if (Teuchos::is_null(blockedDOFManager))
+    return 0;
+
+  return blockedDOFManager->getBlockGIDOffset(blockId,getProductVectorBlockIndex());
 }
 
 template<typename EvalT, typename Traits, typename LO, typename GO>
@@ -250,7 +284,7 @@ evaluateFields(typename Traits::EvalData d)
 
   auto field_coeffs_host_subview = Kokkos::subview(field_coeffs_host,std::pair<int,int>(cellIndex_,cellIndex_+1),Kokkos::ALL);
 
-  auto field_val = Kokkos::createDynRankViewWithType<Kokkos::DynRankView<ScalarT,HostSpace>>(field_coeffs_host, "field_val_at_point", 1, 1); // <C,P>
+  auto field_val = Sacado::createDynRankViewWithType<Kokkos::DynRankView<ScalarT,HostSpace>>(field_coeffs_host, "field_val_at_point", 1, 1); // <C,P>
 
   auto basis_values_host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),basis_values_);
 
@@ -275,6 +309,14 @@ evaluateFields(panzer::Traits::EvalData d)
   Teuchos::ArrayRCP<double> local_dgdx;
   RCP<SpmdVectorBase<double> > dgdx =
     rcp_dynamic_cast<SpmdVectorBase<double> >(this->responseObj_->getGhostedVector());
+  if (dgdx.is_null()) {
+    // Blocked system: scatter into the block that owns the probed field, which
+    // is the block the scatter object's indexer was taken from.
+    auto blocked = rcp_dynamic_cast<Thyra::ProductVectorBase<double> >(
+      this->responseObj_->getGhostedVector(),true);
+    dgdx = rcp_dynamic_cast<SpmdVectorBase<double> >(
+      blocked->getNonconstVectorBlock(this->getProductVectorBlockIndex()),true);
+  }
   dgdx->getNonconstLocalData(ptrFromRef(local_dgdx));
   TEUCHOS_ASSERT(!local_dgdx.is_null());
 
@@ -282,6 +324,7 @@ evaluateFields(panzer::Traits::EvalData d)
                                        this->cellIndex_,
                                        this->responseObj_->have_probe,
                                        d,this->wda,
+                                       this->getDerivativeOffset(this->wda(d).block_id),
                                        local_dgdx);
 }
 

@@ -10,8 +10,8 @@
 #ifndef IFPACK2_BLOCKTRIDICONTAINER_IMPL_HPP
 #define IFPACK2_BLOCKTRIDICONTAINER_IMPL_HPP
 
-//#define IFPACK2_BLOCKTRIDICONTAINER_WRITE_MM
-//#define IFPACK2_BLOCKTRIDICONTAINER_USE_PRINTF
+// #define IFPACK2_BLOCKTRIDICONTAINER_WRITE_MM
+// #define IFPACK2_BLOCKTRIDICONTAINER_USE_PRINTF
 
 #include <Teuchos_Details_MpiTypeTraits.hpp>
 
@@ -19,7 +19,7 @@
 #include <Tpetra_Distributor.hpp>
 #include <Tpetra_BlockMultiVector.hpp>
 
-#include <Kokkos_ArithTraits.hpp>
+#include <KokkosKernels_ArithTraits.hpp>
 #include <KokkosBatched_Util.hpp>
 #include <KokkosBatched_Vector.hpp>
 #include <KokkosBatched_Copy_Decl.hpp>
@@ -52,11 +52,9 @@
 #include "Ifpack2_BlockComputeResidualVector.hpp"
 #include "Ifpack2_BlockComputeResidualAndSolve.hpp"
 
-//#include <KokkosBlas2_gemv.hpp>
-
 // need to interface this into cmake variable (or only use this flag when it is necessary)
-//#define IFPACK2_BLOCKTRIDICONTAINER_ENABLE_PROFILE
-//#undef  IFPACK2_BLOCKTRIDICONTAINER_ENABLE_PROFILE
+// #define IFPACK2_BLOCKTRIDICONTAINER_ENABLE_PROFILE
+// #undef  IFPACK2_BLOCKTRIDICONTAINER_ENABLE_PROFILE
 #if defined(KOKKOS_ENABLE_CUDA) && defined(IFPACK2_BLOCKTRIDICONTAINER_ENABLE_PROFILE)
 #include "cuda_profiler_api.h"
 #endif
@@ -72,7 +70,7 @@
 // if defined, this use pinned memory instead of device pointer
 // by default, we enable pinned memory
 #define IFPACK2_BLOCKTRIDICONTAINER_USE_PINNED_MEMORY_FOR_MPI
-//#define IFPACK2_BLOCKTRIDICONTAINER_USE_CUDA_MEMORY_FOR_MPI
+// #define IFPACK2_BLOCKTRIDICONTAINER_USE_CUDA_MEMORY_FOR_MPI
 
 // if defined, all views are allocated on cuda space intead of cuda uvm space
 #define IFPACK2_BLOCKTRIDICONTAINER_USE_CUDA_SPACE
@@ -138,19 +136,23 @@ using Scratch = Kokkos::View<typename ViewType::data_type,
 /// block tridiag scalar type
 ///
 template <typename T>
-struct BlockTridiagScalarType { typedef T type; };
+struct BlockTridiagScalarType {
+  typedef T type;
+};
 #if defined(IFPACK2_BLOCKTRIDICONTAINER_USE_SMALL_SCALAR_FOR_BLOCKTRIDIAG)
 template <>
-struct BlockTridiagScalarType<double> { typedef float type; };
+struct BlockTridiagScalarType<double> {
+  typedef float type;
+};
 // template<> struct SmallScalarType<Kokkos::complex<double> > { typedef Kokkos::complex<float> type; };
 #endif
 
 #if defined(KOKKOS_ENABLE_CUDA) && defined(IFPACK2_BLOCKTRIDICONTAINER_ENABLE_PROFILE)
 #define IFPACK2_BLOCKTRIDICONTAINER_PROFILER_REGION_BEGIN \
-  KOKKOS_IMPL_CUDA_SAFE_CALL(cudaProfilerStart());
+  cudaProfilerStart();
 
 #define IFPACK2_BLOCKTRIDICONTAINER_PROFILER_REGION_END \
-  { KOKKOS_IMPL_CUDA_SAFE_CALL(cudaProfilerStop()); }
+  { cudaProfilerStop(); }
 #else
 /// later put vtune profiler region
 #define IFPACK2_BLOCKTRIDICONTAINER_PROFILER_REGION_BEGIN
@@ -418,13 +420,8 @@ struct AsyncableImport {
   void createExecutionSpaceInstances() {
 #if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP) || defined(KOKKOS_ENABLE_SYCL)
     // The following line creates 8 streams:
-#if KOKKOS_VERSION >= 40699
     exec_instances =
         Kokkos::Experimental::partition_space(execution_space(), std::vector<int>(8, 1));
-#else
-    exec_instances =
-        Kokkos::Experimental::partition_space(execution_space(), 1, 1, 1, 1, 1, 1, 1, 1);
-#endif
 #endif
   }
 
@@ -1115,8 +1112,8 @@ createPartInterface(const Teuchos::RCP<const typename BlockHelperDetails::ImplTy
 
   BlockHelperDetails::PartInterface<MatrixType> interf;
 
-  const bool jacobi                    = partitions.size() == 0;
   const local_ordinal_type A_n_lclrows = G->getLocalNumRows();
+  const bool jacobi                    = partitions.size() == 0 || partitions.size() == A_n_lclrows;
   const local_ordinal_type nparts      = jacobi ? A_n_lclrows : partitions.size();
 
   typedef std::pair<local_ordinal_type, local_ordinal_type> size_idx_pair_type;
@@ -1132,32 +1129,36 @@ createPartInterface(const Teuchos::RCP<const typename BlockHelperDetails::ImplTy
   }
 
   local_ordinal_type n_subparts_per_part;
-  if (n_subparts_per_part_in == -1) {
-    // If the number of subparts is set to -1, the user let the algorithm
-    // decides the value automatically
-    using execution_space = typename impl_type::execution_space;
-
-    // Line splitting only benefits GPUs
-    if constexpr (impl_type::node_type::is_gpu) {
-      const int line_length = partsz[0].first;
-
-      const local_ordinal_type team_size =
-          SolveTridiagsDefaultModeAndAlgo<typename execution_space::memory_space>::
-              recommended_team_size(blocksize, vector_length, internal_vector_length);
-
-      const local_ordinal_type num_teams = std::max(1, execution_space().concurrency() / (team_size * vector_length));
-      n_subparts_per_part                = getAutomaticNSubparts(nparts, num_teams, line_length, blocksize);
-#ifdef IFPACK2_BLOCKTRIDICONTAINER_USE_PRINTF
-      printf("Automatically chosen n_subparts_per_part = %d for nparts = %d, num_teams = %d, team_size = %d, line_length = %d, and blocksize = %d;\n", n_subparts_per_part, nparts, num_teams, team_size, line_length, blocksize);
-#endif
-    } else {
-      n_subparts_per_part = 1;
-#ifdef IFPACK2_BLOCKTRIDICONTAINER_USE_PRINTF
-      printf("Automatically chosen n_subparts_per_part = 1 for CPU backend\n");
-#endif
-    }
+  if (jacobi) {
+    n_subparts_per_part = 1;
   } else {
-    n_subparts_per_part = n_subparts_per_part_in;
+    if (n_subparts_per_part_in == -1) {
+      // If the number of subparts is set to -1, the user let the algorithm
+      // decides the value automatically
+      using execution_space = typename impl_type::execution_space;
+
+      // Line splitting only benefits GPUs
+      if constexpr (impl_type::node_type::is_gpu) {
+        const int line_length = partsz[0].first;
+
+        const local_ordinal_type team_size =
+            SolveTridiagsDefaultModeAndAlgo<typename execution_space::memory_space>::
+                recommended_team_size(blocksize, vector_length, internal_vector_length);
+
+        const local_ordinal_type num_teams = std::max(1, execution_space().concurrency() / (team_size * vector_length));
+        n_subparts_per_part                = getAutomaticNSubparts(nparts, num_teams, line_length, blocksize);
+#ifdef IFPACK2_BLOCKTRIDICONTAINER_USE_PRINTF
+        printf("Automatically chosen n_subparts_per_part = %d for nparts = %d, num_teams = %d, team_size = %d, line_length = %d, and blocksize = %d;\n", n_subparts_per_part, nparts, num_teams, team_size, line_length, blocksize);
+#endif
+      } else {
+        n_subparts_per_part = 1;
+#ifdef IFPACK2_BLOCKTRIDICONTAINER_USE_PRINTF
+        printf("Automatically chosen n_subparts_per_part = 1 for CPU backend\n");
+#endif
+      }
+    } else {
+      n_subparts_per_part = n_subparts_per_part_in;
+    }
   }
 
   // Total number of sub lines:
@@ -1601,13 +1602,14 @@ createPartInterface(const Teuchos::RCP<const typename BlockHelperDetails::ImplTy
 ///
 template <typename MatrixType>
 struct BlockTridiags {
-  using impl_type                  = BlockHelperDetails::ImplType<MatrixType>;
-  using local_ordinal_type_1d_view = typename impl_type::local_ordinal_type_1d_view;
-  using size_type_1d_view          = typename impl_type::size_type_1d_view;
-  using size_type_2d_view          = typename impl_type::size_type_2d_view;
-  using vector_type_3d_view        = typename impl_type::vector_type_3d_view;
-  using vector_type_4d_view        = typename impl_type::vector_type_4d_view;
-  using btdm_scalar_type_3d_view   = typename impl_type::btdm_scalar_type_3d_view;
+  using impl_type                    = BlockHelperDetails::ImplType<MatrixType>;
+  using local_ordinal_type_1d_view   = typename impl_type::local_ordinal_type_1d_view;
+  using size_type_1d_view            = typename impl_type::size_type_1d_view;
+  using size_type_2d_view            = typename impl_type::size_type_2d_view;
+  using vector_type_3d_view          = typename impl_type::vector_type_3d_view;
+  using vector_type_4d_view          = typename impl_type::vector_type_4d_view;
+  using btdm_scalar_type_3d_view     = typename impl_type::btdm_scalar_type_3d_view;
+  using internal_vector_type_3d_view = typename impl_type::internal_vector_type_3d_view;
 
   // flat_td_ptr(i) is the index into flat-array values of the start of the
   // i'th tridiag. pack_td_ptr is the same, but for packs. If vector_length ==
@@ -1625,6 +1627,10 @@ struct BlockTridiags {
   vector_type_3d_view values_schur;
   // inv(A_00)*A_01 block values.
   vector_type_4d_view e_values;
+  // If doing Schur line splitting: space for permuted version of X,
+  // to be used during the Schur complement block solves (SolveTridiags, SingleVectorSchurTag).
+  // Otherwise, this is not allocated.
+  internal_vector_type_3d_view X_internal_vector_values_schur;
 
   // The following are for fused block Jacobi only.
   // For block row i, diag_offset(i)...diag_offset(i + bs^2)
@@ -1935,19 +1941,21 @@ void performSymbolicPhase(const Teuchos::RCP<const typename BlockHelperDetails::
 
   using execution_space = typename impl_type::execution_space;
 
-  using local_ordinal_type         = typename impl_type::local_ordinal_type;
-  using global_ordinal_type        = typename impl_type::global_ordinal_type;
-  using size_type                  = typename impl_type::size_type;
-  using local_ordinal_type_1d_view = typename impl_type::local_ordinal_type_1d_view;
-  using size_type_1d_view          = typename impl_type::size_type_1d_view;
-  using vector_type_3d_view        = typename impl_type::vector_type_3d_view;
-  using vector_type_4d_view        = typename impl_type::vector_type_4d_view;
-  using crs_matrix_type            = typename impl_type::tpetra_crs_matrix_type;
-  using block_crs_matrix_type      = typename impl_type::tpetra_block_crs_matrix_type;
-  using btdm_scalar_type_3d_view   = typename impl_type::btdm_scalar_type_3d_view;
-  using lo_traits                  = Tpetra::Details::OrdinalTraits<local_ordinal_type>;
+  using local_ordinal_type           = typename impl_type::local_ordinal_type;
+  using global_ordinal_type          = typename impl_type::global_ordinal_type;
+  using size_type                    = typename impl_type::size_type;
+  using local_ordinal_type_1d_view   = typename impl_type::local_ordinal_type_1d_view;
+  using size_type_1d_view            = typename impl_type::size_type_1d_view;
+  using vector_type_3d_view          = typename impl_type::vector_type_3d_view;
+  using vector_type_4d_view          = typename impl_type::vector_type_4d_view;
+  using crs_matrix_type              = typename impl_type::tpetra_crs_matrix_type;
+  using block_crs_matrix_type        = typename impl_type::tpetra_block_crs_matrix_type;
+  using btdm_scalar_type_3d_view     = typename impl_type::btdm_scalar_type_3d_view;
+  using internal_vector_type_3d_view = typename impl_type::internal_vector_type_3d_view;
+  using lo_traits                    = Tpetra::Details::OrdinalTraits<local_ordinal_type>;
 
-  constexpr int vector_length = impl_type::vector_length;
+  constexpr int vector_length          = impl_type::vector_length;
+  constexpr int internal_vector_length = impl_type::internal_vector_length;
 
   const auto comm = A->getRowMap()->getComm();
 
@@ -2182,61 +2190,56 @@ void performSymbolicPhase(const Teuchos::RCP<const typename BlockHelperDetails::
               }
             });
       }
-
-      // exclusive scan
-      typedef BlockHelperDetails::ArrayValueType<size_type, 2> update_type;
+      // Prefix sums to finish computing R_rowptr and R_rowptr_remote.
+      // Also check that the final elements of R_rowptr (aka amd.rowptr)
+      // and R_rowptr_remote (aka amd.rowptr_remote) match the total entry counts computed earlier.
       {
-        Kokkos::RangePolicy<execution_space> policy(0, nrows + 1);
-        Kokkos::parallel_scan(
-            "performSymbolicPhase::RangePolicy<execution_space>::R_graph_fill",
-            policy, KOKKOS_LAMBDA(const local_ordinal_type &lr, update_type &update, const bool &final) {
-              update_type val;
-              val.v[0] = R_rowptr(lr);
-              if (overlap_communication_and_computation)
-                val.v[1] = R_rowptr_remote(lr);
-
-              if (final) {
-                R_rowptr(lr) = update.v[0];
-                if (overlap_communication_and_computation)
-                  R_rowptr_remote(lr) = update.v[1];
-
-                if (lr < nrows) {
-                  const local_ordinal_type ri0 = lclrow2idx[lr];
-                  const local_ordinal_type pi0 = rowidx2part(ri0);
-
-                  size_type cnt_rowptr        = R_rowptr(lr);
-                  size_type cnt_rowptr_remote = overlap_communication_and_computation ? R_rowptr_remote(lr) : 0;  // when not overlap_communication_and_computation, this value is garbage
-
-                  const size_type j0 = local_graph_rowptr(lr);
-                  for (size_type j = j0; j < local_graph_rowptr(lr + 1); ++j) {
-                    const local_ordinal_type lc   = local_graph_colidx(j);
-                    const local_ordinal_type lc2r = col2row[lc];
-                    if (lc2r != (local_ordinal_type)-1) {
-                      const local_ordinal_type ri = lclrow2idx[lc2r];
-                      const local_ordinal_type pi = rowidx2part(ri);
-                      if (pi == pi0 && ri + 1 >= ri0 && ri <= ri0 + 1)
-                        continue;
-                    }
-                    const local_ordinal_type row_entry = j - j0;
-                    if (!overlap_communication_and_computation || lc < nrows)
-                      R_A_colindsub(cnt_rowptr++) = row_entry;
-                    else
-                      R_A_colindsub_remote(cnt_rowptr_remote++) = row_entry;
-                  }
-                }
-              }
-              update += val;
-            });
+        size_type R_rowptr_final;
+#if KOKKOSKERNELS_VERSION >= 50299
+        KokkosKernels::exclusive_parallel_prefix_sum(execution_space(), R_rowptr, R_rowptr_final);
+#else
+        KokkosKernels::Impl::kk_exclusive_parallel_prefix_sum<execution_space>(nrows + 1, R_rowptr, R_rowptr_final);
+#endif
+        TEUCHOS_ASSERT(R_rowptr_final == R_nnz_owned);
+        if (overlap_communication_and_computation) {
+          size_type R_rowptr_remote_final;
+#if KOKKOSKERNELS_VERSION >= 50299
+          KokkosKernels::exclusive_parallel_prefix_sum(execution_space(), R_rowptr_remote, R_rowptr_remote_final);
+#else
+          KokkosKernels::Impl::kk_exclusive_parallel_prefix_sum<execution_space>(nrows + 1, R_rowptr_remote, R_rowptr_remote_final);
+#endif
+          TEUCHOS_ASSERT(R_rowptr_remote_final == R_nnz_remote);
+        }
       }
       {
-        // Check that the last elements of R_rowptr (aka amd.rowptr)
-        // and R_rowptr_remote (aka amd.rowptr_remote) match the expected entry counts
-        auto r_rowptr_end = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(R_rowptr, nrows));
-        TEUCHOS_ASSERT(r_rowptr_end() == R_nnz_owned);
-        if (overlap_communication_and_computation) {
-          auto r_rowptr_remote_end = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(R_rowptr_remote, nrows));
-          TEUCHOS_ASSERT(r_rowptr_remote_end() == R_nnz_remote);
-        }
+        // Fill R graph entries (R_A_colindsub and R_A_colindsub_remote)
+        Kokkos::RangePolicy<execution_space> policy(0, nrows);
+        Kokkos::parallel_for(
+            "performSymbolicPhase::RangePolicy<execution_space>::R_graph_fill",
+            policy, KOKKOS_LAMBDA(const local_ordinal_type &lr) {
+              const local_ordinal_type ri0 = lclrow2idx[lr];
+              const local_ordinal_type pi0 = rowidx2part(ri0);
+
+              size_type cnt_rowptr        = R_rowptr(lr);
+              size_type cnt_rowptr_remote = overlap_communication_and_computation ? R_rowptr_remote(lr) : 0;  // when not overlap_communication_and_computation, this value is garbage
+
+              const size_type j0 = local_graph_rowptr(lr);
+              for (size_type j = j0; j < local_graph_rowptr(lr + 1); ++j) {
+                const local_ordinal_type lc   = local_graph_colidx(j);
+                const local_ordinal_type lc2r = col2row[lc];
+                if (lc2r != (local_ordinal_type)-1) {
+                  const local_ordinal_type ri = lclrow2idx[lc2r];
+                  const local_ordinal_type pi = rowidx2part(ri);
+                  if (pi == pi0 && ri + 1 >= ri0 && ri <= ri0 + 1)
+                    continue;
+                }
+                const local_ordinal_type row_entry = j - j0;
+                if (!overlap_communication_and_computation || lc < nrows)
+                  R_A_colindsub(cnt_rowptr++) = row_entry;
+                else
+                  R_A_colindsub_remote(cnt_rowptr_remote++) = row_entry;
+              }
+            });
       }
 
       // Allocate or view values.
@@ -2247,10 +2250,15 @@ void performSymbolicPhase(const Teuchos::RCP<const typename BlockHelperDetails::
       }
     }
 
-    // Allocate view for E and initialize the values with B:
-
-    if (interf.n_subparts_per_part > 1)
-      btdm.e_values = vector_type_4d_view("btdm.e_values", 2, interf.part2packrowidx0_back, blocksize, blocksize);
+    if (interf.n_subparts_per_part > 1) {
+      // If doing Schur complement line splitting, allocate E and space for permuted X
+      btdm.e_values                       = vector_type_4d_view("btdm.e_values", 2, interf.part2packrowidx0_back, blocksize, blocksize);
+      btdm.X_internal_vector_values_schur = internal_vector_type_3d_view(
+          do_not_initialize_tag("X_internal_vector_values_schur"),
+          2 * (interf.n_subparts_per_part - 1) * interf.part2packrowidx0_sub.extent(0),
+          blocksize,
+          vector_length / internal_vector_length);
+    }
   }
   // Precompute offsets of each A and x entry to speed up residual.
   // Applies if all of these are true:
@@ -2264,7 +2272,7 @@ void performSymbolicPhase(const Teuchos::RCP<const typename BlockHelperDetails::
     bool is_async_importer_active    = !async_importer.is_null();
     local_ordinal_type_1d_view dm2cm = is_async_importer_active ? async_importer->dm2cm : local_ordinal_type_1d_view();
     bool ownedRemoteSeparate         = overlap_communication_and_computation || !is_async_importer_active;
-    BlockHelperDetails::precompute_A_x_offsets<MatrixType>(amd, interf, g, dm2cm, blocksize, ownedRemoteSeparate);
+    BlockHelperDetails::ComputeResidualVector<MatrixType>::precompute_A_x_offsets(amd, interf, g, dm2cm, blocksize, ownedRemoteSeparate);
   }
 
   // If using fused block Jacobi path, allocate diagonal inverses here (d_inv) and find diagonal offsets.
@@ -2403,7 +2411,7 @@ static inline int ExtractAndFactorizeRecommendedSYCLTeamSize(const int blksize,
   return 2 * total_team_size / vector_size;
 }
 template <>
-struct ExtractAndFactorizeTridiagsDefaultModeAndAlgo<Kokkos::Experimental::SYCLDeviceUSMSpace> {
+struct ExtractAndFactorizeTridiagsDefaultModeAndAlgo<Kokkos::SYCLDeviceUSMSpace> {
   typedef KB::Mode::Team mode_type;
   typedef KB::Algo::Level3::Unblocked algo_type;
   static int recommended_team_size(const int blksize,
@@ -2413,7 +2421,7 @@ struct ExtractAndFactorizeTridiagsDefaultModeAndAlgo<Kokkos::Experimental::SYCLD
   }
 };
 template <>
-struct ExtractAndFactorizeTridiagsDefaultModeAndAlgo<Kokkos::Experimental::SYCLSharedUSMSpace> {
+struct ExtractAndFactorizeTridiagsDefaultModeAndAlgo<Kokkos::SYCLSharedUSMSpace> {
   typedef KB::Mode::Team mode_type;
   typedef KB::Algo::Level3::Unblocked algo_type;
   static int recommended_team_size(const int blksize,
@@ -2449,8 +2457,8 @@ solveMultiVector(const typename Kokkos::TeamPolicy<typename impl_type::execution
   using btdm_magnitude_type = typename impl_type::btdm_magnitude_type;
 
   // constant
-  const auto one  = Kokkos::ArithTraits<btdm_magnitude_type>::one();
-  const auto zero = Kokkos::ArithTraits<btdm_magnitude_type>::zero();
+  const auto one  = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
+  const auto zero = KokkosKernels::ArithTraits<btdm_magnitude_type>::zero();
 
   // subview pattern
   auto A  = Kokkos::subview(D_internal_vector_values, i0, Kokkos::ALL(), Kokkos::ALL(), v);
@@ -2549,8 +2557,8 @@ solveSingleVectorNew(const typename Kokkos::TeamPolicy<typename impl_type::execu
   auto X = X_internal_vector_values.data();
 
   // constant
-  const auto one  = Kokkos::ArithTraits<btdm_magnitude_type>::one();
-  const auto zero = Kokkos::ArithTraits<btdm_magnitude_type>::zero();
+  const auto one  = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
+  const auto zero = KokkosKernels::ArithTraits<btdm_magnitude_type>::zero();
   // const local_ordinal_type num_vectors = X_scalar_values.extent(2);
 
   // const local_ordinal_type blocksize = D_scalar_values.extent(1);
@@ -2631,8 +2639,7 @@ solveSingleVectorNew(const typename Kokkos::TeamPolicy<typename impl_type::execu
   } else {
     const local_ordinal_type ws0 = WW.stride(0);
     auto W                       = WW.data() + v;
-    KOKKOSBATCHED_COPY_VECTOR_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type,
-                                                           member, blocksize, X, xs0, W, ws0);
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(member, blocksize), [&](int i) { W[i * ws0] = X[i * xs0]; });
     member.team_barrier();
     KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
                                                     member,
@@ -3199,7 +3206,7 @@ struct ExtractAndFactorizeTridiags {
     typedef typename default_mode_and_algo_type::algo_type default_algo_type;
 
     // constant
-    const auto one = Kokkos::ArithTraits<btdm_magnitude_type>::one();
+    const auto one = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
 
 #ifdef IFPACK2_BLOCKTRIDICONTAINER_USE_PRINTF
     printf("i0 = %d, nrows = %d, v = %d, AA.extent(0) = %ld;\n", i0, nrows, v, AA.extent(0));
@@ -3311,7 +3318,7 @@ struct ExtractAndFactorizeTridiags {
     // We can simply pull the diagonal entry from A into d_inv
     btdm_scalar_scratch_type_3d_view WW1(member.team_scratch(ScratchLevel), half_vector_length, blocksize, blocksize);
     btdm_scalar_scratch_type_3d_view WW2(member.team_scratch(ScratchLevel), half_vector_length, blocksize, blocksize);
-    const auto one                 = Kokkos::ArithTraits<btdm_magnitude_type>::one();
+    const auto one                 = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
     const local_ordinal_type nrows = lclrow.extent(0);
     Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, half_vector_length),
                          [&](const local_ordinal_type &v) {
@@ -3477,7 +3484,7 @@ struct ExtractAndFactorizeTridiags {
 
     member.team_barrier();
 
-    const auto one = Kokkos::ArithTraits<btdm_magnitude_type>::one();
+    const auto one = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
 
     const size_type c_kps1 = pack_td_ptr(partidx, local_subpartidx) + 1;
     const size_type c_kps2 = pack_td_ptr(partidx, local_subpartidx + 1) - 2;
@@ -3607,8 +3614,8 @@ struct ExtractAndFactorizeTridiags {
 #ifdef IFPACK2_BLOCKTRIDICONTAINER_USE_PRINTF
         printf("Start ExtractBCDTag\n");
 #endif
-        Kokkos::deep_copy(e_scalar_values, Kokkos::ArithTraits<btdm_magnitude_type>::zero());
-        Kokkos::deep_copy(scalar_values_schur, Kokkos::ArithTraits<btdm_magnitude_type>::zero());
+        Kokkos::deep_copy(e_scalar_values, KokkosKernels::ArithTraits<btdm_magnitude_type>::zero());
+        Kokkos::deep_copy(scalar_values_schur, KokkosKernels::ArithTraits<btdm_magnitude_type>::zero());
 
         write5DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), e_scalar_values, "e_scalar_values_before_extract.mm");
 
@@ -4022,7 +4029,7 @@ static inline int SolveTridiagsRecommendedSYCLTeamSize(const int blksize,
 }
 
 template <>
-struct SolveTridiagsDefaultModeAndAlgo<Kokkos::Experimental::SYCLSharedUSMSpace> {
+struct SolveTridiagsDefaultModeAndAlgo<Kokkos::SYCLSharedUSMSpace> {
   typedef KB::Mode::Team mode_type;
   typedef KB::Algo::Level2::Unblocked single_vector_algo_type;
   typedef KB::Algo::Level3::Unblocked multi_vector_algo_type;
@@ -4033,7 +4040,7 @@ struct SolveTridiagsDefaultModeAndAlgo<Kokkos::Experimental::SYCLSharedUSMSpace>
   }
 };
 template <>
-struct SolveTridiagsDefaultModeAndAlgo<Kokkos::Experimental::SYCLDeviceUSMSpace> {
+struct SolveTridiagsDefaultModeAndAlgo<Kokkos::SYCLDeviceUSMSpace> {
   typedef KB::Mode::Team mode_type;
   typedef KB::Algo::Level2::Unblocked single_vector_algo_type;
   typedef KB::Algo::Level3::Unblocked multi_vector_algo_type;
@@ -4063,6 +4070,7 @@ struct SolveTridiags {
   using size_type_2d_view          = typename impl_type::size_type_2d_view;
   /// vectorization
   using vector_type_3d_view          = typename impl_type::vector_type_3d_view;
+  using internal_vector_type_3d_view = typename impl_type::internal_vector_type_3d_view;
   using internal_vector_type_4d_view = typename impl_type::internal_vector_type_4d_view;
   using internal_vector_type_5d_view = typename impl_type::internal_vector_type_5d_view;
   using btdm_scalar_type_4d_view     = typename impl_type::btdm_scalar_type_4d_view;
@@ -4104,7 +4112,7 @@ struct SolveTridiags {
   const Unmanaged<internal_vector_type_4d_view> X_internal_vector_values;
   const Unmanaged<btdm_scalar_type_4d_view> X_internal_scalar_values;
 
-  internal_vector_type_4d_view X_internal_vector_values_schur;
+  const Unmanaged<internal_vector_type_3d_view> X_internal_vector_values_schur;
 
   const ConstUnmanaged<internal_vector_type_4d_view> D_internal_vector_values_schur;
   const ConstUnmanaged<internal_vector_type_5d_view> e_internal_vector_values;
@@ -4120,6 +4128,10 @@ struct SolveTridiags {
 #endif
   const impl_scalar_type df;
   const bool compute_diff;
+  // Schur solve only supports solving one vector at a time (currently).
+  // If solving on a multivector, we loop over each vec in the solve.
+  // This is the current vec being solved.
+  local_ordinal_type active_schur_solve_vec;
 
  public:
   SolveTridiags(const BlockHelperDetails::PartInterface<MatrixType> &interf,
@@ -4157,11 +4169,7 @@ struct SolveTridiags {
                                pmv.extent(1),
                                pmv.extent(2),
                                vector_length)
-    , X_internal_vector_values_schur(do_not_initialize_tag("X_internal_vector_values_schur"),
-                                     2 * (n_subparts_per_part - 1) * part2packrowidx0_sub.extent(0),
-                                     pmv.extent(1),
-                                     pmv.extent(2),
-                                     vector_length / internal_vector_length)
+    , X_internal_vector_values_schur(btdm.X_internal_vector_values_schur)
     , D_internal_vector_values_schur((internal_vector_type *)btdm.values_schur.data(),
                                      btdm.values_schur.extent(0),
                                      btdm.values_schur.extent(1),
@@ -4177,7 +4185,8 @@ struct SolveTridiags {
     , Y_scalar_multivector()
     , Z_scalar_vector()
     , df(damping_factor)
-    , compute_diff(is_norm_manager_active) {}
+    , compute_diff(is_norm_manager_active)
+    , active_schur_solve_vec(0) {}
 
  public:
   /// move packed multi vector into flat multi vector for computing residuals
@@ -4217,7 +4226,7 @@ struct SolveTridiags {
                                        y += df * yd;
 
                                        {  // if (compute_diff) {
-                                         const auto yd_abs = Kokkos::ArithTraits<impl_scalar_type>::abs(yd);
+                                         const auto yd_abs = KokkosKernels::ArithTraits<impl_scalar_type>::abs(yd);
                                          z_partial_sum += yd_abs * yd_abs;
                                        }
                                      }
@@ -4241,7 +4250,7 @@ struct SolveTridiags {
                                        y += df * yd;
 
                                        {  // if (compute_diff) {
-                                         const auto yd_abs = Kokkos::ArithTraits<impl_scalar_type>::abs(yd);
+                                         const auto yd_abs = KokkosKernels::ArithTraits<impl_scalar_type>::abs(yd);
                                          z_partial_sum += yd_abs * yd_abs;
                                        }
                                      }
@@ -4277,8 +4286,8 @@ struct SolveTridiags {
     auto X = X_internal_vector_values.data();
 
     // constant
-    const auto one  = Kokkos::ArithTraits<btdm_magnitude_type>::one();
-    const auto zero = Kokkos::ArithTraits<btdm_magnitude_type>::zero();
+    const auto one  = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
+    const auto zero = KokkosKernels::ArithTraits<btdm_magnitude_type>::zero();
     // const local_ordinal_type num_vectors = X_scalar_values.extent(2);
 
     // const local_ordinal_type blocksize = D_scalar_values.extent(1);
@@ -4359,8 +4368,7 @@ struct SolveTridiags {
     } else {
       const local_ordinal_type ws0 = WW.stride(0);
       auto W                       = WW.data() + v;
-      KOKKOSBATCHED_COPY_VECTOR_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type,
-                                                             member, blocksize, X, xs0, W, ws0);
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, blocksize), [&](int i) { W[i * ws0] = X[i * xs0]; });
       member.team_barrier();
       KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
                                                       member,
@@ -4388,8 +4396,8 @@ struct SolveTridiags {
     typedef typename default_mode_and_algo_type::multi_vector_algo_type default_algo_type;
 
     // constant
-    const auto one  = Kokkos::ArithTraits<btdm_magnitude_type>::one();
-    const auto zero = Kokkos::ArithTraits<btdm_magnitude_type>::zero();
+    const auto one  = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
+    const auto zero = KokkosKernels::ArithTraits<btdm_magnitude_type>::zero();
 
     // subview pattern
     auto A  = Kokkos::subview(D_internal_vector_values, i0, Kokkos::ALL(), Kokkos::ALL(), v);
@@ -4447,35 +4455,27 @@ struct SolveTridiags {
     }
   }
 
-  template <int B>
+  template <int B, int ScratchLevel>
   struct SingleVectorTag {};
-  template <int B>
+  template <int B, int ScratchLevel>
   struct MultiVectorTag {};
 
-  template <int B>
+  template <int B, int ScratchLevel>
   struct SingleVectorSubLineTag {};
   template <int B>
-  struct MultiVectorSubLineTag {};
-  template <int B>
   struct SingleVectorApplyCTag {};
-  template <int B>
-  struct MultiVectorApplyCTag {};
-  template <int B>
+  template <int B, int ScratchLevel>
   struct SingleVectorSchurTag {};
-  template <int B>
-  struct MultiVectorSchurTag {};
   template <int B>
   struct SingleVectorApplyETag {};
   template <int B>
-  struct MultiVectorApplyETag {};
-  template <int B>
-  struct SingleVectorCopyToFlatTag {};
+  struct CopyVectorToFlatTag {};
   template <int B>
   struct SingleZeroingTag {};
 
-  template <int B>
+  template <int B, int ScratchLevel>
   KOKKOS_INLINE_FUNCTION void
-  operator()(const SingleVectorTag<B> &, const member_type &member) const {
+  operator()(const SingleVectorTag<B, ScratchLevel> &, const member_type &member) const {
     const local_ordinal_type packidx     = member.league_rank();
     const local_ordinal_type partidx     = packptr(packidx);
     const local_ordinal_type npacks      = packptr(packidx + 1) - partidx;
@@ -4486,7 +4486,7 @@ struct SolveTridiags {
     const local_ordinal_type blocksize   = (B == 0 ? D_internal_vector_values.extent(1) : B);
     const local_ordinal_type num_vectors = 1;
     internal_vector_scratch_type_3d_view
-        WW(member.team_scratch(0), blocksize, 1, vector_loop_size);
+        WW(member.team_scratch(ScratchLevel), blocksize, 1, vector_loop_size);
     Kokkos::single(Kokkos::PerTeam(member), [&]() {
       Z_scalar_vector(member.league_rank()) = impl_scalar_type(0);
     });
@@ -4496,9 +4496,9 @@ struct SolveTridiags {
     });
   }
 
-  template <int B>
+  template <int B, int ScratchLevel>
   KOKKOS_INLINE_FUNCTION void
-  operator()(const MultiVectorTag<B> &, const member_type &member) const {
+  operator()(const MultiVectorTag<B, ScratchLevel> &, const member_type &member) const {
     const local_ordinal_type packidx     = member.league_rank();
     const local_ordinal_type partidx     = packptr(packidx);
     const local_ordinal_type npacks      = packptr(packidx + 1) - partidx;
@@ -4510,7 +4510,7 @@ struct SolveTridiags {
     const local_ordinal_type num_vectors = X_internal_vector_values.extent(2);
 
     internal_vector_scratch_type_3d_view
-        WW(member.team_scratch(0), blocksize, num_vectors, vector_loop_size);
+        WW(member.team_scratch(ScratchLevel), blocksize, num_vectors, vector_loop_size);
     Kokkos::single(Kokkos::PerTeam(member), [&]() {
       Z_scalar_vector(member.league_rank()) = impl_scalar_type(0);
     });
@@ -4520,9 +4520,9 @@ struct SolveTridiags {
     });
   }
 
-  template <int B>
+  template <int B, int ScratchLevel>
   KOKKOS_INLINE_FUNCTION void
-  operator()(const SingleVectorSubLineTag<B> &, const member_type &member) const {
+  operator()(const SingleVectorSubLineTag<B, ScratchLevel> &, const member_type &member) const {
     // btdm is packed and sorted from largest one
     const local_ordinal_type packidx = packindices_sub(member.league_rank());
 
@@ -4542,10 +4542,11 @@ struct SolveTridiags {
     (void)npacks;
 
     internal_vector_scratch_type_3d_view
-        WW(member.team_scratch(0), blocksize, 1, vector_loop_size);
+        WW(member.team_scratch(ScratchLevel), blocksize, 1, vector_loop_size);
 
     Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, vector_loop_size), [&](const int &v) {
-      solveSingleVectorNew<impl_type, internal_vector_scratch_type_3d_view>(member, blocksize, i0, r0, nrows, v, D_internal_vector_values, X_internal_vector_values, WW);
+      auto X_internal_vec = Kokkos::subview(X_internal_vector_values, Kokkos::ALL(), Kokkos::ALL(), active_schur_solve_vec, Kokkos::ALL());
+      solveSingleVectorNew<impl_type, internal_vector_scratch_type_3d_view>(member, blocksize, i0, r0, nrows, v, D_internal_vector_values, X_internal_vec, WW);
     });
   }
 
@@ -4567,9 +4568,6 @@ struct SolveTridiags {
     const local_ordinal_type r0    = part2packrowidx0_sub(partidx, local_subpartidx);
     const local_ordinal_type nrows = partptr_sub(subpartidx, 1) - partptr_sub(subpartidx, 0);
 
-    internal_vector_scratch_type_3d_view
-        WW(member.team_scratch(0), blocksize, blocksize, vector_loop_size);
-
     // Compute v_2 = v_2 - C v_1
 
     const local_ordinal_type local_subpartidx_schur = (local_subpartidx - 1) / 2;
@@ -4579,7 +4577,7 @@ struct SolveTridiags {
     (void)i0_schur;
     (void)i0_offset;
 
-    const auto one = Kokkos::ArithTraits<btdm_magnitude_type>::one();
+    const auto one = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
 
     const size_type c_kps2 = local_subpartidx > 0 ? pack_td_ptr(partidx, local_subpartidx) - 2 : 0;
     const size_type c_kps1 = pack_td_ptr(partidx, local_subpartidx + 1) + 1;
@@ -4591,8 +4589,8 @@ struct SolveTridiags {
 
     if (local_subpartidx == 0) {
       Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, vector_loop_size), [&](const int &v) {
-        auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + nrows - 1, Kokkos::ALL(), 0, v);
-        auto v_2 = Kokkos::subview(X_internal_vector_values, r0 + nrows, Kokkos::ALL(), 0, v);
+        auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + nrows - 1, Kokkos::ALL(), active_schur_solve_vec, v);
+        auto v_2 = Kokkos::subview(X_internal_vector_values, r0 + nrows, Kokkos::ALL(), active_schur_solve_vec, v);
         auto C   = Kokkos::subview(D_internal_vector_values, c_kps1, Kokkos::ALL(), Kokkos::ALL(), v);
 
         KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
@@ -4606,8 +4604,8 @@ struct SolveTridiags {
       });
     } else if (local_subpartidx == (local_ordinal_type)part2packrowidx0_sub.extent(1) - 2) {
       Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, vector_loop_size), [&](const int &v) {
-        auto v_1 = Kokkos::subview(X_internal_vector_values, r0, Kokkos::ALL(), 0, v);
-        auto v_2 = Kokkos::subview(X_internal_vector_values, r0 - 1, Kokkos::ALL(), 0, v);
+        auto v_1 = Kokkos::subview(X_internal_vector_values, r0, Kokkos::ALL(), active_schur_solve_vec, v);
+        auto v_2 = Kokkos::subview(X_internal_vector_values, r0 - 1, Kokkos::ALL(), active_schur_solve_vec, v);
         auto C   = Kokkos::subview(D_internal_vector_values, c_kps2, Kokkos::ALL(), Kokkos::ALL(), v);
 
         KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
@@ -4622,8 +4620,8 @@ struct SolveTridiags {
     } else {
       Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, vector_loop_size), [&](const int &v) {
         {
-          auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + nrows - 1, Kokkos::ALL(), 0, v);
-          auto v_2 = Kokkos::subview(X_internal_vector_values, r0 + nrows, Kokkos::ALL(), 0, v);
+          auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + nrows - 1, Kokkos::ALL(), active_schur_solve_vec, v);
+          auto v_2 = Kokkos::subview(X_internal_vector_values, r0 + nrows, Kokkos::ALL(), active_schur_solve_vec, v);
           auto C   = Kokkos::subview(D_internal_vector_values, c_kps1, Kokkos::ALL(), Kokkos::ALL(), v);
 
           KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
@@ -4636,8 +4634,8 @@ struct SolveTridiags {
                                                           v_2.data(), v_2.stride(0));
         }
         {
-          auto v_1 = Kokkos::subview(X_internal_vector_values, r0, Kokkos::ALL(), 0, v);
-          auto v_2 = Kokkos::subview(X_internal_vector_values, r0 - 1, Kokkos::ALL(), 0, v);
+          auto v_1 = Kokkos::subview(X_internal_vector_values, r0, Kokkos::ALL(), active_schur_solve_vec, v);
+          auto v_2 = Kokkos::subview(X_internal_vector_values, r0 - 1, Kokkos::ALL(), active_schur_solve_vec, v);
           auto C   = Kokkos::subview(D_internal_vector_values, c_kps2, Kokkos::ALL(), Kokkos::ALL(), v);
 
           KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
@@ -4653,9 +4651,9 @@ struct SolveTridiags {
     }
   }
 
-  template <int B>
+  template <int B, int ScratchLevel>
   KOKKOS_INLINE_FUNCTION void
-  operator()(const SingleVectorSchurTag<B> &, const member_type &member) const {
+  operator()(const SingleVectorSchurTag<B, ScratchLevel> &, const member_type &member) const {
     const local_ordinal_type packidx = packindices_sub(member.league_rank());
 
     const local_ordinal_type partidx = packptr_sub(packidx);
@@ -4668,14 +4666,14 @@ struct SolveTridiags {
     const local_ordinal_type r0_schur = nrows * member.league_rank();
 
     internal_vector_scratch_type_3d_view
-        WW(member.team_scratch(0), blocksize, blocksize, vector_loop_size);
+        WW(member.team_scratch(ScratchLevel), blocksize, blocksize, vector_loop_size);
 
     for (local_ordinal_type schur_sub_part = 0; schur_sub_part < n_subparts_per_part - 1; ++schur_sub_part) {
       const local_ordinal_type r0 = part2packrowidx0_sub(partidx, 2 * schur_sub_part + 1);
       for (local_ordinal_type i = 0; i < 2; ++i) {
         copy3DView<local_ordinal_type>(member,
-                                       Kokkos::subview(X_internal_vector_values_schur, r0_schur + 2 * schur_sub_part + i, Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL()),
-                                       Kokkos::subview(X_internal_vector_values, r0 + i, Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL()));
+                                       Kokkos::subview(X_internal_vector_values_schur, r0_schur + 2 * schur_sub_part + i, Kokkos::ALL(), Kokkos::ALL()),
+                                       Kokkos::subview(X_internal_vector_values, r0 + i, Kokkos::ALL(), active_schur_solve_vec, Kokkos::ALL()));
       }
     }
 
@@ -4687,8 +4685,8 @@ struct SolveTridiags {
       const local_ordinal_type r0 = part2packrowidx0_sub(partidx, 2 * schur_sub_part + 1);
       for (local_ordinal_type i = 0; i < 2; ++i) {
         copy3DView<local_ordinal_type>(member,
-                                       Kokkos::subview(X_internal_vector_values, r0 + i, Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL()),
-                                       Kokkos::subview(X_internal_vector_values_schur, r0_schur + 2 * schur_sub_part + i, Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL()));
+                                       Kokkos::subview(X_internal_vector_values, r0 + i, Kokkos::ALL(), active_schur_solve_vec, Kokkos::ALL()),
+                                       Kokkos::subview(X_internal_vector_values_schur, r0_schur + 2 * schur_sub_part + i, Kokkos::ALL(), Kokkos::ALL()));
       }
     }
   }
@@ -4707,12 +4705,9 @@ struct SolveTridiags {
     const local_ordinal_type r0    = part2packrowidx0_sub(partidx, local_subpartidx);
     const local_ordinal_type nrows = partptr_sub(subpartidx, 1) - partptr_sub(subpartidx, 0);
 
-    internal_vector_scratch_type_3d_view
-        WW(member.team_scratch(0), blocksize, blocksize, vector_loop_size);
-
     // Compute v_2 = v_2 - C v_1
 
-    const auto one = Kokkos::ArithTraits<btdm_magnitude_type>::one();
+    const auto one = KokkosKernels::ArithTraits<btdm_magnitude_type>::one();
 
     typedef SolveTridiagsDefaultModeAndAlgo<typename execution_space::memory_space> default_mode_and_algo_type;
 
@@ -4721,10 +4716,10 @@ struct SolveTridiags {
 
     if (local_subpartidx == 0) {
       Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, vector_loop_size), [&](const int &v) {
-        auto v_2 = Kokkos::subview(X_internal_vector_values, r0 + nrows, Kokkos::ALL(), 0, v);
+        auto v_2 = Kokkos::subview(X_internal_vector_values, r0 + nrows, Kokkos::ALL(), active_schur_solve_vec, v);
 
         for (local_ordinal_type row = 0; row < nrows; ++row) {
-          auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + row, Kokkos::ALL(), 0, v);
+          auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + row, Kokkos::ALL(), active_schur_solve_vec, v);
           auto E   = Kokkos::subview(e_internal_vector_values, 0, r0 + row, Kokkos::ALL(), Kokkos::ALL(), v);
 
           KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
@@ -4739,10 +4734,10 @@ struct SolveTridiags {
       });
     } else if (local_subpartidx == (local_ordinal_type)part2packrowidx0_sub.extent(1) - 2) {
       Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, vector_loop_size), [&](const int &v) {
-        auto v_2 = Kokkos::subview(X_internal_vector_values, r0 - 1, Kokkos::ALL(), 0, v);
+        auto v_2 = Kokkos::subview(X_internal_vector_values, r0 - 1, Kokkos::ALL(), active_schur_solve_vec, v);
 
         for (local_ordinal_type row = 0; row < nrows; ++row) {
-          auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + row, Kokkos::ALL(), 0, v);
+          auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + row, Kokkos::ALL(), active_schur_solve_vec, v);
           auto E   = Kokkos::subview(e_internal_vector_values, 1, r0 + row, Kokkos::ALL(), Kokkos::ALL(), v);
 
           KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
@@ -4758,10 +4753,10 @@ struct SolveTridiags {
     } else {
       Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, vector_loop_size), [&](const int &v) {
         {
-          auto v_2 = Kokkos::subview(X_internal_vector_values, r0 + nrows, Kokkos::ALL(), 0, v);
+          auto v_2 = Kokkos::subview(X_internal_vector_values, r0 + nrows, Kokkos::ALL(), active_schur_solve_vec, v);
 
           for (local_ordinal_type row = 0; row < nrows; ++row) {
-            auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + row, Kokkos::ALL(), 0, v);
+            auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + row, Kokkos::ALL(), active_schur_solve_vec, v);
             auto E   = Kokkos::subview(e_internal_vector_values, 0, r0 + row, Kokkos::ALL(), Kokkos::ALL(), v);
 
             KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
@@ -4775,10 +4770,10 @@ struct SolveTridiags {
           }
         }
         {
-          auto v_2 = Kokkos::subview(X_internal_vector_values, r0 - 1, Kokkos::ALL(), 0, v);
+          auto v_2 = Kokkos::subview(X_internal_vector_values, r0 - 1, Kokkos::ALL(), active_schur_solve_vec, v);
 
           for (local_ordinal_type row = 0; row < nrows; ++row) {
-            auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + row, Kokkos::ALL(), 0, v);
+            auto v_1 = Kokkos::subview(X_internal_vector_values, r0 + row, Kokkos::ALL(), active_schur_solve_vec, v);
             auto E   = Kokkos::subview(e_internal_vector_values, 1, r0 + row, Kokkos::ALL(), Kokkos::ALL(), v);
 
             KOKKOSBATCHED_GEMV_NO_TRANSPOSE_INTERNAL_INVOKE(default_mode_type, default_algo_type,
@@ -4797,13 +4792,13 @@ struct SolveTridiags {
 
   template <int B>
   KOKKOS_INLINE_FUNCTION void
-  operator()(const SingleVectorCopyToFlatTag<B> &, const member_type &member) const {
+  operator()(const CopyVectorToFlatTag<B> &, const member_type &member) const {
     const local_ordinal_type packidx     = member.league_rank();
     const local_ordinal_type partidx     = packptr(packidx);
     const local_ordinal_type npacks      = packptr(packidx + 1) - partidx;
     const local_ordinal_type pri0        = part2packrowidx0(partidx);
     const local_ordinal_type blocksize   = (B == 0 ? D_internal_vector_values.extent(1) : B);
-    const local_ordinal_type num_vectors = 1;
+    const local_ordinal_type num_vectors = X_internal_vector_values.extent(2);
 
     Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, vector_loop_size), [&](const int &v) {
       copyToFlatMultiVector(member, partidx, npacks, pri0, v, blocksize, num_vectors);
@@ -4834,45 +4829,64 @@ struct SolveTridiags {
         SolveTridiagsDefaultModeAndAlgo<typename execution_space::memory_space>::
             recommended_team_size(blocksize, vector_length, internal_vector_length);
     const int per_team_scratch = internal_vector_scratch_type_3d_view ::shmem_size(blocksize, num_vectors, vector_loop_size);
+    const int max_scratch      = team_policy_type::scratch_size_max(0);
 
-#if defined(KOKKOS_ENABLE_DEPRECATED_CODE)
-#define BLOCKTRIDICONTAINER_DETAILS_SOLVETRIDIAGS(B)                                            \
-  if (num_vectors == 1) {                                                                       \
-    const Kokkos::TeamPolicy<execution_space, SingleVectorTag<B>>                               \
-        policy(packptr.extent(0) - 1, team_size, vector_loop_size);                             \
-    Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                        \
-                         policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch)), *this); \
-  } else {                                                                                      \
-    const Kokkos::TeamPolicy<execution_space, MultiVectorTag<B>>                                \
-        policy(packptr.extent(0) - 1, team_size, vector_loop_size);                             \
-    Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<MultiVector>",                         \
-                         policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch)), *this); \
-  }                                                                                             \
-  break
-#else
 #define BLOCKTRIDICONTAINER_DETAILS_SOLVETRIDIAGS(B)                                                                                                  \
-  if (num_vectors == 1) {                                                                                                                             \
-    if (packindices_schur.extent(1) <= 0) {                                                                                                           \
-      Kokkos::TeamPolicy<execution_space, SingleVectorTag<B>>                                                                                         \
-          policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                                 \
-      policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                                  \
-      Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                            \
-                           policy, *this);                                                                                                            \
-    } else {                                                                                                                                          \
-      {                                                                                                                                               \
-        Kokkos::TeamPolicy<execution_space, SingleZeroingTag<B>>                                                                                      \
+  if (packindices_schur.extent(1) <= 0) {                                                                                                             \
+    if (num_vectors == 1) {                                                                                                                           \
+      if (per_team_scratch < max_scratch) {                                                                                                           \
+        Kokkos::TeamPolicy<execution_space, SingleVectorTag<B, 0>>                                                                                    \
             policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                               \
-        Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleZeroingTag>",                                                                      \
-                             policy, *this);                                                                                                          \
-      }                                                                                                                                               \
-      {                                                                                                                                               \
-        IFPACK2_BLOCKHELPER_TIMER("BlockTriDi::ApplyInverseJacobi::SingleVectorSubLineTag", SingleVectorSubLineTag0);                                 \
-        write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_before_SingleVectorSubLineTag.mm"); \
-        Kokkos::TeamPolicy<execution_space, SingleVectorSubLineTag<B>>                                                                                \
-            policy(packindices_sub.extent(0), team_size, vector_loop_size);                                                                           \
         policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                                \
         Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                          \
                              policy, *this);                                                                                                          \
+      } else {                                                                                                                                        \
+        Kokkos::TeamPolicy<execution_space, SingleVectorTag<B, 1>>                                                                                    \
+            policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                               \
+        policy.set_scratch_size(1, Kokkos::PerTeam(per_team_scratch));                                                                                \
+        Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                          \
+                             policy, *this);                                                                                                          \
+      }                                                                                                                                               \
+    } else {                                                                                                                                          \
+      if (per_team_scratch < max_scratch) {                                                                                                           \
+        Kokkos::TeamPolicy<execution_space, MultiVectorTag<B, 0>>                                                                                     \
+            policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                               \
+        policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                                \
+        Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<MultiVector>",                                                                           \
+                             policy, *this);                                                                                                          \
+      } else {                                                                                                                                        \
+        Kokkos::TeamPolicy<execution_space, MultiVectorTag<B, 1>>                                                                                     \
+            policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                               \
+        policy.set_scratch_size(1, Kokkos::PerTeam(per_team_scratch));                                                                                \
+        Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<MultiVector>",                                                                           \
+                             policy, *this);                                                                                                          \
+      }                                                                                                                                               \
+    }                                                                                                                                                 \
+  } else {                                                                                                                                            \
+    {                                                                                                                                                 \
+      Kokkos::TeamPolicy<execution_space, SingleZeroingTag<B>>                                                                                        \
+          policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                                 \
+      Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleZeroingTag>",                                                                        \
+                           policy, *this);                                                                                                            \
+    }                                                                                                                                                 \
+    for (local_ordinal_type vec = 0; vec < num_vectors; vec++) {                                                                                      \
+      this->active_schur_solve_vec = vec;                                                                                                             \
+      {                                                                                                                                               \
+        IFPACK2_BLOCKHELPER_TIMER("BlockTriDi::ApplyInverseJacobi::SingleVectorSubLineTag", SingleVectorSubLineTag0);                                 \
+        write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_before_SingleVectorSubLineTag.mm"); \
+        if (per_team_scratch < max_scratch) {                                                                                                         \
+          Kokkos::TeamPolicy<execution_space, SingleVectorSubLineTag<B, 0>>                                                                           \
+              policy(packindices_sub.extent(0), team_size, vector_loop_size);                                                                         \
+          policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                              \
+          Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                        \
+                               policy, *this);                                                                                                        \
+        } else {                                                                                                                                      \
+          Kokkos::TeamPolicy<execution_space, SingleVectorSubLineTag<B, 1>>                                                                           \
+              policy(packindices_sub.extent(0), team_size, vector_loop_size);                                                                         \
+          policy.set_scratch_size(1, Kokkos::PerTeam(per_team_scratch));                                                                              \
+          Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                        \
+                               policy, *this);                                                                                                        \
+        }                                                                                                                                             \
         write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_after_SingleVectorSubLineTag.mm");  \
         IFPACK2_BLOCKHELPER_TIMER_FENCE(execution_space)                                                                                              \
       }                                                                                                                                               \
@@ -4881,7 +4895,6 @@ struct SolveTridiags {
         write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_before_SingleVectorApplyCTag.mm");  \
         Kokkos::TeamPolicy<execution_space, SingleVectorApplyCTag<B>>                                                                                 \
             policy(packindices_sub.extent(0), team_size, vector_loop_size);                                                                           \
-        policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                                \
         Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                          \
                              policy, *this);                                                                                                          \
         write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_after_SingleVectorApplyCTag.mm");   \
@@ -4890,11 +4903,19 @@ struct SolveTridiags {
       {                                                                                                                                               \
         IFPACK2_BLOCKHELPER_TIMER("BlockTriDi::ApplyInverseJacobi::SingleVectorSchurTag", SingleVectorSchurTag0);                                     \
         write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_before_SingleVectorSchurTag.mm");   \
-        Kokkos::TeamPolicy<execution_space, SingleVectorSchurTag<B>>                                                                                  \
-            policy(packindices_schur.extent(0), team_size, vector_loop_size);                                                                         \
-        policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                                \
-        Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                          \
-                             policy, *this);                                                                                                          \
+        if (per_team_scratch < max_scratch) {                                                                                                         \
+          Kokkos::TeamPolicy<execution_space, SingleVectorSchurTag<B, 0>>                                                                             \
+              policy(packindices_schur.extent(0), team_size, vector_loop_size);                                                                       \
+          policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                              \
+          Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                        \
+                               policy, *this);                                                                                                        \
+        } else {                                                                                                                                      \
+          Kokkos::TeamPolicy<execution_space, SingleVectorSchurTag<B, 1>>                                                                             \
+              policy(packindices_schur.extent(0), team_size, vector_loop_size);                                                                       \
+          policy.set_scratch_size(1, Kokkos::PerTeam(per_team_scratch));                                                                              \
+          Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                        \
+                               policy, *this);                                                                                                        \
+        }                                                                                                                                             \
         write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_after_SingleVectorSchurTag.mm");    \
         IFPACK2_BLOCKHELPER_TIMER_FENCE(execution_space)                                                                                              \
       }                                                                                                                                               \
@@ -4903,28 +4924,20 @@ struct SolveTridiags {
         write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_before_SingleVectorApplyETag.mm");  \
         Kokkos::TeamPolicy<execution_space, SingleVectorApplyETag<B>>                                                                                 \
             policy(packindices_sub.extent(0), team_size, vector_loop_size);                                                                           \
-        policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                                \
         Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVector>",                                                                          \
                              policy, *this);                                                                                                          \
         write4DMultiVectorValuesToFile(part2packrowidx0_sub.extent(0), X_internal_scalar_values, "x_scalar_values_after_SingleVectorApplyETag.mm");   \
         IFPACK2_BLOCKHELPER_TIMER_FENCE(execution_space)                                                                                              \
       }                                                                                                                                               \
-      {                                                                                                                                               \
-        Kokkos::TeamPolicy<execution_space, SingleVectorCopyToFlatTag<B>>                                                                             \
-            policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                               \
-        Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<SingleVectorCopyToFlatTag>",                                                             \
-                             policy, *this);                                                                                                          \
-      }                                                                                                                                               \
     }                                                                                                                                                 \
-  } else {                                                                                                                                            \
-    Kokkos::TeamPolicy<execution_space, MultiVectorTag<B>>                                                                                            \
-        policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                                   \
-    policy.set_scratch_size(0, Kokkos::PerTeam(per_team_scratch));                                                                                    \
-    Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<MultiVector>",                                                                               \
-                         policy, *this);                                                                                                              \
+    {                                                                                                                                                 \
+      Kokkos::TeamPolicy<execution_space, CopyVectorToFlatTag<B>>                                                                                     \
+          policy(packptr.extent(0) - 1, team_size, vector_loop_size);                                                                                 \
+      Kokkos::parallel_for("SolveTridiags::TeamPolicy::run<CopyVectorToFlatTag>",                                                                     \
+                           policy, *this);                                                                                                            \
+    }                                                                                                                                                 \
   }                                                                                                                                                   \
   break
-#endif
     switch (blocksize) {
       case 3: BLOCKTRIDICONTAINER_DETAILS_SOLVETRIDIAGS(3);
       case 5: BLOCKTRIDICONTAINER_DETAILS_SOLVETRIDIAGS(5);
@@ -4999,7 +5012,7 @@ int applyInverseJacobi(  // importer
   // const parameters
   const bool is_seq_method_requested     = !tpetra_importer.is_null();
   const bool is_async_importer_active    = !async_importer.is_null();
-  const bool is_norm_manager_active      = tol > Kokkos::ArithTraits<magnitude_type>::zero();
+  const bool is_norm_manager_active      = tol > KokkosKernels::ArithTraits<magnitude_type>::zero();
   const magnitude_type tolerance         = tol * tol;
   const local_ordinal_type blocksize     = btdm.values.extent(1);
   const local_ordinal_type num_vectors   = Y.getNumVectors();
@@ -5142,10 +5155,11 @@ int applyInverseJacobi(  // importer
   return sweep;
 }
 
-// Implementation of fused block Jacobi for a specific block size,
-// or (if B == 0) for a general block size.
-template <typename MatrixType, int B>
-int applyFusedBlockJacobi_Impl(
+///
+/// top level apply interface (fused block Jacobi)
+///
+template <typename MatrixType>
+int applyFusedBlockJacobi(
     const Teuchos::RCP<const typename BlockHelperDetails::ImplType<MatrixType>::tpetra_import_type> &tpetra_importer,
     const Teuchos::RCP<AsyncableImport<MatrixType>> &async_importer,
     const bool overlap_communication_and_computation,
@@ -5172,6 +5186,8 @@ int applyFusedBlockJacobi_Impl(
   using impl_scalar_type_1d_view        = typename impl_type::impl_scalar_type_1d_view;
   using impl_scalar_type_2d_view_tpetra = typename impl_type::impl_scalar_type_2d_view_tpetra;
 
+  IFPACK2_BLOCKHELPER_TIMER("BlockTriDi::ApplyFusedBlockJacobi", ApplyFusedBlockJacobi);
+
   // the tpetra importer and async importer can't both be active
   TEUCHOS_TEST_FOR_EXCEPT_MSG(!tpetra_importer.is_null() && !async_importer.is_null(),
                               "Neither Tpetra importer nor Async importer is null.");
@@ -5181,7 +5197,7 @@ int applyFusedBlockJacobi_Impl(
 
   // const parameters
   const bool is_async_importer_active    = !async_importer.is_null();
-  const bool is_norm_manager_active      = tol > Kokkos::ArithTraits<magnitude_type>::zero();
+  const bool is_norm_manager_active      = tol > KokkosKernels::ArithTraits<magnitude_type>::zero();
   const magnitude_type tolerance         = tol * tol;
   const local_ordinal_type blocksize     = btdm.d_inv.extent(1);
   const local_ordinal_type num_vectors   = Y.getNumVectors();
@@ -5219,13 +5235,8 @@ int applyFusedBlockJacobi_Impl(
   if (W.extent(0) != size_t(num_blockrows))
     W = impl_scalar_type_1d_view(do_not_initialize_tag("W"), num_blockrows);
 
-  // Create the required functors upfront (this is inexpensive - all shallow copies)
-  BlockHelperDetails::ComputeResidualAndSolve_SolveOnly<MatrixType, B>
-      functor_solve_only(amd, btdm.d_inv, W, blocksize, damping_factor);
-  BlockHelperDetails::ComputeResidualAndSolve_1Pass<MatrixType, B>
-      functor_1pass(amd, btdm.d_inv, W, blocksize, damping_factor);
-  BlockHelperDetails::ComputeResidualAndSolve_2Pass<MatrixType, B>
-      functor_2pass(amd, btdm.d_inv, W, blocksize, damping_factor);
+  BlockHelperDetails::ComputeResidualAndSolve<MatrixType>
+      residualAndSolve(amd, btdm.d_inv, W, blocksize, damping_factor);
 
   // norm manager workspace resize
   if (is_norm_manager_active)
@@ -5242,7 +5253,7 @@ int applyFusedBlockJacobi_Impl(
   for (; sweep < max_num_sweeps; ++sweep) {
     if (is_y_zero) {
       // If y is initially zero, then we are just computing y := damping_factor * Dinv * x
-      functor_solve_only.run(XX, y_buffers[1 - current_y]);
+      residualAndSolve.run_y_zero(XX, y_buffers[1 - current_y]);
     } else {
       // real use case does not use overlap comp and comm
       if (overlap_communication_and_computation || !is_async_importer_active) {
@@ -5250,11 +5261,11 @@ int applyFusedBlockJacobi_Impl(
         if (two_pass_residual) {
           // Pass 1 computes owned residual and stores into new y buffer,
           // but doesn't apply Dinv or produce a norm yet
-          functor_2pass.run_pass1(XX, y_buffers[current_y], y_buffers[1 - current_y]);
+          residualAndSolve.run_pass1_of_2(XX, y_buffers[current_y], y_buffers[1 - current_y]);
         } else {
           // This case happens if running with single rank.
           // There are no remote columns, so residual and solve can happen in one step.
-          functor_1pass.run(XX, y_buffers[current_y], remote_multivector, y_buffers[1 - current_y]);
+          residualAndSolve.run_single_pass(XX, y_buffers[current_y], remote_multivector, y_buffers[1 - current_y]);
         }
         if (is_norm_manager_active && norm_manager.checkDone(sweep, tolerance)) {
           if (is_async_importer_active) async_importer->cancel();
@@ -5263,14 +5274,14 @@ int applyFusedBlockJacobi_Impl(
         if (is_async_importer_active) {
           async_importer->syncRecv();
           // Stage 2 finishes computing the residual, then applies Dinv and computes norm.
-          functor_2pass.run_pass2(y_buffers[current_y], remote_multivector, y_buffers[1 - current_y]);
+          residualAndSolve.run_pass2_of_2(y_buffers[current_y], remote_multivector, y_buffers[1 - current_y]);
         }
       } else {
         if (is_async_importer_active)
           async_importer->syncExchange(y_buffers[current_y]);
         if (is_norm_manager_active && norm_manager.checkDone(sweep, tolerance)) break;
         // Full residual, Dinv apply, and norm in one kernel
-        functor_1pass.run(XX, y_buffers[current_y], remote_multivector, y_buffers[1 - current_y]);
+        residualAndSolve.run_single_pass(XX, y_buffers[current_y], remote_multivector, y_buffers[1 - current_y]);
       }
     }
 
@@ -5295,58 +5306,6 @@ int applyFusedBlockJacobi_Impl(
 
   // sqrt the norms for the caller's use.
   if (is_norm_manager_active) norm_manager.finalize();
-  return sweep;
-}
-
-///
-/// top level apply interface (fused block Jacobi)
-///
-template <typename MatrixType>
-int applyFusedBlockJacobi(
-    const Teuchos::RCP<const typename BlockHelperDetails::ImplType<MatrixType>::tpetra_import_type> &tpetra_importer,
-    const Teuchos::RCP<AsyncableImport<MatrixType>> &async_importer,
-    const bool overlap_communication_and_computation,
-    // tpetra interface
-    const typename BlockHelperDetails::ImplType<MatrixType>::tpetra_multivector_type &X,   // tpetra interface
-    /* */ typename BlockHelperDetails::ImplType<MatrixType>::tpetra_multivector_type &Y,   // tpetra interface
-    /* */ typename BlockHelperDetails::ImplType<MatrixType>::impl_scalar_type_1d_view &W,  // temporary tpetra interface (diff)
-    // local object interface
-    const BlockHelperDetails::PartInterface<MatrixType> &interf,                              // mesh interface
-    const BlockTridiags<MatrixType> &btdm,                                                    // packed block tridiagonal matrices
-    const BlockHelperDetails::AmD<MatrixType> &amd,                                           // R = A - D
-    /* */ typename BlockHelperDetails::ImplType<MatrixType>::impl_scalar_type_1d_view &work,  // workspace
-    /* */ BlockHelperDetails::NormManager<MatrixType> &norm_manager,
-    // preconditioner parameters
-    const typename BlockHelperDetails::ImplType<MatrixType>::impl_scalar_type &damping_factor,
-    /* */ bool is_y_zero,
-    const int max_num_sweeps,
-    const typename BlockHelperDetails::ImplType<MatrixType>::magnitude_type tol,
-    const int check_tol_every) {
-  IFPACK2_BLOCKHELPER_TIMER("BlockTriDi::ApplyFusedBlockJacobi", ApplyFusedBlockJacobi);
-  int blocksize = btdm.d_inv.extent(1);
-  int sweep     = 0;
-#define BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(B)                               \
-  {                                                                             \
-    sweep = applyFusedBlockJacobi_Impl<MatrixType, B>(                          \
-        tpetra_importer, async_importer, overlap_communication_and_computation, \
-        X, Y, W, interf, btdm, amd, work,                                       \
-        norm_manager, damping_factor, is_y_zero,                                \
-        max_num_sweeps, tol, check_tol_every);                                  \
-  }                                                                             \
-  break
-  switch (blocksize) {
-    case 3: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(3);
-    case 5: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(5);
-    case 7: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(7);
-    case 9: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(9);
-    case 10: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(10);
-    case 11: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(11);
-    case 16: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(16);
-    case 17: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(17);
-    case 18: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(18);
-    default: BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI(0);
-  }
-#undef BLOCKTRIDICONTAINER_APPLY_FUSED_JACOBI
 
   return sweep;
 }

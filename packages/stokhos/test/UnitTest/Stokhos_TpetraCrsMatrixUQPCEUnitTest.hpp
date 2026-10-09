@@ -1200,7 +1200,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(
 
   // Solve
   RCP<Tpetra_Vector> x = Tpetra::createVector<Scalar>(map);
-  typedef Kokkos::ArithTraits<BaseScalar> BST;
+  typedef KokkosKernels::ArithTraits<BaseScalar> BST;
   typedef typename BST::mag_type base_mag_type;
   typedef typename Tpetra_Vector::mag_type mag_type;
   base_mag_type btol = 1e-9;
@@ -1371,7 +1371,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(
   }
 
   RCP<Tpetra_Vector> x = Tpetra::createVector<Scalar>(map);
-  typedef Kokkos::ArithTraits<BaseScalar> BST;
+  typedef KokkosKernels::ArithTraits<BaseScalar> BST;
   typedef typename BST::mag_type base_mag_type;
   typedef typename Tpetra_Vector::mag_type mag_type;
   base_mag_type btol = 1e-9;
@@ -2235,7 +2235,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(
     flat_solver->solve();
   }
 
-  typedef Kokkos::ArithTraits<BaseScalar> ST;
+  typedef KokkosKernels::ArithTraits<BaseScalar> ST;
   typename ST::mag_type btol = 1e-12;
   ArrayRCP<Scalar> x_view = x->get1dViewNonConst();
   ArrayRCP<Scalar> x2_view = x2->get1dViewNonConst();

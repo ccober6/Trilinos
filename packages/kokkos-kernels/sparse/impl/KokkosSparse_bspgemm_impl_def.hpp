@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 namespace KokkosSparse {
 
@@ -25,9 +12,7 @@ void KokkosBSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_vi
                    b_lno_nnz_view_t_, b_scalar_nnz_view_t_>::KokkosBSPGEMM_numeric(c_row_view_t &rowmapC_,
                                                                                    c_lno_nnz_view_t &entriesC_,
                                                                                    c_scalar_nnz_view_t &valuesC_) {
-  // get the algorithm and execution space.
-  // SPGEMMAlgorithm spgemm_algorithm =
-  // this->handle->get_spgemm_handle()->get_algorithm_type();
+  // get the execution space as enum.
   KokkosKernels::Impl::ExecSpaceType my_exec_space_ = KokkosKernels::Impl::get_exec_space_type<MyExecSpace>();
 
   if (Base::KOKKOSKERNELS_VERBOSE) {

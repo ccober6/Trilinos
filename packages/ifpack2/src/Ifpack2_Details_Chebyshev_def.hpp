@@ -22,7 +22,8 @@
 #include "Ifpack2_Details_Chebyshev_Weights.hpp"
 // #include "Ifpack2_Details_ScaledDampedResidual.hpp"
 #include "Ifpack2_Details_ChebyshevKernel.hpp"
-#include "Kokkos_ArithTraits.hpp"
+#include "Ifpack2_Details_Behavior.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "Teuchos_FancyOStream.hpp"
 #include "Teuchos_oblackholestream.hpp"
 #include "Tpetra_Details_residual.hpp"
@@ -56,7 +57,7 @@ struct V_ReciprocalThresholdSelfFunctor {
   typedef typename XV::execution_space execution_space;
   typedef typename XV::non_const_value_type value_type;
   typedef SizeType size_type;
-  typedef Kokkos::ArithTraits<value_type> KAT;
+  typedef KokkosKernels::ArithTraits<value_type> KAT;
   typedef typename KAT::mag_type mag_type;
 
   XV X_;
@@ -104,7 +105,7 @@ struct GlobalReciprocalThreshold<TpetraVectorType, true> {
           const typename TpetraVectorType::scalar_type& min_val) {
     typedef typename TpetraVectorType::scalar_type scalar_type;
     typedef typename TpetraVectorType::mag_type mag_type;
-    typedef Kokkos::ArithTraits<scalar_type> STS;
+    typedef KokkosKernels::ArithTraits<scalar_type> STS;
 
     const scalar_type ONE      = STS::one();
     const mag_type min_val_abs = STS::abs(min_val);
@@ -146,8 +147,8 @@ void reciprocal_threshold(Tpetra::Vector<S, L, G, N>& V, const S& minVal) {
 template <class ScalarType, const bool lapackSupportsScalarType = LapackSupportsScalar<ScalarType>::value>
 struct LapackHelper {
   static ScalarType
-  tri_diag_spectral_radius(Teuchos::ArrayRCP<typename Teuchos::ScalarTraits<ScalarType>::magnitudeType> diag,
-                           Teuchos::ArrayRCP<typename Teuchos::ScalarTraits<ScalarType>::magnitudeType> offdiag) {
+  tri_diag_spectral_radius(Teuchos::ArrayRCP<typename Teuchos::ScalarTraits<ScalarType>::magnitudeType> /*diag*/,
+                           Teuchos::ArrayRCP<typename Teuchos::ScalarTraits<ScalarType>::magnitudeType> /*offdiag*/) {
     throw std::runtime_error("LAPACK does not support the scalar type.");
   }
 };
@@ -284,6 +285,7 @@ Chebyshev<ScalarType, MV>::
   , computeMaxResNorm_(false)
   , computeSpectralRadius_(true)
   , ckUseNativeSpMV_(MV::node_type::is_gpu)
+  , preAllocateTempVector_(true)
   , debug_(false) {
   checkConstructorInput();
 }
@@ -316,6 +318,7 @@ Chebyshev<ScalarType, MV>::
   , computeMaxResNorm_(false)
   , computeSpectralRadius_(true)
   , ckUseNativeSpMV_(MV::node_type::is_gpu)
+  , preAllocateTempVector_(true)
   , debug_(false) {
   checkConstructorInput();
   setParameters(params);
@@ -360,6 +363,7 @@ void Chebyshev<ScalarType, MV>::
   const bool defaultComputeMaxResNorm         = false;
   const bool defaultComputeSpectralRadius     = true;
   const bool defaultCkUseNativeSpMV           = MV::node_type::is_gpu;
+  const bool defaultPreAllocateTempVector     = true;
   const bool defaultDebug                     = false;
 
   // We'll set the instance data transactionally, after all reads
@@ -383,6 +387,7 @@ void Chebyshev<ScalarType, MV>::
   bool computeMaxResNorm         = defaultComputeMaxResNorm;
   bool computeSpectralRadius     = defaultComputeSpectralRadius;
   bool ckUseNativeSpMV           = defaultCkUseNativeSpMV;
+  bool preAllocateTempVector     = defaultPreAllocateTempVector;
   bool debug                     = defaultDebug;
 
   // Fetch the parameters from the ParameterList.  Defer all
@@ -458,6 +463,10 @@ void Chebyshev<ScalarType, MV>::
   // Load the kernel fuse override from the parameter list
   if (plist.isParameter("chebyshev: use native spmv"))
     ckUseNativeSpMV = plist.get("chebyshev: use native spmv", ckUseNativeSpMV);
+
+  // Load the pre-allocate overrride from the parameter list
+  if (plist.isParameter("chebyshev: pre-allocate temp vector"))
+    preAllocateTempVector = plist.get("chebyshev: pre-allocate temp vector", preAllocateTempVector);
 
   // Don't fill in defaults for the max or min eigenvalue, because
   // this class uses the existence of those parameters to determine
@@ -615,21 +624,6 @@ void Chebyshev<ScalarType, MV>::
         "Ifpack2::Chebyshev: Ifpack2 only supports \"first\", \"textbook\", \"fourth\", and \"opt_fourth\", for \"chebyshev: algorithm\".");
   }
 
-#ifdef IFPACK2_ENABLE_DEPRECATED_CODE
-  // to preserve behavior with previous input decks, only read "chebyshev:textbook algorithm" setting
-  // if a user has not specified "chebyshev: algorithm"
-  if (!plist.isParameter("chebyshev: algorithm")) {
-    if (plist.isParameter("chebyshev: textbook algorithm")) {
-      const bool textbookAlgorithm = plist.get<bool>("chebyshev: textbook algorithm");
-      if (textbookAlgorithm) {
-        chebyshevAlgorithm = "textbook";
-      } else {
-        chebyshevAlgorithm = "first";
-      }
-    }
-  }
-#endif
-
   if (plist.isParameter("chebyshev: compute max residual norm")) {
     computeMaxResNorm = plist.get<bool>("chebyshev: compute max residual norm");
   }
@@ -690,6 +684,7 @@ void Chebyshev<ScalarType, MV>::
   computeMaxResNorm_     = computeMaxResNorm;
   computeSpectralRadius_ = computeSpectralRadius;
   ckUseNativeSpMV_       = ckUseNativeSpMV;
+  preAllocateTempVector_ = preAllocateTempVector;
   debug_                 = debug;
 
   if (debug_) {
@@ -840,7 +835,7 @@ void Chebyshev<ScalarType, MV>::compute() {
 
   // Have we estimated eigenvalues before?
   const bool computedEigenvalueEstimates =
-      STS::isnaninf(computedLambdaMax_) || STS::isnaninf(computedLambdaMin_);
+      !(STS::isnaninf(computedLambdaMax_) || STS::isnaninf(computedLambdaMin_));
 
   // Only recompute the eigenvalue estimates if
   // - we are supposed to assume that the matrix may have changed, or
@@ -945,6 +940,25 @@ void Chebyshev<ScalarType, MV>::compute() {
       eigRatioForApply_  = one;  // Ifpack doesn't include this line.
     }
   }
+
+  // Allocate temporary vector
+  if (preAllocateTempVector_ && !D_.is_null()) {
+    makeTempMultiVector(*D_);
+    if (chebyshevAlgorithm_ == "fourth" || chebyshevAlgorithm_ == "opt_fourth") {
+      makeSecondTempMultiVector(*D_);
+    }
+  }
+
+  if (chebyshevAlgorithm_ == "textbook") {
+    // no-op
+  } else {
+    if (ck_.is_null()) {
+      ck_ = Teuchos::rcp(new ChebyshevKernel<op_type>(A_, ckUseNativeSpMV_));
+    }
+    if (ckUseNativeSpMV_) {
+      ck_->setAuxiliaryVectors(1);
+    }
+  }
 }
 
 template <class ScalarType, class MV>
@@ -1026,7 +1040,7 @@ void Chebyshev<ScalarType, MV>::
 template <class ScalarType, class MV>
 void Chebyshev<ScalarType, MV>::
     computeResidual(MV& R, const MV& B, const op_type& A, const MV& X,
-                    const Teuchos::ETransp mode) {
+                    const Teuchos::ETransp /*mode*/) {
   Tpetra::Details::residual(A, X, B, R);
 }
 
@@ -1100,8 +1114,8 @@ Chebyshev<ScalarType, MV>::
 
       typedef typename MV::impl_scalar_type IST;
       typedef typename MV::local_ordinal_type LO;
-      typedef Kokkos::ArithTraits<IST> ATS;
-      typedef Kokkos::ArithTraits<typename ATS::mag_type> STM;
+      typedef KokkosKernels::ArithTraits<IST> ATS;
+      typedef KokkosKernels::ArithTraits<typename ATS::mag_type> STM;
 
       const LO lclNumRows = static_cast<LO>(D_rangeMap->getLocalLength());
       for (LO i = 0; i < lclNumRows; ++i) {
@@ -1253,12 +1267,16 @@ void Chebyshev<ScalarType, MV>::
 
 template <class ScalarType, class MV>
 void Chebyshev<ScalarType, MV>::
-    fourthKindApplyImpl(const op_type& A,
+    fourthKindApplyImpl(const op_type& /*A*/,
                         const MV& B,
                         MV& X,
                         const int numIters,
                         const ST lambdaMax,
                         const V& D_inv) {
+  if (numIters <= 0) {
+    return;
+  }
+
   // standard 4th kind Chebyshev smoother has \beta_i := 1
   std::vector<ScalarType> betas(numIters, 1.0);
   if (chebyshevAlgorithm_ == "opt_fourth") {
@@ -1329,7 +1347,7 @@ Chebyshev<ScalarType, MV>::maxNormInf(const MV& X) {
 
 template <class ScalarType, class MV>
 void Chebyshev<ScalarType, MV>::
-    ifpackApplyImpl(const op_type& A,
+    ifpackApplyImpl(const op_type& /*A*/,
                     const MV& B,
                     MV& X,
                     const int numIters,
@@ -1338,11 +1356,7 @@ void Chebyshev<ScalarType, MV>::
                     const ST eigRatio,
                     const V& D_inv) {
   using std::endl;
-#ifdef HAVE_IFPACK2_DEBUG
-  const bool debug = debug_;
-#else
-  const bool debug = false;
-#endif
+  const bool debug = Ifpack2::Details::Behavior::debug() ? debug_ : false;
 
   if (debug) {
     *out_ << " \\|B\\|_{\\infty} = " << maxNormInf(B) << endl;

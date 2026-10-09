@@ -8,67 +8,66 @@ TRIBITS_ADD_EXECUTABLE_AND_TEST(
   STANDARD_PASS_OUTPUT
   )
 
-TRIBITS_ADD_EXECUTABLE_AND_TEST(
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
   Tpetra_BlockCG_hb_test
   SOURCES test_bl_cg_hb.cpp
+  ARGS "--verbose"
+       "--verbose --use-single-red"
+       "--verbose --num-rhs=2 --block-size=2"
   COMM serial mpi
-  ARGS
-    "--verbose"
   STANDARD_PASS_OUTPUT
-)
+  )
 
-TRIBITS_ADD_EXECUTABLE_AND_TEST(
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
   Tpetra_PseudoBlockCG_hb_test
   SOURCES test_pseudo_bl_cg_hb.cpp
   ARGS "--verbose"
   COMM serial mpi
+  )
+
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
+  Tpetra_PseudoBlockStochasticCG_hb_test
+  SOURCES test_pseudo_stochastic_cg_hb.cpp
+  ARGS "--verbose"
+  COMM serial mpi
+  )
+
+TRIBITS_ADD_EXECUTABLE_AND_TEST(
+  Tpetra_pseudo_cg_hb
+  SOURCES test_pseudo_cg_hb.cpp
+  COMM serial mpi
+  ARGS "--verbose --filename=bcsstk14.hb"
+  STANDARD_PASS_OUTPUT
 )
 
 TRIBITS_ADD_EXECUTABLE_AND_TEST(
-  Tpetra_PseudoBlockStochasticCG_hb_test
-  SOURCES test_pseudo_stochastic_cg_hb.cpp
-  ARGS
+  Tpetra_resolve_cg_hb
+  SOURCES test_resolve_cg_hb.cpp
   COMM serial mpi
+  ARGS "--verbose --filename=bcsstk14.hb"
+  STANDARD_PASS_OUTPUT
 )
 
-ASSERT_DEFINED(${PACKAGE_NAME}_ENABLE_Triutils)
-IF (${PACKAGE_NAME}_ENABLE_Triutils)
+ASSERT_DEFINED(Tpetra_INST_COMPLEX_DOUBLE)
+IF (Tpetra_INST_COMPLEX_DOUBLE)
 
-  TRIBITS_ADD_EXECUTABLE_AND_TEST(
-    Tpetra_pseudo_cg_hb
-    SOURCES test_pseudo_cg_hb.cpp 
+  BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
+    Tpetra_BlockCG_complex_hb_test
+    SOURCES test_cg_complex_hb.cpp
+    ARGS
+      "--verbose"
+      "--verbose --pseudo"
     COMM serial mpi
-    ARGS "--verbose --filename=bcsstk14.hb"
-    STANDARD_PASS_OUTPUT 
-  )
-
-  TRIBITS_ADD_EXECUTABLE_AND_TEST(
-    Tpetra_resolve_cg_hb
-    SOURCES test_resolve_cg_hb.cpp 
-    COMM serial mpi
-    ARGS "--verbose --filename=bcsstk14.hb"
-    STANDARD_PASS_OUTPUT 
-  )
-
-  ASSERT_DEFINED(Tpetra_INST_COMPLEX_DOUBLE)
-  IF (Tpetra_INST_COMPLEX_DOUBLE)
-
-    TRIBITS_ADD_EXECUTABLE_AND_TEST(
-      Tpetra_BlockCG_complex_hb_test
-      SOURCES test_bl_cg_complex_hb.cpp
-      ARGS "--verbose"
-      COMM serial mpi
     )
 
-    TRIBITS_COPY_FILES_TO_BINARY_DIR(
-      Tpetra_BlockCG_complex_hb_CopyFiles
-      SOURCE_DIR ${Belos_SOURCE_DIR}/testmatrices
-      SOURCE_FILES mhd1280b.cua
-      EXEDEPS Tpetra_BlockCG_complex_hb_test
+  TRIBITS_COPY_FILES_TO_BINARY_DIR(
+    Tpetra_BlockCG_complex_hb_CopyFiles
+    SOURCE_DIR ${Belos_SOURCE_DIR}/testmatrices
+    SOURCE_FILES mhd1280b.cua
+    EXEDEPS Tpetra_BlockCG_complex_hb_test
     )
 
-  ENDIF()
-ENDIF(${PACKAGE_NAME}_ENABLE_Triutils)
+ENDIF()
 
 TRIBITS_COPY_FILES_TO_BINARY_DIR(Tpetra_BlockCG_hb_CopyFiles2
   SOURCE_DIR ${Belos_SOURCE_DIR}/testmatrices

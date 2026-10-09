@@ -88,7 +88,12 @@ void user_app::addResponsesToModelEvaluatorFactory(const Teuchos::ParameterList&
       for(std::size_t i=0;i<eblocks.size();i++)
         wkst_descs.push_back(panzer::blockDescriptor(eblocks[i]));
 
-      me_factory.addResponse(name,wkst_descs,builder);
+      const bool add_derivatives = lst.isParameter("Request Derivatives") ? lst.get<bool>("Request Derivatives") : false;
+      if (add_derivatives) {
+        me_factory.addResponseWithDerivatives(name,wkst_descs,builder);
+      } else {
+        me_factory.addResponse(name,wkst_descs,builder);
+      }
     }
     else if (lst.get<std::string>("Type") == "Point Value") {
       panzer::ProbeResponse_Builder<panzer::LocalOrdinal,panzer::GlobalOrdinal> builder;
@@ -105,7 +110,12 @@ void user_app::addResponsesToModelEvaluatorFactory(const Teuchos::ParameterList&
       for(std::size_t i=0;i<eblocks.size();i++)
         descriptors.push_back(panzer::blockDescriptor(eblocks[i]));
 
-      me_factory.addResponse("Value In Middle",descriptors,builder);
+      const bool add_derivatives = lst.isParameter("Request Derivatives") ? lst.get<bool>("Request Derivatives") : false;
+      if (add_derivatives) {
+        me_factory.addResponseWithDerivatives("Value In Middle",descriptors,builder);
+      } else {
+        me_factory.addResponse("Value In Middle",descriptors,builder);
+      }
     }
     else {
       TEUCHOS_TEST_FOR_EXCEPTION(true,std::runtime_error,"Error: Response type of \"" << lst.get<std::string>("Type") << "\" is not supported!");
@@ -200,7 +210,7 @@ user_app::buildModelEvaluator(const Teuchos::RCP<Teuchos::ParameterList>& input_
     return {physics,global_data,mesh,rLibrary,stkIOResponseLibrary,linObjFactory,globalIndexer};
 }
 
-Teuchos::RCP<Tempus::IntegratorBasic<double>>
+Teuchos::RCP<Tempus::IntegratorForwardSensitivity<double>>
 user_app::buildTimeIntegrator(const Teuchos::RCP<Teuchos::ParameterList>& input_params,
                               const Teuchos::RCP<const Teuchos::Comm<int>>& comm,
                               Teuchos::RCP<Thyra::ModelEvaluator<double>> physics,
@@ -232,18 +242,17 @@ user_app::buildTimeIntegrator(const Teuchos::RCP<Teuchos::ParameterList>& input_
   // disableRecursiveValidation() to avoid errors with arbitrary
   // names.
 
-  const bool doInitialization = false;
-  auto integrator = createIntegratorBasic<double>(tempus_pl, physics, doInitialization);
+  auto integrator = createIntegratorForwardSensitivity<double>(tempus_pl, physics);
 
   RCP<ParameterList> noxList = parameterList("Correct NOX Params");
   *noxList = tempus_pl->sublist("My Example Stepper",true).sublist("My Example Solver",true).sublist("NOX",true);
-  // noxList->print(std::cout);
   integrator->getStepper()->getSolver()->setParameterList(noxList);
   integrator->initialize();
 
-  // Setting observers on tempus breaks the screen output of the
-  // time steps! It replaces IntegratorObserverBasic which handles
-  // IO. Is this at least documented?
+  // The observer replaces IntegratorObserverBasic, which prints the per time
+  // step screen output, so add it back alongside the mesh output observer.
+  // TempusObserver_WriteToExodus pulls the state block out of the forward
+  // sensitivity integrator's augmented solution before writing.
   {
     RCP<Tempus::IntegratorObserverComposite<double>> tempus_observers = rcp(new Tempus::IntegratorObserverComposite<double>);
     RCP<const panzer_stk::TempusObserverFactory> tof =
@@ -257,53 +266,4 @@ user_app::buildTimeIntegrator(const Teuchos::RCP<Teuchos::ParameterList>& input_
   integrator->initializeSolutionHistory(0.0, x0);
 
   return integrator;
-}
-
-std::tuple<int,int> user_app::findParameterIndex(const std::string& p_name,const Thyra::ModelEvaluator<double>& me)
-{
-  bool found = false;
-  int index = -1;
-  int sub_index = -1;
-  for (int p = 0; p < me.Np(); ++p) {
-    auto p_names = me.get_p_names(p);
-    for (Teuchos::Ordinal p_sub=0; p_sub < p_names->size(); ++p_sub) {
-      if ((*p_names)[p_sub] == p_name) {
-        found = true;
-        index = p;
-        sub_index = p_sub;
-        break;
-      }
-    }
-    if (found) break;
-  }
-
-  TEUCHOS_TEST_FOR_EXCEPTION(!found,std::runtime_error,
-    "ERROR: the parameter \"" << p_name << "\" is not a valid parameter name in the model evaluator!");
-
-  return {index,sub_index};
-}
-
-std::tuple<int,int> user_app::findResponseIndex(const std::string& g_name,const Thyra::ModelEvaluator<double>& me)
-{
-  bool found = false;
-  int index = -1;
-  int sub_index = -1;
-  for (int g = 0; g < me.Ng(); ++g) {
-    auto g_names = me.get_g_names(g);
-    for (Teuchos::Ordinal g_sub=0; g_sub < g_names.size(); ++g_sub) {
-      std::cout << "g(" << g << "," << g_sub << ")=" << g_names[g_sub] << std::endl;
-      if (g_names[g_sub] == g_name) {
-        found = true;
-        index = g;
-        sub_index = g_sub;
-        break;
-      }
-    }
-    if (found) break;
-  }
-
-  TEUCHOS_TEST_FOR_EXCEPTION(!found,std::runtime_error,
-    "ERROR: the response \"" << g_name << "\" is not a valid response name in the model evaluator!");
-  
-  return {index,sub_index};
 }

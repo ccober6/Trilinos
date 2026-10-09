@@ -1,11 +1,14 @@
 #include "user_app_Utilities.hpp"
 #include "Teuchos_StandardParameterEntryValidators.hpp"
+#include "Panzer_ModelEvaluator_Utilities.hpp"
+
 
 namespace ROL {
 
 template <typename Real>
 TransientReducedObjective<Real>::
 TransientReducedObjective(const Teuchos::RCP<Teuchos::ParameterList>& input_params,
+                          const Teuchos::RCP<Teuchos::ParameterList>& tempus_params,
                           const Teuchos::RCP<const Teuchos::Comm<int>>& comm,
                           const Teuchos::RCP<Teuchos::ParameterList>& objective_params,
                           const Teuchos::RCP<std::ostream>& os) :
@@ -15,6 +18,7 @@ TransientReducedObjective(const Teuchos::RCP<Teuchos::ParameterList>& input_para
   response_index_(0),
   use_fd_gradient_(false),
   input_params_(input_params),
+  tempus_params_(tempus_params),
   comm_(comm),
   os_(os),
   print_debug_(true)
@@ -48,8 +52,8 @@ TransientReducedObjective(const Teuchos::RCP<Teuchos::ParameterList>& input_para
   std::tie(model_,global_data_,mesh_,response_library_,stk_io_response_library_,lin_obj_factory_,global_indexer_) =
     user_app::buildModelEvaluator(input_params_,comm_);
 
-  param_index_ = std::get<0>(user_app::findParameterIndex(objective_params->get<std::string>("Parameter Name"),*model_));
-  response_index_ = std::get<0>(user_app::findResponseIndex(objective_params->get<std::string>("Response Name"),*model_));
+  param_index_ = std::get<0>(panzer::findParameterIndex(objective_params->get<std::string>("Parameter Name"),*model_));
+  response_index_ = std::get<0>(panzer::findResponseIndex(objective_params->get<std::string>("Response Name"),*model_));
 }
 
 template <typename Real>
@@ -288,12 +292,22 @@ run_tempus(const Thyra::ModelEvaluatorBase::InArgs<Real>&  inArgs,
   
   // Create and run integrator
   if (dgdp != Teuchos::null && sensitivity_method_ == "Forward") {
-    RCP<Tempus::IntegratorForwardSensitivity<Real> > integrator =
-      Tempus::createIntegratorForwardSensitivity<Real>(tempus_params_, wrapped_model);
-    const bool integratorStatus = integrator->advanceTime();
-    TEUCHOS_TEST_FOR_EXCEPTION(
-      !integratorStatus, std::logic_error, "Integrator failed!");
+    //RCP<Tempus::IntegratorForwardSensitivity<Real> > integrator =
+    //  Tempus::createIntegratorForwardSensitivity<Real>(tempus_params_, wrapped_model);
+    //const bool integratorStatus = integrator->advanceTime();
+    //TEUCHOS_TEST_FOR_EXCEPTION(
+    //  !integratorStatus, std::logic_error, "Integrator failed!");
 
+    auto input_params_copy = Teuchos::parameterList(*input_params_);
+    const bool override_nox_output = true;
+    auto integrator = user_app::buildTimeIntegrator(input_params_copy,comm_,wrapped_model,mesh_,response_library_,
+                                                    stk_io_response_library_,
+                                                    lin_obj_factory_,global_indexer_,
+                                                    override_nox_output);
+
+    bool integratorStatus = integrator->advanceTime();
+    TEUCHOS_ASSERT(integratorStatus);
+ 
     // Get final state
     t = integrator->getTime();
     x = integrator->getX();
@@ -384,6 +398,9 @@ run_tempus(const Thyra::ModelEvaluatorBase::InArgs<Real>&  inArgs,
   modelInArgs.set_x(x);
   if (modelInArgs.supports(MEB::IN_ARG_x_dot)) modelInArgs.set_x_dot(x_dot);
   if (modelInArgs.supports(MEB::IN_ARG_t)) modelInArgs.set_t(t);
+  // Need to think about how to set these - seems dependent on response
+  if (modelInArgs.supports(MEB::IN_ARG_alpha)) modelInArgs.set_alpha(0.0);
+  if (modelInArgs.supports(MEB::IN_ARG_beta)) modelInArgs.set_beta(1.0);
   RCP<Thyra::MultiVectorBase<Real> > dgdx, dgdxdot;
   MEB::EDerivativeMultiVectorOrientation dgdx_orientation =
     MEB::DERIV_MV_JACOBIAN_FORM;
@@ -450,6 +467,7 @@ run_tempus(const Thyra::ModelEvaluatorBase::InArgs<Real>&  inArgs,
     else
       dxdotdp->apply(Thyra::TRANS, *dgdxdot, dgdp.ptr(), Real(1.0), Real(1.0));
   }
+
 }
 
 } // namespace ROL

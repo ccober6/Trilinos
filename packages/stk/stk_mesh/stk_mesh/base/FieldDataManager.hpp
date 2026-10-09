@@ -36,6 +36,7 @@
 #define stk_mesh_FieldDataManager_hpp
 
 #include <stk_mesh/base/Types.hpp>      // for EntityRank, PartVector
+#include <stk_mesh/base/NgpTypes.hpp>
 #include <stk_util/util/FieldDataAllocator.hpp>
 #include "stk_mesh/base/Bucket.hpp"     // for Bucket
 #include <cstddef>
@@ -46,32 +47,15 @@ namespace stk { namespace mesh { class FieldBase; } }
 namespace stk {
 namespace mesh {
 
-class AllocatorAdaptorInterface {
-public:
-  virtual ~AllocatorAdaptorInterface() {}
-
-  using pointer = std::byte*;
-
-  virtual pointer allocate(size_t num, const void* = 0) = 0;
-  virtual void deallocate(pointer p, size_t num) = 0;
+struct FieldLayoutData
+{
+  int numBytesPerEntity {};
+  int numComponents {};
+  int numCopies {};
 };
 
-template<class AllocatorType>
-class AllocatorAdaptor : public AllocatorAdaptorInterface {
-public:
-  AllocatorAdaptor(){}
-  virtual ~AllocatorAdaptor(){}
-
-  pointer allocate(size_t num, const void* = 0) override {
-    return AllocatorType().allocate(num);
-  }
-
-  void deallocate(pointer p, size_t num) override {
-    AllocatorType().deallocate(p, num);
-  }
-};
-
-struct BucketFieldSegment {
+struct BucketFieldSegment
+{
   BucketFieldSegment(int offset_, int size_)
     : offset(offset_),
       size(size_)
@@ -81,69 +65,126 @@ struct BucketFieldSegment {
   int size;
 };
 
-
 class FieldDataManager
 {
 public:
-  FieldDataManager(const unsigned num_ranks,
-                   unsigned alignmentIncrementBytes = stk::impl::DEFAULT_FIELD_ALIGNMENT_BYTES,
-                   std::unique_ptr<AllocatorAdaptorInterface> allocatorAdaptor =
-                       std::unique_ptr<AllocatorAdaptorInterface>());
+  FieldDataManager(const unsigned numRanks,
+                   unsigned alignmentPaddingSize = STK_ALIGNMENT_PADDING_SIZE);
 
   ~FieldDataManager() = default;
 
-  void allocate_bucket_field_data(const EntityRank rank, const std::vector<FieldBase *> & fieldSet,
-                                  const PartVector& supersetParts, unsigned size, unsigned capacity);
+  // Called when creating new Bucket.  Initializes storage for all Fields.
+  void allocate_bucket_field_data(const EntityRank rank, const std::vector<FieldBase*>& fieldsOfRank,
+                                  const PartVector& supersetParts, unsigned totalNumFields, unsigned size,
+                                  unsigned capacity);
+
+  // Called when removing existing Bucket
   void deallocate_bucket_field_data(const EntityRank rank, const unsigned bucketId, const size_t capacity,
-                                    const std::vector<FieldBase*>&  fields);
-  void reorder_bucket_field_data(EntityRank rank, const std::vector<FieldBase*> & fields,
+                                    const std::vector<FieldBase*>& fieldsOfRank);
+
+  // Called when reordering buckets (leaving contents alone)
+  void reorder_bucket_field_data(EntityRank rank, const std::vector<FieldBase*>& fieldsOfRank,
                                  const std::vector<unsigned>& reorderedBucketIds);
+
+  // Called when initially allocating all Buckets.  Initializes storage for all Fields.
   void allocate_field_data(EntityRank rank, const std::vector<Bucket*>& buckets,
-                           const std::vector< FieldBase * > & fieldSet);
-  void reallocate_field_data(EntityRank rank, const std::vector<Bucket*>& buckets, FieldBase & currentField,
-                             const std::vector<FieldBase *> & allFields);
-  void add_field_data_for_entity(const std::vector<FieldBase *> &allFields, EntityRank dstRank,
+                           const std::vector<FieldBase*>& fieldsOfRank, unsigned totalNumFields);
+
+  // Called when adding a late Field or adding a Field to a late Part.  Initializes new storage.
+  void reallocate_field_data(EntityRank rank, const std::vector<Bucket*>& buckets, FieldBase& targetField,
+                             const std::vector<FieldBase*>& fieldsOfRank, unsigned totalNumFields);
+
+  // Called when adding an entity to a Bucket.  Adds space for new Entity but doesn't initialize the field data.
+  void add_field_data_for_entity(const std::vector<FieldBase*>& fieldsOfRank, EntityRank dstRank,
                                  unsigned dstBucketId, unsigned dstBucketOrd, unsigned newBucketSize);
+
+  // Initialize field data using initial values from the field objects
+  void initialize_entity_field_data(const std::vector<FieldBase*>& fieldsOfRank, EntityRank dstRank,
+                                    unsigned dstBucketId, unsigned dstBucketOrd, unsigned newBucketSize);
+
+  // Called when removing an entity from a Bucket.
   void remove_field_data_for_entity(EntityRank rank, unsigned bucketId, unsigned bucketOrd, unsigned newBucketSize,
-                                    const std::vector<FieldBase *> &allFields);
-  void initialize_entity_field_data(EntityRank rank, unsigned bucketId, unsigned bucketOrd, unsigned newBucketSize,
-                                    const std::vector<FieldBase *> &fields);
-  void grow_bucket_capacity(const FieldVector & allFields, EntityRank rank, unsigned bucketId,
+                                    const std::vector<FieldBase*>& fieldsOfRank);
+
+  // Called when growing a Bucket before adding an Entity
+  void grow_bucket_capacity(const FieldVector& fieldsOfRank, EntityRank rank, unsigned bucketId,
                             unsigned bucketSize, unsigned bucketCapacity);
+
+  // Updates STK_FIELD_ASAN memory poisoning around current active data
   void reset_empty_field_data(EntityRank rank, unsigned bucketId, unsigned bucketSize,
-                              unsigned bucketCapacity, const FieldVector & fields);
+                              unsigned bucketCapacity, const FieldVector& fieldsOfRank);
+
+  void initialize_field_on_entity(const stk::mesh::FieldBase& field, unsigned bucketId, unsigned bucketOrd);
 
   unsigned get_bucket_capacity(EntityRank rank, unsigned bucketId) const {
     return m_bucketCapacity[rank][bucketId];
   }
+
   size_t get_num_bytes_allocated_on_field(const unsigned fieldIndex) const {
     return m_numBytesAllocatedPerField[fieldIndex];
   }
-  unsigned get_alignment_bytes() const { return m_alignmentIncrementBytes; }
+
+  unsigned get_alignment_padding_size() const { return m_alignmentPaddingSize; }
+
+  const FieldDataAllocator<std::byte>& get_field_data_allocator() const { return m_fieldDataAllocator; }
 
 private:
+  const FieldMetaDataArrayType& field_meta_data_array(const FieldBase& field) const;
+  FieldMetaDataArrayType& field_meta_data_array(FieldBase& field);
+
+  void set_field_meta_data_array_on_field(FieldBase& field);
+
   void allocate_new_field_meta_data(const EntityRank rank, const unsigned bucketId,
-                                    const std::vector<FieldBase*>& allFields);
+                                    const std::vector<FieldBase*>& fieldsOfRank);
   void reallocate_bucket_field_data(const EntityRank rank, const unsigned bucketId, FieldBase & currentField,
-                                    const std::vector<FieldBase *> & allFields, const PartVector& supersetParts,
+                                    const std::vector<FieldBase*>& fieldsOfRank, const PartVector& supersetParts,
                                     unsigned bucketSize, unsigned bucketCapacity);
-  void allocate_bucket_ordinal_field_data(const EntityRank rank, const std::vector<FieldBase *> & fieldSet,
-                                          const PartVector& supersetParts, unsigned bucketOrd, unsigned size,
-                                          unsigned capacity);
-  void resize_bucket_arrays(const EntityRank rank, const std::vector<FieldBase*>& allFields, int newNumBuckets);
+  void allocate_bucket_ordinal_field_data(const EntityRank rank, const std::vector<FieldBase*>& fieldsOfRank,
+                                          const PartVector& supersetParts, unsigned totalNumFields, unsigned bucketOrd,
+                                          unsigned size, unsigned capacity);
+  void resize_bucket_arrays(const EntityRank rank, const std::vector<FieldBase*>& fieldsOfRank, int newNumBuckets);
+  void resize_field_arrays(int newNumFields);
+
+  void check_field_rank(const FieldBase* field, EntityRank expectedRank) const;
+  FieldLayoutData get_field_layout_data(const FieldBase& field, const EntityRank rank, const PartVector& supersetParts);
+  void update_field_pointer(FieldMetaData& fieldMetaData, const size_t capacity, size_t &currentFieldOffset,
+                            std::byte* allData, size_t alignmentPaddingSize);
+  void update_field_pointers_to_new_bucket(const EntityRank rank, const unsigned bucketId,
+                                           const std::vector<FieldBase*>& fieldsOfRank, const size_t capacity,
+                                           std::byte* newAllocationAllFields, unsigned alignmentPaddingSize);
+  void initialize_field_on_bucket(const stk::mesh::FieldBase& field, int bucketId, const FieldMetaData& fieldMetaData,
+                                  unsigned size, unsigned capacity);
+  template <typename EntityBytesType>
+  void copy_init_into_entity(EntityBytesType& entityBytes, const std::byte* initVal);
+  void initialize_new_field_values(const FieldBase& newField, const EntityRank rank, const unsigned bucketId,
+                                   unsigned size, unsigned capacity);
+  void resize_field_meta_data(FieldBase& field, int newSize);
+  void update_field_meta_data(const EntityRank rank, const unsigned bucketId, const std::vector<FieldBase*> & allFields,
+                              const PartVector & supersetParts, unsigned bucketSize, unsigned bucketCapacity);
+
+  void copy_field_data_from_old_to_new_bucket(EntityRank rank, unsigned bucketSize, unsigned bucketId,
+                                              const std::vector<FieldBase*>& fieldsOfRank,
+                                              const std::byte* oldAllocationAllFields,
+                                              std::byte* newAllocationAllFields,
+                                              const std::vector<BucketFieldSegment>& oldOffsetForField,
+                                              const std::vector<BucketFieldSegment>& newOffsetForField,
+                                              unsigned oldBucketCapacity, unsigned newBucketCapacity);
 
   std::vector<BucketFieldSegment> get_old_bucket_field_offsets(const EntityRank rank,
                                                                const unsigned bucketId,
-                                                               const std::vector<FieldBase*>& allFields,
+                                                               const std::vector<FieldBase*>& fieldsOfRank,
                                                                const unsigned capacity) const;
   std::vector<BucketFieldSegment> get_new_bucket_field_offsets(const EntityRank rank,
                                                                const unsigned bucketId,
-                                                               const std::vector<FieldBase*>& allFields,
+                                                               const std::vector<FieldBase*>& fieldsOfRank,
                                                                const unsigned capacity) const;
 
-  std::unique_ptr<AllocatorAdaptorInterface> m_fieldDataAllocator;
-  unsigned m_alignmentIncrementBytes;
-  std::vector<std::vector<std::byte*>> m_fieldRawData;
+  using AllocationType = FieldDataAllocator<std::byte>::HostAllocationType;
+
+  FieldDataAllocator<std::byte> m_fieldDataAllocator;
+  unsigned m_alignmentPaddingSize;
+  std::vector<FieldMetaDataArrayType> m_fieldMetaDataArrays;
+  std::vector<std::vector<AllocationType>> m_fieldRawData;
   std::vector<std::vector<unsigned>> m_bucketCapacity;
   std::vector<size_t> m_numBytesAllocatedPerField;
 };

@@ -214,7 +214,6 @@ namespace Stokhos {
 
     KokkosMatrixType kokkos_matrix = A.getLocalMatrixDevice();
     KokkosMatrixValuesType matrix_values = kokkos_matrix.values;
-    const size_t ncols = kokkos_matrix.numCols();
     typedef GetMeanValsFunc <KokkosMatrixValuesType > MeanFunc;
     typedef typename MeanFunc::MeanViewType KokkosMeanMatrixValuesType;
     MeanFunc meanfunc(matrix_values);
@@ -239,7 +238,6 @@ namespace Stokhos {
     typedef Tpetra::CrsMatrix<Scalar,LO,GO,N> MatrixType;
     typedef Tpetra::CrsMatrix<BaseScalar,LO,GO,N> ScalarMatrixType;
     typedef typename MatrixType::local_matrix_device_type KokkosMatrixType;
-    typedef typename ScalarMatrixType::local_matrix_device_type ScalarKokkosMatrixType;
     typedef typename KokkosMatrixType::values_type KokkosMatrixValuesType;
 
     KokkosMatrixType kokkos_matrix = A.getLocalMatrixDevice();
@@ -486,8 +484,6 @@ namespace Stokhos {
            Scalar alpha = Teuchos::ScalarTraits<Scalar>::one(),
            Scalar beta = Teuchos::ScalarTraits<Scalar>::zero()) const
     {
-      typedef typename scalar_mv_type::device_type device_type;
-
       auto xv = X.getLocalViewDevice(Tpetra::Access::ReadOnly);
       auto yv = Y.getLocalViewDevice(Tpetra::Access::ReadWrite);
       const size_t pce_size = Kokkos::dimension_scalar(xv);

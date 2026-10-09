@@ -10,7 +10,7 @@
 #define NOX_TPETRA_1DFEM_FUNCTORS_HPP
 
 #include "Kokkos_Core.hpp"
-#include "Kokkos_ArithTraits.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "Tpetra_Details_OrdinalTraits.hpp"
 
 template <class ViewType, class GO>
@@ -112,7 +112,7 @@ struct ResidualEvaluatorFunctor
   KOKKOS_INLINE_FUNCTION
   void operator() (const std::size_t row) const
   {
-    Scalar one = Kokkos::ArithTraits<Scalar>::one();
+    Scalar one = KokkosKernels::ArithTraits<Scalar>::one();
     fView_(row, 0) = one/(one - integralOpView_(row,0)) - uView_(row, 0);
   }
 
@@ -157,8 +157,8 @@ struct JacobianEvaluatorFunctor
   KOKKOS_INLINE_FUNCTION
   void operator() (const std::size_t row) const
   {
-    Scalar zero = Kokkos::ArithTraits<Scalar>::zero();
-    Scalar one = Kokkos::ArithTraits<Scalar>::one();
+    Scalar zero = KokkosKernels::ArithTraits<Scalar>::zero();
+    Scalar one = KokkosKernels::ArithTraits<Scalar>::one();
     Scalar value = omega_*integralOpXView_(row,0);
     value /= (2*globalLength_*(one-integralOpView_(row,0))*(one-integralOpView_(row,0)));
     if (beta_ == zero)
@@ -199,7 +199,7 @@ struct PreconditionerEvaluatorFunctor
   KOKKOS_INLINE_FUNCTION
   void operator() (const LO localRow) const
   {
-    Scalar one = Kokkos::ArithTraits<Scalar>::one();
+    Scalar one = KokkosKernels::ArithTraits<Scalar>::one();
     Scalar value = one - integralOpView_(localRow, 0);
     value = omega_/(4*numGlobalElements_*value*value) - one;
     value = 1.0/value;

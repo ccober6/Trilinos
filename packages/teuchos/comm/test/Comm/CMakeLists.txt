@@ -58,6 +58,28 @@ TRIBITS_ADD_EXECUTABLE_AND_TEST(
   )
 
 TRIBITS_ADD_EXECUTABLE_AND_TEST(
+  alltoall
+  SOURCES
+    alltoall.cpp
+    ${TEUCHOS_STD_UNIT_TEST_MAIN}
+  COMM serial mpi
+  NUM_MPI_PROCS 1-10
+  ARGS "--output-show-proc-rank --show-test-details=ALL"
+  STANDARD_PASS_OUTPUT
+  )
+
+TRIBITS_ADD_EXECUTABLE_AND_TEST(
+  alltoallv
+  SOURCES
+    alltoallv.cpp
+    ${TEUCHOS_STD_UNIT_TEST_MAIN}
+  COMM serial mpi
+  NUM_MPI_PROCS 1-10
+  ARGS "--output-show-proc-rank --show-test-details=ALL"
+  STANDARD_PASS_OUTPUT
+  )
+
+TRIBITS_ADD_EXECUTABLE_AND_TEST(
   reduce
   SOURCES
     reduce.cpp
@@ -170,3 +192,15 @@ TRIBITS_ADD_EXECUTABLE_AND_TEST(
   NUM_MPI_PROCS 4
   COMM mpi
 )
+
+
+TRIBITS_ADD_EXECUTABLE_AND_TEST(
+  messageTags
+  SOURCES
+    mpi_message_tags.cpp
+    ${TEUCHOS_STD_UNIT_TEST_MAIN}
+  COMM mpi
+  NUM_MPI_PROCS 2-10
+  ARGS "--globally-reduce-test-result --output-show-proc-rank --output-to-root-rank-only=-1"
+  STANDARD_PASS_OUTPUT
+  )

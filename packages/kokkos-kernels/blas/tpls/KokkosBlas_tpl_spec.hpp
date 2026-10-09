@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSBLAS_TPL_SPEC_HPP_
 #define KOKKOSBLAS_TPL_SPEC_HPP_
@@ -102,6 +89,16 @@ inline cublasOperation_t trans_mode_kk_to_cublas(const char kkMode[]) {
   else
     trans = CUBLAS_OP_C;
   return trans;
+}
+
+/// \brief This function converts KK side mode to cuBLAS side mode
+inline cublasSideMode_t side_mode_kk_to_cublas(const char kkMode[]) {
+  cublasSideMode_t side;
+  if ((kkMode[0] == 'L') || (kkMode[0] == 'l'))
+    side = CUBLAS_SIDE_LEFT;
+  else
+    side = CUBLAS_SIDE_RIGHT;
+  return side;
 }
 
 }  // namespace Impl
@@ -198,6 +195,19 @@ inline rocblas_operation trans_mode_kk_to_rocblas(const char kkMode[]) {
   else
     trans = rocblas_operation_conjugate_transpose;
   return trans;
+}
+
+/// \brief This function converts KK side mode to rocBLAS side mode
+inline rocblas_side side_mode_kk_to_rocblas(const char kkSide[]) {
+  rocblas_side side;
+  if (kkSide[0] == 'L' || kkSide[0] == 'l') {
+    side = rocblas_side_left;
+  } else if (kkSide[0] == 'R' || kkSide[0] == 'r') {
+    side = rocblas_side_right;
+  } else {
+    side = rocblas_side_both;
+  }
+  return side;
 }
 
 }  // namespace Impl

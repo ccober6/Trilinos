@@ -64,11 +64,11 @@ public:
   std::string locally_check_leaf_children_have_parents_on_same_proc() const;
 
   FieldRef get_marker_field_and_sync_to_host() const;
-  bool require_post_refinement_fixups() const { return false; };
 
   bool do_refinement(const int debugLevel = 0);
 
   bool do_uniform_refinement(const int numUniformRefinementLevels);
+  bool do_rebalance();
 
   void restore_after_restart();
   void set_marker_field(const std::string & markerFieldName);

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #include "KokkosKernels_Utils.hpp"
 
@@ -496,7 +483,8 @@ void KokkosBSPGEMM<
     int num_chunks                             = this->concurrency;
 
     Kokkos::Timer timer1;
-    const size_t chunk_size = this->b_col_cnt * block_dim * block_dim + this->b_col_cnt / sizeof(scalar_t) + 1;
+    const size_t chunk_size =
+        this->b_col_cnt * static_cast<size_t>(block_dim) * block_dim + this->b_col_cnt / sizeof(scalar_t) + 1;
     pool_memory_space m_space(num_chunks, chunk_size, 0, my_pool_type);
     MyExecSpace().fence();
 

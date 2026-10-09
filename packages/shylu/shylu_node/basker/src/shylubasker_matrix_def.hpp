@@ -14,14 +14,9 @@
 #include "shylubasker_types.hpp"
 #include "shylubasker_util.hpp"
 
-#ifdef BASKER_KOKKOS
-#include <Kokkos_Core.hpp>
-#include <Kokkos_Timer.hpp>
-#else
-#include <omp.h>
-#endif
+#include "Kokkos_Core.hpp"
+#include "Kokkos_Timer.hpp"
 #include "Teuchos_ScalarTraits.hpp"
-
 
 #include <iostream>
 
@@ -38,11 +33,8 @@ namespace BaskerNS
     mnnz    = 0;
     v_fill  = BASKER_FALSE;
     tpivot  = 0;
-    #ifdef BASKER_2DL
     p_size  = 0;
     w_fill  = BASKER_FALSE;
-    #endif
-    inc_lvl_flg = BASKER_FALSE;
     anorm = -1.0;
     gnorm = -1.0;
     //printf("matrix init\n");
@@ -58,11 +50,8 @@ namespace BaskerNS
     nnz     = 0;
     v_fill  = BASKER_FALSE;
     tpivot  = 0;
-    #ifdef BASKER_2DL
     p_size  = 0;
     w_fill  = BASKER_FALSE;
-    #endif
-    inc_lvl_flg = BASKER_FALSE;
     anorm = -1.0;
     gnorm = -1.0;
   }//end BaskerMatrix(label)
@@ -78,10 +67,8 @@ namespace BaskerNS
     tpivot = 0;
     anorm = -1.0;
     gnorm = -1.0;
-    #ifdef BASKER_2DL
     p_size = 0;
     w_fill = BASKER_FALSE;
-    #endif
 
     v_fill = BASKER_FALSE;
     init_matrix("matrix", _m,_n,_nnz, colptr, rowind, nzval);
@@ -98,10 +85,8 @@ namespace BaskerNS
     tpivot = 0;
     anorm = -1.0;
     gnorm = -1.0;
-    #ifdef BASKER_2DL
     p_size = 0;
     w_fill = BASKER_FALSE;
-    #endif
 
     v_fill = BASKER_FALSE;
     init_matrix(_label, _m,_n,_nnz, colptr, rowind, nzval);
@@ -132,12 +117,6 @@ namespace BaskerNS
       FREE_INT_1DARRAY(iws);
       FREE_ENTRY_1DARRAY(ews);
       w_fill = BASKER_FALSE;
-    }
-
-    if(inc_lvl_flg == BASKER_TRUE)
-    {
-      FREE_INT_1DARRAY(inc_lvl);
-      inc_lvl_flg = BASKER_FALSE;
     }
   }//end finalize()
 
@@ -238,9 +217,6 @@ namespace BaskerNS
       BASKER_ASSERT(nnz > 0, "matrix init_vector nnz");
       MALLOC_INT_1DARRAY(row_idx,nnz);
       MALLOC_ENTRY_1DARRAY(val,nnz);
-#ifdef BASKER_INC_LVL
-      MALLOC_INT_1DARRAY(inc_lvl, nnz);
-#endif
     }
     else if(nnz==0)
     {
@@ -249,9 +225,6 @@ namespace BaskerNS
       row_idx(0) = (Int) 0;
       MALLOC_ENTRY_1DARRAY(val, nnz+1);
       val(0) = (Entry) 0;
-#ifdef BASKER_INC_LVL
-      MALLOC_INT_1DARRAY(inc_lvl, nnz+1);
-#endif
     }
 
   }//end init_vectors(Int, Int, Int)
@@ -487,17 +460,6 @@ namespace BaskerNS
       val(i) = 0;
     }
     #endif
-
-    //#ifdef BASKER_INC_LVL
-    if(inc_lvl_flg == BASKER_TRUE)
-    {
-      for(Int i = 0; i < nnz; i++)
-      {
-        inc_lvl(i) = 0;
-      }
-    }
-    //#endif
-
     v_fill = BASKER_TRUE;
     return 0;
   }
@@ -567,7 +529,7 @@ namespace BaskerNS
 
     const Entry zero(0.0);
 
-    anorm = abs(zero);
+    anorm = std::abs(zero);
     Int temp_count = 0;
     for(Int k = scol; k < scol+ncol; ++k)
     {
@@ -591,7 +553,7 @@ namespace BaskerNS
             // if all were zero, then add the last entry to avoid empty column.
             row_idx(temp_count) = M.row_idx(i-1)-srow;
             val(temp_count) = M.val(i-1);
-            anorm_k += abs(M.val(i-1));
+            anorm_k += std::abs(M.val(i-1));
             temp_count++;
           }
           break;
@@ -618,7 +580,7 @@ namespace BaskerNS
           row_idx(temp_count) = j-srow;
           val(temp_count) = M.val(i);
 
-          anorm_k += abs(M.val(i));
+          anorm_k += std::abs(M.val(i));
           temp_count++;
           kept_count ++;
         } else {
@@ -638,14 +600,6 @@ namespace BaskerNS
     col_ptr(0) = (Int) 0;
 
   }//end convert2d(Matrix)
-
-  template <class Int, class Entry, class Exe_Space>
-  BASKER_INLINE
-  void BaskerMatrix<Int,Entry,Exe_Space>::init_inc_lvl()
-  {
-    MALLOC_INT_1DARRAY(inc_lvl, nnz+1);
-    inc_lvl_flg = BASKER_TRUE;
-  }
 
   template <class Int, class Entry, class Exe_Space>
   BASKER_INLINE
@@ -692,13 +646,15 @@ namespace BaskerNS
   
   template <class Int, class Entry, class Exe_Space>
   BASKER_INLINE
-  void BaskerMatrix<Int,Entry,Exe_Space>::print_matrix(const char *filename)
+  void BaskerMatrix<Int,Entry,Exe_Space>::print_matrix(const char *filename, const int base)
   {
     FILE *fp = fopen(filename, "w");
     if (nrow > 0 && ncol > 0) {
       for(Int j = 0; j < ncol; j++) {
         for(Int k = col_ptr[j]; k < col_ptr[j+1]; k++) {
-          fprintf(fp,"%d %d %.16e\n", (int)row_idx[k], (int)j, val[k]);
+          int row = base+row_idx[k];
+          int col = base+j;
+          fprintf(fp,"%d %d %.16e\n", row, col, val[k]);
         }
       }
     }

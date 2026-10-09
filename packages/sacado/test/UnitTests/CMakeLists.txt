@@ -35,6 +35,7 @@ IF (Sacado_ENABLE_TeuchosCore)
       ARGS
       COMM serial mpi
       STANDARD_PASS_OUTPUT
+      RUN_SERIAL
       )
 
     TRIBITS_ADD_EXECUTABLE_AND_TEST(
@@ -43,6 +44,7 @@ IF (Sacado_ENABLE_TeuchosCore)
       ARGS
       COMM serial mpi
       STANDARD_PASS_OUTPUT
+      RUN_SERIAL
       )
 
     TRIBITS_ADD_EXECUTABLE_AND_TEST(
@@ -51,6 +53,7 @@ IF (Sacado_ENABLE_TeuchosCore)
       ARGS
       COMM serial mpi
       STANDARD_PASS_OUTPUT
+      RUN_SERIAL
       )
 
     TRIBITS_ADD_EXECUTABLE_AND_TEST(
@@ -59,6 +62,7 @@ IF (Sacado_ENABLE_TeuchosCore)
       ARGS
       COMM serial mpi
       STANDARD_PASS_OUTPUT
+      RUN_SERIAL
       )
 
     TRIBITS_ADD_EXECUTABLE_AND_TEST(
@@ -68,6 +72,7 @@ IF (Sacado_ENABLE_TeuchosCore)
       COMM serial mpi
       STANDARD_PASS_OUTPUT
       XHOSTTYPE Windows Windows_NT
+      RUN_SERIAL
       )
 
   ENDIF()
@@ -82,6 +87,7 @@ IF (Sacado_ENABLE_TeuchosCore)
           ARGS
           COMM serial mpi
           STANDARD_PASS_OUTPUT
+          RUN_SERIAL
           )
       ENDIF()
 
@@ -89,6 +95,14 @@ IF (Sacado_ENABLE_TeuchosCore)
         FadKokkosTests_Serial
         SOURCES Fad_KokkosTests.hpp
                 Fad_KokkosTests_Serial.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        )
+      
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+	FadKokkosTests_ViewCornerCases
+	SOURCES Fad_KokkosTests_ViewCornerCases.cpp
         COMM serial mpi
         STANDARD_PASS_OUTPUT
         NUM_MPI_PROCS 1
@@ -139,6 +153,7 @@ IF (Sacado_ENABLE_TeuchosCore)
           ARGS
           COMM serial mpi
           STANDARD_PASS_OUTPUT
+          RUN_SERIAL
           )
       ENDIF()
 
@@ -201,6 +216,7 @@ IF (Sacado_ENABLE_TeuchosCore)
           ARGS
           COMM serial mpi
           STANDARD_PASS_OUTPUT
+          RUN_SERIAL
           )
       ENDIF()
 
@@ -263,6 +279,7 @@ IF (Sacado_ENABLE_TeuchosCore)
           ARGS
           COMM serial mpi
           STANDARD_PASS_OUTPUT
+          RUN_SERIAL
           )
       ENDIF()
 
@@ -385,6 +402,7 @@ IF (Sacado_ENABLE_TeuchosCore)
           ARGS
           COMM serial mpi
           STANDARD_PASS_OUTPUT
+          RUN_SERIAL
           )
       ENDIF()
 
@@ -497,6 +515,122 @@ IF (Sacado_ENABLE_TeuchosCore)
 #        NUM_MPI_PROCS 1
 #        RUN_SERIAL
 #        )
+    ENDIF()
+
+    IF (Kokkos_ENABLE_SYCL)
+      IF (Sacado_ENABLE_TeuchosKokkosComm)
+        TRIBITS_ADD_EXECUTABLE_AND_TEST(
+          Fad_Kokkos_CommTests_SYCL
+          SOURCES Fad_Kokkos_CommTests_SYCL.cpp Fad_CommTests.hpp ${UTILS_SOURCES}
+          ARGS
+          COMM serial mpi
+          STANDARD_PASS_OUTPUT
+          RUN_SERIAL
+          )
+      ENDIF()
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosTests_SYCL
+        SOURCES Fad_KokkosTests.hpp
+                Fad_KokkosTests_SYCL.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosTests_DFad_SYCL
+        SOURCES Fad_KokkosTests.hpp
+                Fad_KokkosTests_DFad_SYCL.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosTests_SYCL_Hierarchical
+        SOURCES Fad_KokkosTests.hpp
+                Fad_KokkosTests_SYCL_Hierarchical.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosTests_SYCL_Hierarchical_SFad
+        SOURCES Fad_KokkosTests.hpp
+                Fad_KokkosTests_SYCL_Hierarchical_SFad.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosTests_SYCL_Hierarchical_SFad_Large
+        SOURCES Fad_KokkosTests.hpp
+                Fad_KokkosTests_SYCL_Hierarchical_SFad_Large.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosTests_SYCL_Hierarchical_DFad
+        SOURCES Fad_KokkosTests.hpp
+                Fad_KokkosTests_SYCL_Hierarchical_DFad.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosTests_NoViewSpec_SYCL
+        SOURCES Fad_KokkosTests.hpp
+                Fad_KokkosTests_NoViewSpec_SYCL.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosAtomicTests_SYCL
+        SOURCES Fad_KokkosAtomicTests.hpp
+                Fad_KokkosAtomicTests_SYCL.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        FadKokkosAtomicTests_NoViewSpec_SYCL
+        SOURCES Fad_KokkosAtomicTests.hpp
+                Fad_KokkosAtomicTests_NoViewSpec_SYCL.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
+
+      # Diagnostic probe, not a correctness test:  reports the actual vector
+      # width of a TeamPolicy on this device and validates that the oneAPI
+      # free-function work-item queries give the thread indices the
+      # hierarchical Fad code needs.
+      TRIBITS_ADD_EXECUTABLE_AND_TEST(
+        SyclIndexProbe
+        SOURCES SyclIndexProbe.cpp
+        COMM serial mpi
+        STANDARD_PASS_OUTPUT
+        NUM_MPI_PROCS 1
+        RUN_SERIAL
+        )
     ENDIF()
 
     TRIBITS_ADD_EXECUTABLE_AND_TEST(

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #include "gtest/gtest.h"
 #include "Kokkos_Core.hpp"
 #include "Kokkos_Random.hpp"
@@ -33,7 +20,7 @@ void impl_test_batched_gemm_with_handle(BatchedGemmHandle* batchedGemmHandle, co
   using transA          = typename ParamTagType::transA;
   using transB          = typename ParamTagType::transB;
   using batchLayout     = typename ParamTagType::batchLayout;
-  using ats             = Kokkos::ArithTraits<ScalarType>;
+  using ats             = KokkosKernels::ArithTraits<ScalarType>;
 
   int ret        = 0;
   auto algo_type = batchedGemmHandle->get_kernel_algo_type();
@@ -78,8 +65,9 @@ void impl_test_batched_gemm_with_handle(BatchedGemmHandle* batchedGemmHandle, co
     // Check for DblBuf runtime errors related to team_size
     try {
       fmsg = kk_failure_str(__FILE__, __FUNCTION__, __LINE__);
-      Impl::BatchedDblBufGemm<transA, transB, batchLayout, BatchedGemmHandle, ScalarType, decltype(a_actual),
-                              decltype(b_actual), decltype(c_actual), BoundsCheck::Yes, AlphaTag::No, 65536, 1, 65536>(
+      KokkosBatched::Impl::BatchedDblBufGemm<transA, transB, batchLayout, BatchedGemmHandle, ScalarType,
+                                             decltype(a_actual), decltype(b_actual), decltype(c_actual),
+                                             BoundsCheck::Yes, AlphaTag::No, 65536, 1, 65536>(
           batchedGemmHandle, alpha, a_actual, b_actual, beta, c_actual)
           .invoke();
       FAIL() << (fmsg + fmsg_rhs);
@@ -89,9 +77,10 @@ void impl_test_batched_gemm_with_handle(BatchedGemmHandle* batchedGemmHandle, co
     // Check for DblBuf runtime errors related to vector_len
     try {
       fmsg = kk_failure_str(__FILE__, __FUNCTION__, __LINE__);
-      Impl::BatchedDblBufGemm<transA, transB, batchLayout, BatchedGemmHandle, ScalarType, decltype(a_actual),
-                              decltype(b_actual), decltype(c_actual), BoundsCheck::No, AlphaTag::No, 65536, 65536 * 2,
-                              65536>(batchedGemmHandle, alpha, a_actual, b_actual, beta, c_actual)
+      KokkosBatched::Impl::BatchedDblBufGemm<transA, transB, batchLayout, BatchedGemmHandle, ScalarType,
+                                             decltype(a_actual), decltype(b_actual), decltype(c_actual),
+                                             BoundsCheck::No, AlphaTag::No, 65536, 65536 * 2, 65536>(
+          batchedGemmHandle, alpha, a_actual, b_actual, beta, c_actual)
           .invoke();
       FAIL() << (fmsg + fmsg_rhs);
     } catch (const std::runtime_error& error) {
@@ -146,8 +135,8 @@ void impl_test_batched_gemm_with_handle(BatchedGemmHandle* batchedGemmHandle, co
 
   Kokkos::fence();
 
-  typename ViewType::HostMirror c_expected_host = Kokkos::create_mirror_view(c_expected);
-  typename ViewType::HostMirror c_actual_host   = Kokkos::create_mirror_view(c_actual);
+  typename ViewType::host_mirror_type c_expected_host = Kokkos::create_mirror_view(c_expected);
+  typename ViewType::host_mirror_type c_actual_host   = Kokkos::create_mirror_view(c_actual);
 
   // Copy to host
   Kokkos::deep_copy(c_expected_host, c_expected);
@@ -288,9 +277,9 @@ void test_batched_gemm_with_layout(int N) {
 
   // Non-square cases
   for (int i = 1; i < 5; ++i) {
-    int dimM = 1 * i;
+    int dimM = 3 * i;
     int dimN = 2 * i;
-    int dimK = 3 * i;
+    int dimK = i;
     if ((std::is_same<typename ParamTagType::transA, KokkosBatched::Trans::NoTranspose>::value) &&
         (std::is_same<typename ParamTagType::transB, KokkosBatched::Trans::NoTranspose>::value)) {
       Test::impl_test_batched_gemm<DeviceType, ViewType, ScalarType, ParamTagType>(N, dimM, dimK, dimK, dimN, dimM,

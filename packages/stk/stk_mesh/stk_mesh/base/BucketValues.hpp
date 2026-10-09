@@ -47,25 +47,34 @@ namespace stk::mesh {
 // Device BucketValues
 //==============================================================================
 
-template <typename T, typename MemSpace = stk::ngp::HostMemSpace,
-          Layout DataLayout = DefaultLayoutSelector<MemSpace>::layout>
-class BucketValues {
+template <typename T, typename Space = stk::ngp::HostSpace,
+          Layout DataLayout = DefaultLayoutSelector<Space>::layout>
+class BucketValues
+{
 public:
   using value_type = T;
-  using mem_space = MemSpace;
+  using space = Space;
+  using exec_space = typename Space::exec_space;
+  using mem_space = typename Space::mem_space;
   static constexpr Layout layout = DataLayout;
 
   KOKKOS_INLINE_FUNCTION BucketValues(T* dataPtr, int numComponents, int numCopies, int numEntities,
                                       int scalarStride, [[maybe_unused]] const char* fieldName)
     : m_dataPtr(dataPtr),
-#ifdef STK_FIELD_BOUNDS_CHECK
+    #ifdef STK_FIELD_BOUNDS_CHECK
       m_fieldName(fieldName),
-#endif
+    #endif
       m_numComponents(numComponents),
       m_numCopies(numCopies),
       m_numEntities(numEntities),
       m_scalarStride(scalarStride)
   {}
+
+  KOKKOS_DEFAULTED_FUNCTION BucketValues() = default;
+  KOKKOS_DEFAULTED_FUNCTION BucketValues(const BucketValues&) = default;
+  KOKKOS_DEFAULTED_FUNCTION BucketValues(BucketValues&&) = default;
+  KOKKOS_DEFAULTED_FUNCTION BucketValues& operator=(const BucketValues&) = default;
+  KOKKOS_DEFAULTED_FUNCTION BucketValues& operator=(BucketValues&&) = default;
 
   KOKKOS_DEFAULTED_FUNCTION ~BucketValues() = default;
 
@@ -128,7 +137,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_component_bounds(component, file, line);
 
-    return m_dataPtr[static_cast<int>(component)*m_scalarStride + static_cast<int>(entity)];
+    return m_dataPtr[component()*m_scalarStride + entity()];
   }
 
   KOKKOS_INLINE_FUNCTION T& operator()(EntityIdx entity, CopyIdx copy,
@@ -139,7 +148,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_copy_bounds(copy, file, line);
 
-    return m_dataPtr[static_cast<int>(copy)*m_scalarStride + static_cast<int>(entity)];
+    return m_dataPtr[copy()*m_scalarStride + entity()];
   }
 
   KOKKOS_INLINE_FUNCTION T& operator()(EntityIdx entity, CopyIdx copy, ComponentIdx component,
@@ -149,8 +158,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_copy_and_component_bounds(copy, component, file, line);
 
-    return m_dataPtr[(static_cast<int>(copy)*m_numComponents + static_cast<int>(component))*m_scalarStride +
-                     static_cast<int>(entity)];
+    return m_dataPtr[(copy()*m_numComponents + component())*m_scalarStride + entity()];
   }
 
   KOKKOS_INLINE_FUNCTION T& operator()(EntityIdx entity, ScalarIdx scalar,
@@ -160,7 +168,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_scalar_bounds(scalar, file, line);
 
-    return m_dataPtr[static_cast<int>(scalar)*m_scalarStride + static_cast<int>(entity)];
+    return m_dataPtr[scalar()*m_scalarStride + entity()];
   }
 
 
@@ -199,7 +207,7 @@ private:
 #ifdef STK_FIELD_BOUNDS_CHECK
   KOKKOS_INLINE_FUNCTION void check_defined_field(const char* file, int line) const {
     if (not is_field_defined()) {
-      if (line == -1) {
+      if (line == 0) {
         printf("Error: Accessing BucketValues for Field '%s' that is not defined on this Bucket.\n", m_fieldName);
       }
       else {
@@ -211,7 +219,7 @@ private:
   }
   KOKKOS_INLINE_FUNCTION void check_single_scalar_access(const char* file, int line) const {
     if (m_numCopies*m_numComponents != 1) {
-      if (line == -1) {
+      if (line == 0) {
         printf("Error: Accessing BucketValues for Field '%s' as a scalar when it has %i components and %i copies. "
                " Please use a Bucket operator() that takes appropriate index arguments.\n", m_fieldName,
                m_numComponents, m_numCopies);
@@ -226,7 +234,7 @@ private:
   }
   KOKKOS_INLINE_FUNCTION void check_single_component_access(const char* file, int line) const {
     if (m_numComponents != 1) {
-      if (line == -1) {
+      if (line == 0) {
         printf("Error: Accessing BucketValues for Field '%s' as if it only has one component when it actually"
                " has %i components.  Please use a Bucket operator() that also has a component argument.\n",
                m_fieldName, m_numComponents);
@@ -241,7 +249,7 @@ private:
   }
   KOKKOS_INLINE_FUNCTION void check_single_copy_access(const char* file, int line) const {
     if (m_numCopies != 1) {
-      if (line == -1) {
+      if (line == 0) {
         printf("Error: Accessing BucketValues for Field '%s' as if it only has one copy when it actually"
                " has %i copies.  Please use a Bucket operator() that also has a copy argument.\n",
                m_fieldName, m_numCopies);
@@ -256,7 +264,7 @@ private:
   }
   KOKKOS_INLINE_FUNCTION void check_component_bounds(int component, const char* file, int line) const {
     if ((component < 0) || (component >= m_numComponents)) {
-      if (line == -1) {
+      if (line == 0) {
         printf("Error: Out-of-bounds access to BucketValues for Field '%s' with component index %i for a"
                " Bucket with %i components.\n", m_fieldName, component, m_numComponents);
       }
@@ -269,7 +277,7 @@ private:
   }
   KOKKOS_INLINE_FUNCTION void check_copy_bounds(int copy, const char* file, int line) const {
     if ((copy < 0) || (copy >= m_numCopies)) {
-      if (line == -1) {
+      if (line == 0) {
         printf("Error: Out-of-bounds access to BucketValues for Field '%s' with copy index %i for a Bucket"
                " with %i copies.\n", m_fieldName, copy, m_numCopies);
       }
@@ -283,7 +291,7 @@ private:
   KOKKOS_INLINE_FUNCTION void check_copy_and_component_bounds(int copy, int component, const char* file,
                                                               int line) const {
     if (((copy < 0) || (copy >= m_numCopies)) || ((component < 0) || (component >= m_numComponents))) {
-      if (line == -1) {
+      if (line == 0) {
         printf("Error: Out-of-bounds access to BucketValues for Field '%s' with component index %i and copy"
                " index %i for a Bucket with %i components and %i copies.\n", m_fieldName, component, copy,
                m_numComponents, m_numCopies);
@@ -298,7 +306,7 @@ private:
   }
   KOKKOS_INLINE_FUNCTION void check_scalar_bounds(int scalar, const char* file, int line) const {
     if ((scalar < 0) || (scalar >= m_numCopies*m_numComponents)) {
-      if (line == -1) {
+      if (line == 0) {
         printf("Error: Out-of-bounds access to BucketValues for Field '%s' with scalar index %i for a"
                " Bucket with %i scalars.\n", m_fieldName, scalar, m_numCopies*m_numComponents);
       }
@@ -310,8 +318,8 @@ private:
     }
   }
   KOKKOS_INLINE_FUNCTION void check_entity_bounds(int entity, const char* file, int line) const {
-    if ((static_cast<int>(entity) < 0) || (static_cast<int>(entity) >= m_numEntities)) {
-      if (line == -1) {
+    if ((entity < 0) || (entity >= m_numEntities)) {
+      if (line == 0) {
         printf("Error: Out-of-bounds access to BucketValues for Field '%s' with Entity index %i for a Bucket"
                " with %i Entities.\n", m_fieldName, entity, m_numEntities);
       }
@@ -365,18 +373,31 @@ private:
 //==============================================================================
 
 template<typename T>
-class BucketValues<T, stk::ngp::HostMemSpace, Layout::Right> {
+class BucketValues<T, stk::ngp::HostSpace, Layout::Right>
+{
 public:
+  using value_type = T;
+  using space = stk::ngp::HostSpace;
+  using mem_space = stk::ngp::HostSpace::mem_space;
+  using exec_space = stk::ngp::HostSpace::exec_space;
+  static constexpr Layout layout = Layout::Right;
+
   inline BucketValues(T* dataPtr, int numComponents, int numCopies, int numEntities,
                       [[maybe_unused]] const char* fieldName)
     : m_dataPtr(dataPtr),
-#ifdef STK_FIELD_BOUNDS_CHECK
+    #ifdef STK_FIELD_BOUNDS_CHECK
       m_fieldName(fieldName),
-#endif
+    #endif
       m_numComponents(numComponents),
       m_numCopies(numCopies),
       m_numEntities(numEntities)
   {}
+
+  BucketValues() = default;
+  BucketValues(const BucketValues&) = default;
+  BucketValues(BucketValues&&) = default;
+  BucketValues& operator=(const BucketValues&) = default;
+  BucketValues& operator=(BucketValues&&) = default;
 
   ~BucketValues() = default;
 
@@ -439,7 +460,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_component_bounds(component, file, line);
 
-    return m_dataPtr[static_cast<int>(entity)*m_numComponents + static_cast<int>(component)];
+    return m_dataPtr[entity()*m_numComponents + component()];
   }
 
   inline T& operator()(EntityIdx entity, CopyIdx copy,
@@ -450,7 +471,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_copy_bounds(copy, file, line);
 
-    return m_dataPtr[static_cast<int>(entity)*m_numCopies + static_cast<int>(copy)];
+    return m_dataPtr[entity()*m_numCopies + copy()];
   }
 
   inline T& operator()(EntityIdx entity, CopyIdx copy, ComponentIdx component,
@@ -460,8 +481,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_copy_and_component_bounds(copy, component, file, line);
 
-    return m_dataPtr[(static_cast<int>(entity)*m_numCopies + static_cast<int>(copy))*m_numComponents +
-                     static_cast<int>(component)];
+    return m_dataPtr[(entity()*m_numCopies + copy())*m_numComponents + component()];
   }
 
   inline T& operator()(EntityIdx entity, ScalarIdx scalar,
@@ -471,7 +491,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_scalar_bounds(scalar, file, line);
 
-    return m_dataPtr[static_cast<int>(entity)*m_numCopies*m_numComponents + static_cast<int>(scalar)];
+    return m_dataPtr[entity()*m_numCopies*m_numComponents + scalar()];
   }
 
 
@@ -508,69 +528,56 @@ public:
 
 private:
 #ifdef STK_FIELD_BOUNDS_CHECK
-  inline std::string location_string(const char* file, int line) const {
-    if (line != -1) {
-      std::string fileName(file);
-      std::size_t pathDelimeter = fileName.find_last_of("/");
-      if (pathDelimeter < fileName.size()) {
-        fileName = fileName.substr(pathDelimeter+1);
-      }
-      return fileName + ":" + std::to_string(line) + ": ";
-    }
-    else {
-      return "";
-    }
-  }
   inline void check_defined_field(const char* file, int line) const {
     STK_ThrowRequireMsg(is_field_defined(),
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " that is not defined on this Bucket.");
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' that is not defined on this Bucket.");
   }
   inline void check_single_scalar_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numComponents*m_numCopies == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as a scalar when it has " << m_numComponents << " components and " << m_numCopies <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as a scalar when it has " << m_numComponents << " components and " << m_numCopies <<
                         " copies.  Please use a Bucket operator() that takes appropriate index arguments.");
   }
   inline void check_single_component_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numComponents == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as if it only has one component when it actually has " << m_numComponents <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as if it only has one component when it actually has " << m_numComponents <<
                         " components.  Please use a Bucket operator() that also has a component argument.");
   }
   inline void check_single_copy_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numCopies == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as if it only has one copy when it actually has " << m_numCopies <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as if it only has one copy when it actually has " << m_numCopies <<
                         " copies.  Please use a Bucket operator() that also has a copy argument.");
   }
   inline void check_component_bounds(int component, const char* file, int line) const {
     STK_ThrowRequireMsg((component >= 0) && (component < m_numComponents),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with component index " << component << " for a Bucket with " <<
                         m_numComponents << " components.");
   }
   inline void check_copy_bounds(int copy, const char* file, int line) const {
     STK_ThrowRequireMsg((copy >= 0) && (copy < m_numCopies),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with copy index " << copy << " for a Bucket with " << m_numCopies <<
                         " copies.");
   }
   inline void check_copy_and_component_bounds(int copy, int component, const char* file, int line) const {
     STK_ThrowRequireMsg(((copy >= 0) && (copy < m_numCopies)) && ((component >= 0) && (component < m_numComponents)),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with component index " << component << " and copy index " << copy <<
                         " for a Bucket with " << m_numComponents << " components and " << m_numCopies << " copies.");
   }
   inline void check_scalar_bounds(int scalar, const char* file, int line) const {
     STK_ThrowRequireMsg((scalar >= 0) && (scalar < m_numCopies*m_numComponents),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with scalar index " << scalar << " for a Bucket with " <<
                         m_numCopies*m_numComponents << " scalars.");
   }
   inline void check_entity_bounds(int entity, const char* file, int line) const {
     STK_ThrowRequireMsg((entity >= 0) && (entity < m_numEntities),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with Entity index " << entity << " for a Bucket with " << m_numEntities <<
                         " Entities.");
   }
@@ -616,19 +623,32 @@ private:
 //==============================================================================
 
 template<typename T>
-class BucketValues<T, stk::ngp::HostMemSpace, Layout::Left> {
+class BucketValues<T, stk::ngp::HostSpace, Layout::Left>
+{
 public:
+  using value_type = T;
+  using space = stk::ngp::HostSpace;
+  using mem_space = stk::ngp::HostSpace::mem_space;
+  using exec_space = stk::ngp::HostSpace::exec_space;
+  static constexpr Layout layout = Layout::Left;
+
   inline BucketValues(T* dataPtr, int numComponents, int numCopies, int numEntities, int scalarStride,
                       [[maybe_unused]] const char* fieldName)
     : m_dataPtr(dataPtr),
-#ifdef STK_FIELD_BOUNDS_CHECK
+    #ifdef STK_FIELD_BOUNDS_CHECK
       m_fieldName(fieldName),
-#endif
+    #endif
       m_numComponents(numComponents),
       m_numCopies(numCopies),
       m_numEntities(numEntities),
       m_scalarStride(scalarStride)
   {}
+
+  BucketValues() = default;
+  BucketValues(const BucketValues&) = default;
+  BucketValues(BucketValues&&) = default;
+  BucketValues& operator=(const BucketValues&) = default;
+  BucketValues& operator=(BucketValues&&) = default;
 
   ~BucketValues() = default;
 
@@ -691,7 +711,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_component_bounds(component, file, line);
 
-    return m_dataPtr[static_cast<int>(component)*m_scalarStride + static_cast<int>(entity)];
+    return m_dataPtr[component()*m_scalarStride + entity()];
   }
 
   inline T& operator()(EntityIdx entity, CopyIdx copy,
@@ -702,7 +722,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_copy_bounds(copy, file, line);
 
-    return m_dataPtr[static_cast<int>(copy)*m_scalarStride + static_cast<int>(entity)];
+    return m_dataPtr[copy()*m_scalarStride + entity()];
   }
 
   inline T& operator()(EntityIdx entity, CopyIdx copy, ComponentIdx component,
@@ -712,8 +732,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_copy_and_component_bounds(copy, component, file, line);
 
-    return m_dataPtr[(static_cast<int>(copy)*m_numComponents + static_cast<int>(component))*m_scalarStride +
-                     static_cast<int>(entity)];
+    return m_dataPtr[(copy()*m_numComponents + component())*m_scalarStride + entity()];
   }
 
   inline T& operator()(EntityIdx entity, ScalarIdx scalar,
@@ -723,7 +742,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_scalar_bounds(scalar, file, line);
 
-    return m_dataPtr[static_cast<int>(scalar)*m_scalarStride + static_cast<int>(entity)];
+    return m_dataPtr[scalar()*m_scalarStride + entity()];
   }
 
 
@@ -760,69 +779,56 @@ public:
 
 private:
 #ifdef STK_FIELD_BOUNDS_CHECK
-  inline std::string location_string(const char* file, int line) const {
-    if (line != -1) {
-      std::string fileName(file);
-      std::size_t pathDelimeter = fileName.find_last_of("/");
-      if (pathDelimeter < fileName.size()) {
-        fileName = fileName.substr(pathDelimeter+1);
-      }
-      return fileName + ":" + std::to_string(line) + ": ";
-    }
-    else {
-      return "";
-    }
-  }
   inline void check_defined_field(const char* file, int line) const {
     STK_ThrowRequireMsg(is_field_defined(),
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " that is not defined on this Bucket.");
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' that is not defined on this Bucket.");
   }
   inline void check_single_scalar_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numComponents*m_numCopies == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as a scalar when it has " << m_numComponents << " components and " << m_numCopies <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as a scalar when it has " << m_numComponents << " components and " << m_numCopies <<
                         " copies.  Please use a Bucket operator() that takes appropriate index arguments.");
   }
   inline void check_single_component_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numComponents == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as if it only has one component when it actually has " << m_numComponents <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as if it only has one component when it actually has " << m_numComponents <<
                         " components.  Please use a Bucket operator() that also has a component argument.");
   }
   inline void check_single_copy_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numCopies == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as if it only has one copy when it actually has " << m_numCopies <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as if it only has one copy when it actually has " << m_numCopies <<
                         " copies.  Please use a Bucket operator() that also has a copy argument.");
   }
   inline void check_component_bounds(int component, const char* file, int line) const {
     STK_ThrowRequireMsg((component >= 0) && (component < m_numComponents),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with component index " << component << " for a Bucket with " <<
                         m_numComponents << " components.");
   }
   inline void check_copy_bounds(int copy, const char* file, int line) const {
     STK_ThrowRequireMsg((copy >= 0) && (copy < m_numCopies),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with copy index " << copy << " for a Bucket with " << m_numCopies <<
                         " copies.");
   }
   inline void check_copy_and_component_bounds(int copy, int component, const char* file, int line) const {
     STK_ThrowRequireMsg(((copy >= 0) && (copy < m_numCopies)) && ((component >= 0) && (component < m_numComponents)),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with component index " << component << " and copy index " << copy <<
                         " for a Bucket with " << m_numComponents << " components and " << m_numCopies << " copies.");
   }
   inline void check_scalar_bounds(int scalar, const char* file, int line) const {
     STK_ThrowRequireMsg((scalar >= 0) && (scalar < m_numCopies*m_numComponents),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with scalar index " << scalar << " for a Bucket with " <<
                         m_numCopies*m_numComponents << " scalars.");
   }
   inline void check_entity_bounds(int entity, const char* file, int line) const {
     STK_ThrowRequireMsg((entity >= 0) && (entity < m_numEntities),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with Entity index " << entity << " for a Bucket with " << m_numEntities <<
                         " Entities.");
   }
@@ -869,14 +875,21 @@ private:
 //==============================================================================
 
 template<typename T>
-class BucketValues<T, stk::ngp::HostMemSpace, Layout::Auto> {
+class BucketValues<T, stk::ngp::HostSpace, Layout::Auto>
+{
 public:
+  using value_type = T;
+  using space = stk::ngp::HostSpace;
+  using mem_space = stk::ngp::HostSpace::mem_space;
+  using exec_space = stk::ngp::HostSpace::exec_space;
+  static constexpr Layout layout = Layout::Auto;
+
   inline BucketValues(T* dataPtr, int numComponents, int numCopies, int numEntities,
                       [[maybe_unused]] const char* fieldName)
     : m_dataPtr(dataPtr),
-#ifdef STK_FIELD_BOUNDS_CHECK
+    #ifdef STK_FIELD_BOUNDS_CHECK
       m_fieldName(fieldName),
-#endif
+    #endif
       m_numComponents(numComponents),
       m_numCopies(numCopies),
       m_numEntities(numEntities),
@@ -887,15 +900,21 @@ public:
   inline BucketValues(T* dataPtr, int numComponents, int numCopies, int numEntities, int scalarStride,
                       [[maybe_unused]] const char* fieldName)
     : m_dataPtr(dataPtr),
-#ifdef STK_FIELD_BOUNDS_CHECK
+    #ifdef STK_FIELD_BOUNDS_CHECK
       m_fieldName(fieldName),
-#endif
+    #endif
       m_numComponents(numComponents),
       m_numCopies(numCopies),
       m_numEntities(numEntities),
       m_scalarStride(scalarStride),
       m_entityStride(1)
   {}
+
+  BucketValues() = default;
+  BucketValues(const BucketValues&) = default;
+  BucketValues(BucketValues&&) = default;
+  BucketValues& operator=(const BucketValues&) = default;
+  BucketValues& operator=(BucketValues&&) = default;
 
   ~BucketValues() = default;
 
@@ -958,7 +977,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_component_bounds(component, file, line);
 
-    return m_dataPtr[static_cast<int>(entity)*m_entityStride + static_cast<int>(component)*m_scalarStride];
+    return m_dataPtr[entity()*m_entityStride + component()*m_scalarStride];
   }
 
   inline T& operator()(EntityIdx entity, CopyIdx copy,
@@ -969,7 +988,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_copy_bounds(copy, file, line);
 
-    return m_dataPtr[static_cast<int>(entity)*m_entityStride + static_cast<int>(copy)*m_scalarStride];
+    return m_dataPtr[entity()*m_entityStride + copy()*m_scalarStride];
   }
 
   inline T& operator()(EntityIdx entity, CopyIdx copy, ComponentIdx component,
@@ -979,8 +998,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_copy_and_component_bounds(copy, component, file, line);
 
-    return m_dataPtr[static_cast<int>(entity)*m_entityStride +
-                     (static_cast<int>(copy)*m_numComponents + static_cast<int>(component))*m_scalarStride];
+    return m_dataPtr[entity()*m_entityStride + (copy()*m_numComponents + component())*m_scalarStride];
   }
 
   inline T& operator()(EntityIdx entity, ScalarIdx scalar,
@@ -990,7 +1008,7 @@ public:
     check_entity_bounds(entity, file, line);
     check_scalar_bounds(scalar, file, line);
 
-    return m_dataPtr[static_cast<int>(entity)*m_entityStride + static_cast<int>(scalar)*m_scalarStride];
+    return m_dataPtr[entity()*m_entityStride + scalar()*m_scalarStride];
   }
 
 
@@ -1027,69 +1045,56 @@ public:
 
 private:
 #ifdef STK_FIELD_BOUNDS_CHECK
-  inline std::string location_string(const char* file, int line) const {
-    if (line != -1) {
-      std::string fileName(file);
-      std::size_t pathDelimeter = fileName.find_last_of("/");
-      if (pathDelimeter < fileName.size()) {
-        fileName = fileName.substr(pathDelimeter+1);
-      }
-      return fileName + ":" + std::to_string(line) + ": ";
-    }
-    else {
-      return "";
-    }
-  }
   inline void check_defined_field(const char* file, int line) const {
     STK_ThrowRequireMsg(is_field_defined(),
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " that is not defined on this Bucket.");
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' that is not defined on this Bucket.");
   }
   inline void check_single_scalar_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numComponents*m_numCopies == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as a scalar when it has " << m_numComponents << " components and " << m_numCopies <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as a scalar when it has " << m_numComponents << " components and " << m_numCopies <<
                         " copies.  Please use a Bucket operator() that takes appropriate index arguments.");
   }
   inline void check_single_component_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numComponents == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as if it only has one component when it actually has " << m_numComponents <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as if it only has one component when it actually has " << m_numComponents <<
                         " components.  Please use a Bucket operator() that also has a component argument.");
   }
   inline void check_single_copy_access(const char* file, int line) const {
     STK_ThrowRequireMsg(m_numCopies == 1,
-                        location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName << "'"
-                        " as if it only has one copy when it actually has " << m_numCopies <<
+                        source_location_string(file, line) << "Accessing BucketValues for Field '" << m_fieldName <<
+                        "' as if it only has one copy when it actually has " << m_numCopies <<
                         " copies.  Please use a Bucket operator() that also has a copy argument.");
   }
   inline void check_component_bounds(int component, const char* file, int line) const {
     STK_ThrowRequireMsg((component >= 0) && (component < m_numComponents),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with component index " << component << " for a Bucket with " <<
                         m_numComponents << " components.");
   }
   inline void check_copy_bounds(int copy, const char* file, int line) const {
     STK_ThrowRequireMsg((copy >= 0) && (copy < m_numCopies),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with copy index " << copy << " for a Bucket with " << m_numCopies <<
                         " copies.");
   }
   inline void check_copy_and_component_bounds(int copy, int component, const char* file, int line) const {
     STK_ThrowRequireMsg(((copy >= 0) && (copy < m_numCopies)) && ((component >= 0) && (component < m_numComponents)),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with component index " << component << " and copy index " << copy <<
                         " for a Bucket with " << m_numComponents << " components and " << m_numCopies << " copies.");
   }
   inline void check_scalar_bounds(int scalar, const char* file, int line) const {
     STK_ThrowRequireMsg((scalar >= 0) && (scalar < m_numCopies*m_numComponents),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with scalar index " << scalar << " for a Bucket with " <<
                         m_numCopies*m_numComponents << " scalars.");
   }
   inline void check_entity_bounds(int entity, const char* file, int line) const {
     STK_ThrowRequireMsg((entity >= 0) && (entity < m_numEntities),
-                        location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
+                        source_location_string(file, line) << "Out-of-bounds access to BucketValues for Field '" <<
                         m_fieldName << "' with Entity index " << entity << " for a Bucket with " << m_numEntities <<
                         " Entities.");
   }

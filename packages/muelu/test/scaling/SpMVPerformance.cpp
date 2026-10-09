@@ -104,7 +104,6 @@ class SpMVMeasurement : public Measurement {
 };
 
 std::string systemName(const Xpetra::UnderlyingLib& lib) {
-  if (lib == Xpetra::UseEpetra) return "Epetra";
   if (lib == Xpetra::UseTpetra) return "Tpetra";
   return "Unknown";
 }
@@ -141,6 +140,7 @@ class SystemLoader {
   using MultiVector           = Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
   using CoordScalar           = typename Teuchos::ScalarTraits<Scalar>::coordinateType;
   using RealValuedMultiVector = Xpetra::MultiVector<CoordScalar, LocalOrdinal, GlobalOrdinal, Node>;
+  using Matrix                = Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
 
  public:
   SystemLoader(Teuchos::CommandLineProcessor& c)
@@ -153,9 +153,9 @@ class SystemLoader {
     MatrixLoad<Scalar, LocalOrdinal, GlobalOrdinal, Node>(
         comm, system.lib,
         binaryFormat, matrixFile, rhsFile, rowMapFile, colMapFile,
-        domainMapFile, rangeMapFile, coordFile, coordMapFile, nullFile, materialFile, blockNumberFile,
+        domainMapFile, rangeMapFile, coordFile, coordMapFile, nullFile, materialFile, blockNumberFile, massFile,
         map, system.A,
-        coordinates, nullspace, material, blockNumber,
+        coordinates, nullspace, material, blockNumber, mass,
         system.X, system.B, system.numVectors,
         galeriParameters, xpetraParameters,
         galeriStream);
@@ -179,12 +179,14 @@ class SystemLoader {
   std::string nullFile        = "";
   std::string materialFile    = "";
   std::string blockNumberFile = "";
+  std::string massFile        = "";
 
   Teuchos::RCP<const Map> map;
   Teuchos::RCP<RealValuedMultiVector> coordinates;
   Teuchos::RCP<MultiVector> nullspace;
   Teuchos::RCP<MultiVector> material;
   Teuchos::RCP<Xpetra::Vector<LocalOrdinal, LocalOrdinal, GlobalOrdinal, Node>> blockNumber;
+  Teuchos::RCP<Matrix> mass;
   std::ostringstream galeriStream;
 };
 

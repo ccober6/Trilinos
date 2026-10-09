@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #include <iostream>
 #include "KokkosKernels_config.h"
 #include "KokkosKernels_default_types.hpp"
@@ -119,7 +106,7 @@ void print_options() {
   std::cerr << "\t[Required] INPUT MATRIX: '--amtx [left_hand_side.mtx]' -- for C=AxA" << std::endl;
 
   std::cerr << "\t[Optional] '--algorithm "
-               "[DEFAULT=KKDEFAULT=KKSPGEMM|KKMEM|KKDENSE]' --> to choose algorithm. "
+               "[DEFAULT|KKDEFAULT=KKSPGEMM|KKMEM|KKDENSE]' --> to choose algorithm. "
                "KKMEM is outdated, use KKSPGEMM instead."
             << std::endl;
   std::cerr << "\t[Optional] --bmtx [righ_hand_side.mtx]' for C = AxB" << std::endl;
@@ -215,7 +202,7 @@ int parse_inputs(KokkosKernels::Experiment::Parameters& params, int argc, char**
       // because there are pre- post processing in these TPL kernel wraps.
     } else if (perf_test::check_arg_str(i, argc, argv, "--algorithm", algoStr)) {
       if (0 == Test::string_compare_no_case(algoStr, "DEFAULT")) {
-        params.algorithm = KokkosSparse::SPGEMM_KK;
+        params.algorithm = KokkosSparse::SPGEMM_DEFAULT;
       } else if (0 == Test::string_compare_no_case(algoStr, "KKDEFAULT")) {
         params.algorithm = KokkosSparse::SPGEMM_KK;
       } else if (0 == Test::string_compare_no_case(algoStr, "KKSPGEMM")) {

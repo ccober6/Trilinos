@@ -22,8 +22,6 @@
 #include <Tpetra_Core.hpp>
 #include <Tpetra_Vector.hpp>
 #include <Tpetra_CrsMatrix.hpp>
-// I/O for Harwell-Boeing files
-#define HIDE_TPETRA_INOUT_IMPLEMENTATIONS
 #include <Tpetra_MatrixIO.hpp>
 
 // Teuchos
@@ -177,19 +175,19 @@ int run(int argc, char *argv[]) {
       }
     }
 
-  if (ret!=Belos::Converged || badRes) {
-    success = false;
-    if (procVerbose)
-      std::cout << std::endl << "ERROR:  Belos did not converge!" << std::endl;
-  } else {
-    success = true;
-    if (procVerbose)
-      std::cout << std::endl << "SUCCESS:  Belos converged!" << std::endl;
-  }
-}
-TEUCHOS_STANDARD_CATCH_STATEMENTS(verbose, std::cerr, success);
+    if (ret==Belos::Converged && !badRes) {
+      success = true;
+      if (procVerbose)
+        std::cout << std::endl << "SUCCESS:  Belos converged!" << std::endl;
+    } else {
+      success = false;
+      if (procVerbose)
+        std::cout << std::endl << "ERROR:  Belos did not converge!" << std::endl;
+    }
+  } // try
+  TEUCHOS_STANDARD_CATCH_STATEMENTS(verbose, std::cerr, success);
 
-return success ? EXIT_SUCCESS : EXIT_FAILURE;
+  return success ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 int main(int argc, char *argv[]) {

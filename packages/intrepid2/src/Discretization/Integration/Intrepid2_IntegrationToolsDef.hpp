@@ -127,7 +127,7 @@ namespace Intrepid2 {
         const bool allocateFadStorage = !(std::is_standard_layout<Scalar>::value && std::is_trivial<Scalar>::value);  
         if (allocateFadStorage)
         {
-          fad_size_output_ = dimension_scalar(integralView_);
+          fad_size_output_ = get_dimension_scalar(integralView_);
         }
         
         const int R = numTensorComponents_ - 1;
@@ -483,11 +483,11 @@ namespace Intrepid2 {
                       const int Gy_index = leftEnumerationIndex_y  * rightEnumerationSpan_y + rightEnumerationIndex_y;
                       
                       const int Gz_index = 0;
-                      const Scalar & Gz = scratchView(scratchOffsetForThread + offsetsForComponentOrdinal_[2] + Gz_index);
+                      const Scalar & aGz = scratchView(scratchOffsetForThread + offsetsForComponentOrdinal_[2] + Gz_index);
                       
                       Scalar & Gy = scratchView(scratchOffsetForThread + offsetsForComponentOrdinal_[1] + Gy_index);
                                             
-                      Gy += leftValue * Gz * rightValue;
+                      Gy += leftValue * aGz * rightValue;
     //                approximateFlopCount += 3; // 2 multiplies, 1 sum
                     }
                   }
@@ -1067,7 +1067,7 @@ namespace Intrepid2 {
         const bool allocateFadStorage = !(std::is_standard_layout<Scalar>::value && std::is_trivial<Scalar>::value);
         if (allocateFadStorage)
         {
-          fad_size_output_ = dimension_scalar(integralView_);
+          fad_size_output_ = get_dimension_scalar(integralView_);
         }
       }
 
@@ -1412,8 +1412,6 @@ namespace Intrepid2 {
                     for (int j2=0; j2<rightFieldBounds_z; j2++)
                     {
                       Scalar Gz = 0.0;
-                      
-                      int Gy_index_offset = GyEntryCount * threadNumber; // thread-relative index into GyIntegrals container; store one value per z coordinate
                       
                       if (fad_size_output_ == 0)
                       {
@@ -1861,13 +1859,113 @@ namespace Intrepid2 {
         integral_(i,j) = refSpaceIntegral;
       }
     };
+
+    template <class Scalar, class DeviceType>
+    class F_ComputeIntegral
+    {
+      // Member variables to capture the necessary data
+
+      using ComponentIntegralsArray = Kokkos::Array<Kokkos::Array<ScalarView<Scalar, DeviceType>, Parameters::MaxTensorComponents>, Parameters::MaxTensorComponents>;
+
+      Kokkos::View<Scalar **, DeviceType> integralView2_;
+      Kokkos::View<Scalar ***, DeviceType> integralView3_;
+      const TensorData<Scalar, DeviceType> leftComponent_;
+      const TensorData<Scalar, DeviceType> rightComponent_;
+      const TensorData<Scalar, DeviceType> cellMeasures_;
+      const TransformedBasisValues<Scalar, DeviceType> basisValuesLeft_;
+      const TransformedBasisValues<Scalar, DeviceType> basisValuesRight_;
+      const ComponentIntegralsArray componentIntegrals_;
+      const ordinal_type d_start_;
+      const ordinal_type d_end_;
+      const ordinal_type numPointTensorComponents_;
+      const ordinal_type leftFieldOffset_;
+      const ordinal_type rightFieldOffset_;
+      const ordinal_type integralViewRank_;
+
+    public:
+      // Constructor to initialize the functor
+      F_ComputeIntegral(
+          Kokkos::View<Scalar **, DeviceType> integralView2,
+          Kokkos::View<Scalar ***, DeviceType> integralView3,
+          const TensorData<Scalar, DeviceType> leftComponent,
+          const TensorData<Scalar, DeviceType> rightComponent,
+          const TensorData<Scalar, DeviceType> cellMeasures,
+          const TransformedBasisValues<Scalar, DeviceType> basisValuesLeft,
+          const TransformedBasisValues<Scalar, DeviceType> basisValuesRight,
+          const ComponentIntegralsArray componentIntegrals,
+          const ordinal_type d_start,
+          const ordinal_type d_end,
+          const ordinal_type numPointTensorComponents,
+          const ordinal_type leftFieldOffset,
+          const ordinal_type rightFieldOffset,
+          const ordinal_type integralViewRank)
+          : 
+          integralView2_(integralView2),
+          integralView3_(integralView3),
+          leftComponent_(leftComponent),
+          rightComponent_(rightComponent),
+          cellMeasures_(cellMeasures),
+          basisValuesLeft_(basisValuesLeft),
+          basisValuesRight_(basisValuesRight),
+          componentIntegrals_(componentIntegrals),
+          d_start_(d_start),
+          d_end_(d_end),
+          numPointTensorComponents_(numPointTensorComponents),
+          leftFieldOffset_(leftFieldOffset),
+          rightFieldOffset_(rightFieldOffset),
+          integralViewRank_(integralViewRank) {}
+
+      KOKKOS_INLINE_FUNCTION
+      void operator()(const ordinal_type &cellDataOrdinal, const ordinal_type &leftFieldOrdinal, const ordinal_type &rightFieldOrdinal) const
+      {
+        const Scalar &cellMeasureWeight = cellMeasures_.getTensorComponent(0)(cellDataOrdinal);
+
+        TensorArgumentIterator leftTensorIterator(leftComponent_, 0); // shape is (F,P), and we walk the F dimension of the container
+        leftTensorIterator.setEnumerationIndex(leftFieldOrdinal);
+
+        TensorArgumentIterator rightTensorIterator(rightComponent_, 0); // shape is (F,P), and we walk the F dimension of the container
+        rightTensorIterator.setEnumerationIndex(rightFieldOrdinal);
+
+        Scalar integralSum = 0.0;
+        for (ordinal_type d = d_start_; d < d_end_; d++)
+        {
+          const Scalar &transformLeft_d = basisValuesLeft_.transformWeight(cellDataOrdinal, 0, d, d);
+          const Scalar &transformRight_d = basisValuesRight_.transformWeight(cellDataOrdinal, 0, d, d);
+
+          const Scalar &leftRightTransform_d = transformLeft_d * transformRight_d;
+          //            approximateFlopCount++;
+
+          Scalar integral_d = 1.0;
+
+          for (ordinal_type r = 0; r < numPointTensorComponents_; r++)
+          {
+            integral_d *= componentIntegrals_[r][d](leftTensorIterator.argument(r), rightTensorIterator.argument(r));
+            //              approximateFlopCount++; // product
+          }
+          integralSum += leftRightTransform_d * integral_d;
+          //            approximateFlopCount += 2; // multiply and sum
+
+          const ordinal_type i = leftFieldOrdinal + leftFieldOffset_;
+          const ordinal_type j = rightFieldOrdinal + rightFieldOffset_;
+
+          if (integralViewRank_ == 3)
+          {
+            integralView3_(cellDataOrdinal, i, j) += cellMeasureWeight * integralSum;
+          }
+          else
+          {
+            integralView2_(i, j) += cellMeasureWeight * integralSum;
+          }
+        }
+      }
+    };
   }
 
 template<typename DeviceType>
 template<class Scalar>
-Data<Scalar,DeviceType> IntegrationTools<DeviceType>::allocateIntegralData(const TransformedBasisValues<Scalar,DeviceType> vectorDataLeft,
-                                                                           const TensorData<Scalar,DeviceType> cellMeasures,
-                                                                           const TransformedBasisValues<Scalar,DeviceType> vectorDataRight)
+Data<Scalar,DeviceType> IntegrationTools<DeviceType>::allocateIntegralData(const TransformedBasisValues<Scalar,DeviceType> &vectorDataLeft,
+                                                                           const TensorData<Scalar,DeviceType> &cellMeasures,
+                                                                           const TransformedBasisValues<Scalar,DeviceType> &vectorDataRight)
 {
   // allocates a (C,F,F) container for storing integral data
   
@@ -1923,7 +2021,7 @@ Data<Scalar,DeviceType> IntegrationTools<DeviceType>::allocateIntegralData(const
 //! 2. arbitrary mesh: cellMeasures has trivial tensor product structure (one tensorial component).
 template<typename DeviceType>
 template<class Scalar>
-void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> integrals, const TransformedBasisValues<Scalar,DeviceType> & basisValuesLeft,
+void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> &integrals, const TransformedBasisValues<Scalar,DeviceType> & basisValuesLeft,
                                              const TensorData<Scalar,DeviceType> & cellMeasures,
                                              const TransformedBasisValues<Scalar,DeviceType> & basisValuesRight, const bool sumInto,
                                              double* approximateFlops)
@@ -2073,8 +2171,8 @@ void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> integrals, 
       const int leftVectorComponentCount = leftIsVectorValued ? basisValuesLeft.vectorData().numComponents() : 1;
       for (int leftVectorComponentOrdinal = 0; leftVectorComponentOrdinal < leftVectorComponentCount; leftVectorComponentOrdinal++)
       {
-        TensorData<Scalar,DeviceType> leftComponent = leftIsVectorValued ? basisValuesLeft.vectorData().getComponent(leftFamilyOrdinal, leftVectorComponentOrdinal)
-                                                                         : basisValuesLeft.basisValues().tensorData(leftFamilyOrdinal);
+        const TensorData<Scalar,DeviceType> & leftComponent = leftIsVectorValued ? basisValuesLeft.vectorData().getComponent(leftFamilyOrdinal, leftVectorComponentOrdinal)
+                                                                                 : basisValuesLeft.basisValues().tensorData(leftFamilyOrdinal);
         if (!leftComponent.isValid())
         {
           a_offset++; // empty components are understood to take up one dimension
@@ -2092,8 +2190,8 @@ void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> integrals, 
           const int rightVectorComponentCount = rightIsVectorValued ? basisValuesRight.vectorData().numComponents() : 1;
           for (int rightVectorComponentOrdinal = 0; rightVectorComponentOrdinal < rightVectorComponentCount; rightVectorComponentOrdinal++)
           {
-            TensorData<Scalar,DeviceType> rightComponent = rightIsVectorValued ? basisValuesRight.vectorData().getComponent(rightFamilyOrdinal, rightVectorComponentOrdinal)
-                                                                               : basisValuesRight.basisValues().tensorData(rightFamilyOrdinal);
+            const TensorData<Scalar,DeviceType> & rightComponent = rightIsVectorValued ? basisValuesRight.vectorData().getComponent(rightFamilyOrdinal, rightVectorComponentOrdinal)
+                                                                                       : basisValuesRight.basisValues().tensorData(rightFamilyOrdinal);
             if (!rightComponent.isValid())
             {
               b_offset++; // empty components are understood to take up one dimension
@@ -2158,7 +2256,7 @@ void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> integrals, 
                 const bool allocateFadStorage = !(std::is_standard_layout<Scalar>::value && std::is_trivial<Scalar>::value);
                 if (allocateFadStorage)
                 {
-                  auto fad_size_output = dimension_scalar(integrals.getUnderlyingView());
+                  auto fad_size_output = get_dimension_scalar(integrals.getUnderlyingView());
                   componentIntegralView = ScalarView<Scalar,DeviceType>("componentIntegrals for tensor component " + std::to_string(r) + ", in dimension " + std::to_string(d), leftTensorComponentFields, rightTensorComponentFields, fad_size_output);
                 }
                 else
@@ -2182,53 +2280,12 @@ void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> integrals, 
             } // r
             
             ExecutionSpace().fence();
-            
+            Impl::F_ComputeIntegral<Scalar,DeviceType> computeIntegralFunctor(integralView2, integralView3, leftComponent, rightComponent, cellMeasures, basisValuesLeft, basisValuesRight, componentIntegrals, d_start, d_end, numPointTensorComponents, leftFieldOffset, rightFieldOffset, integralViewRank);
             Kokkos::Array<int,3> upperBounds {cellDataExtent,leftComponentFieldCount,rightComponentFieldCount}; // separately declared in effort to get around Intel 17.0.1 compiler weirdness.
             Kokkos::Array<int,3> lowerBounds {0,0,0};
             auto policy = Kokkos::MDRangePolicy<ExecutionSpace,Kokkos::Rank<3>>(lowerBounds, upperBounds);
             // TODO: note that for best performance, especially with Fad types, we should replace this parallel for with a Functor and use hierarchical parallelism
-            Kokkos::parallel_for("compute field integrals", policy,
-                                 KOKKOS_LAMBDA (const int &cellDataOrdinal, const int &leftFieldOrdinal, const int &rightFieldOrdinal) {
-              const Scalar & cellMeasureWeight = cellMeasures.getTensorComponent(0)(cellDataOrdinal);
-          
-              TensorArgumentIterator leftTensorIterator(leftComponent, 0); // shape is (F,P), and we walk the F dimension of the container
-              leftTensorIterator.setEnumerationIndex(leftFieldOrdinal);
-          
-              TensorArgumentIterator rightTensorIterator(rightComponent, 0); // shape is (F,P), and we walk the F dimension of the container
-              rightTensorIterator.setEnumerationIndex(rightFieldOrdinal);
-          
-              Scalar integralSum = 0.0;
-              for (int d=d_start; d<d_end; d++)
-              {
-                const Scalar & transformLeft_d  =  basisValuesLeft.transformWeight(cellDataOrdinal,0,d,d);
-                const Scalar & transformRight_d = basisValuesRight.transformWeight(cellDataOrdinal,0,d,d);
-                
-                const Scalar & leftRightTransform_d = transformLeft_d * transformRight_d;
-        //            approximateFlopCount++;
-                
-                Scalar integral_d = 1.0;
-                
-                for (int r=0; r<numPointTensorComponents; r++)
-                {
-                  integral_d *= componentIntegrals[r][d](leftTensorIterator.argument(r),rightTensorIterator.argument(r));
-        //              approximateFlopCount++; // product
-                }
-                integralSum += leftRightTransform_d * integral_d;
-        //            approximateFlopCount += 2; // multiply and sum
-                
-                const int i =  leftFieldOrdinal +  leftFieldOffset;
-                const int j = rightFieldOrdinal + rightFieldOffset;
-                
-                if (integralViewRank == 3)
-                {
-                  integralView3(cellDataOrdinal,i,j) += cellMeasureWeight * integralSum;
-                }
-                else
-                {
-                  integralView2(i,j) += cellMeasureWeight * integralSum;
-                }
-              }
-            });
+            Kokkos::parallel_for("compute field integrals", policy, computeIntegralFunctor);
             b_offset += rightDimSpan;
           } // rightVectorComponentOrdinal
         } // rightFamilyOrdinal
@@ -2430,8 +2487,6 @@ void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> integrals, 
 //    std::cout << "Completed mat-mat in " << timer->totalElapsedTime() << " seconds.\n";
 //    timer->reset();
     
-    const int leftFamilyCount     = basisValuesLeft. basisValues().numFamilies();
-    const int rightFamilyCount    = basisValuesRight.basisValues().numFamilies();
     const int leftComponentCount  = leftIsVectorValued ? basisValuesLeft. vectorData().numComponents() : 1;
     const int rightComponentCount = rightIsVectorValued ? basisValuesRight.vectorData().numComponents() : 1;
     
@@ -2444,8 +2499,8 @@ void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> integrals, 
       bool haveLaunchedContributionToCurrentFamilyLeft = false; // helps to track whether we need a Kokkos::fence before launching a kernel.
       for (int leftComponentOrdinal=0; leftComponentOrdinal<leftComponentCount; leftComponentOrdinal++)
       {
-        TensorData<Scalar,DeviceType> leftComponent = leftIsVectorValued ? basisValuesLeft.vectorData().getComponent(leftFamilyOrdinal, leftComponentOrdinal)
-                                                                         : basisValuesLeft.basisValues().tensorData(leftFamilyOrdinal);
+        const TensorData<Scalar,DeviceType> & leftComponent = leftIsVectorValued ? basisValuesLeft.vectorData().getComponent(leftFamilyOrdinal, leftComponentOrdinal)
+                                                                                 : basisValuesLeft.basisValues().tensorData(leftFamilyOrdinal);
         if (!leftComponent.isValid())
         {
            // represents zero
@@ -2462,8 +2517,8 @@ void IntegrationTools<DeviceType>::integrate(Data<Scalar,DeviceType> integrals, 
           int b_offset = 0;
           for (int rightComponentOrdinal=0; rightComponentOrdinal<rightComponentCount; rightComponentOrdinal++)
           {
-            TensorData<Scalar,DeviceType> rightComponent = rightIsVectorValued ? basisValuesRight.vectorData().getComponent(rightFamilyOrdinal, rightComponentOrdinal)
-                                                                               : basisValuesRight.basisValues().tensorData(rightFamilyOrdinal);
+            const TensorData<Scalar,DeviceType> & rightComponent = rightIsVectorValued ? basisValuesRight.vectorData().getComponent(rightFamilyOrdinal, rightComponentOrdinal)
+                                                                                       : basisValuesRight.basisValues().tensorData(rightFamilyOrdinal);
             if (!rightComponent.isValid())
             {
                // represents zero

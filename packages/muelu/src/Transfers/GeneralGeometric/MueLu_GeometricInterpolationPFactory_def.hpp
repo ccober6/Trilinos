@@ -11,7 +11,7 @@
 #define MUELU_GEOMETRICINTERPOLATIONPFACTORY_DEF_HPP
 
 #include "Xpetra_CrsGraph.hpp"
-#include "Xpetra_CrsMatrixUtils.hpp"
+#include "MueLu_CrsMatrixUtils.hpp"
 
 #include "MueLu_MasterList.hpp"
 #include "MueLu_Monitor.hpp"
@@ -275,8 +275,6 @@ void GeometricInterpolationPFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     P = P_wrap;
     if (A->IsView("stridedMaps") == true) {
       P->CreateView("stridedMaps", A->getRowMap("stridedMaps"), stridedPointMap);
-    } else {
-      P->CreateView("stridedMaps", P->getRangeMap(), PointMap);
     }
   } else {
     // Create the prolongator matrix and its associated objects
@@ -289,8 +287,6 @@ void GeometricInterpolationPFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     // set StridingInformation of P
     if (A->IsView("stridedMaps") == true)
       P->CreateView("stridedMaps", A->getRowMap("stridedMaps"), stridedDomainMap);
-    else
-      P->CreateView("stridedMaps", P->getRangeMap(), stridedDomainMap);
   }
 
 }  // BuildConstantP
@@ -463,8 +459,6 @@ void GeometricInterpolationPFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   // set StridingInformation of P
   if (A->IsView("stridedMaps") == true) {
     P->CreateView("stridedMaps", A->getRowMap("stridedMaps"), stridedDomainMap);
-  } else {
-    P->CreateView("stridedMaps", P->getRangeMap(), stridedDomainMap);
   }
 
 }  // BuildLinearP

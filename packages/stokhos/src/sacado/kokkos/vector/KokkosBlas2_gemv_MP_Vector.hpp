@@ -16,7 +16,7 @@
 #include "Stokhos_ViewStorage.hpp"
 #include "Sacado_MP_Vector.hpp"
 #include "Kokkos_View_MP_Vector.hpp"
-#include "Kokkos_ArithTraits_MP_Vector.hpp"
+#include "KokkosKernels_ArithTraits_MP_Vector.hpp"
 #include "KokkosBlas.hpp"
 
 #include "Stokhos_Sacado_Kokkos_MP_Vector.hpp"
@@ -123,7 +123,7 @@ public:
         {
             Scalar tmp = 0.;
             Kokkos::parallel_reduce(
-                Kokkos::TeamThreadRange(team, nj), [=](int jj, Scalar &tmp_sum) {
+                Kokkos::TeamThreadRange(team, nj), [&](int jj, Scalar &tmp_sum) {
                     tmp_sum += A_(jj + j_min, i) * x_(jj + j_min);
                 },
                 tmp);
@@ -137,7 +137,7 @@ public:
         {
             Scalar tmp = 0.;
             Kokkos::parallel_reduce(
-                Kokkos::TeamThreadRange(team, nj), [=](int jj, Scalar &tmp_sum) {
+                Kokkos::TeamThreadRange(team, nj), [&](int jj, Scalar &tmp_sum) {
                     tmp_sum += A_(jj + j_min, i) * x_(jj + j_min);
                 },
                 tmp);
@@ -222,12 +222,12 @@ void inner_products_MP(
 
     if (beta == Scalar(0.))
         Kokkos::parallel_for(
-            m, KOKKOS_LAMBDA(const int i) {
+            Kokkos::RangePolicy<execution_space>(0, m), KOKKOS_LAMBDA(const int i) {
                 y(i) = beta;
             });
     else
         Kokkos::parallel_for(
-            m, KOKKOS_LAMBDA(const int i) {
+            Kokkos::RangePolicy<execution_space>(0, m), KOKKOS_LAMBDA(const int i) {
                 y(i) *= beta;
             });
 

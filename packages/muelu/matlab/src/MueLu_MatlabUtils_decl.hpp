@@ -33,14 +33,7 @@ typedef size_t mwIndex;
 #include "MueLu_AmalgamationInfo_decl.hpp"
 #include "MueLu_Utilities_decl.hpp"
 #include "MueLu_Graph_fwd.hpp"
-#ifdef HAVE_MUELU_EPETRA
-#include "Epetra_MultiVector.h"
-#include "Epetra_CrsMatrix.h"
-#endif
 #include "Tpetra_CrsMatrix_decl.hpp"
-#ifdef HAVE_MUELU_EPETRA
-#include "Xpetra_EpetraCrsMatrix.hpp"
-#endif
 #include "Xpetra_MapFactory.hpp"
 #include "Xpetra_CrsGraph.hpp"
 #include "Xpetra_VectorFactory.hpp"
@@ -66,14 +59,10 @@ enum MuemexType {
   XPETRA_MATRIX_COMPLEX,
   XPETRA_MULTIVECTOR_DOUBLE,
   XPETRA_MULTIVECTOR_COMPLEX,
-#ifdef HAVE_MUELU_EPETRA
-  EPETRA_CRSMATRIX,
-  EPETRA_MULTIVECTOR,
-#endif
   AGGREGATES,
   AMALGAMATION_INFO,
   GRAPH
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
   ,
   FIELDCONTAINER_ORDINAL
 #endif
@@ -101,7 +90,7 @@ typedef MueLu::Aggregates<mm_LocalOrd, mm_GlobalOrd, mm_node_t> MAggregates;
 typedef MueLu::AmalgamationInfo<mm_LocalOrd, mm_GlobalOrd, mm_node_t> MAmalInfo;
 typedef MueLu::LWGraph<mm_LocalOrd, mm_GlobalOrd, mm_node_t> MGraph;
 
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
 typedef Kokkos::DynRankView<mm_LocalOrd, typename mm_node_t::device_type> FieldContainer_ordinal;
 #endif
 

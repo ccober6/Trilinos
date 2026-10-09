@@ -13,9 +13,16 @@
 #include <Teuchos_FancyOStream.hpp>
 #include <Xpetra_Matrix.hpp>
 
+#include "KokkosKernels_ArithTraits.hpp"
 #include "MueLu_ConfigDefs.hpp"
 #include "MueLu_SmootherBase.hpp"
 #include "MueLu_SmootherPrototype.hpp"
+#include "Teuchos_ParameterEntry.hpp"
+#include "Teuchos_ParameterList.hpp"
+#include "Teuchos_VerbosityLevel.hpp"
+#include "Tpetra_Access.hpp"
+#include <Xpetra_BlockedCrsMatrix.hpp>
+#include <Xpetra_BlockedMultiVector.hpp>
 
 // Helper functions to test if derived classes conforms to the SmootherBase and SmootherPrototype interfaces
 
@@ -44,7 +51,7 @@ testApply(const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>& A,
           const MueLu::SmootherBase<Scalar, LocalOrdinal, GlobalOrdinal, Node>& smoother,
           Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>& X,
           const Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>& RHS,
-          Teuchos::FancyOStream& out, bool& success) {
+          Teuchos::FancyOStream& out, bool& /*success*/) {
 #include "MueLu_UseShortNames.hpp"
   typedef Teuchos::ScalarTraits<SC> ST;
 
@@ -119,7 +126,7 @@ testApply_X0_RandomRHS(const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal,
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void setupSmoother(Teuchos::RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>& A,
                    MueLu::SmootherPrototype<Scalar, LocalOrdinal, GlobalOrdinal, Node>& smoother,
-                   Teuchos::FancyOStream& out, bool& success) {
+                   Teuchos::FancyOStream& /*out*/, bool& /*success*/) {
 #include "MueLu_UseShortNames.hpp"
 
   Level level;
@@ -165,6 +172,191 @@ void testDirectSolver(MueLu::SmootherPrototype<Scalar, LocalOrdinal, GlobalOrdin
 
   magnitude_type residualNorms = testApply_A125_X0_RandomRHS(smoother, out, success);
   TEST_EQUALITY(residualNorms < 100 * MT::eps(), true);
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+void testDirectSolverBlocked(MueLu::SmootherPrototype<Scalar, LocalOrdinal, GlobalOrdinal, Node>& smoother,
+                             Teuchos::FancyOStream& out, bool& success) {
+#include "MueLu_UseShortNames.hpp"
+
+  using ST             = Teuchos::ScalarTraits<SC>;
+  using magnitude_type = typename ST::magnitudeType;
+  using MT             = Teuchos::ScalarTraits<magnitude_type>;
+
+  const GO n0 = 50;
+  const GO n1 = 75;
+  const GO n  = n0 + n1;
+
+  auto comm = Parameters::getDefaultComm();
+
+  // Full map
+  RCP<const Map> fullMap = MapFactory::Build(Parameters::getLib(), n, 0, comm);
+
+  // Build disjoint submaps from full GIDs
+  Teuchos::Array<GO> gids0, gids1;
+  const Teuchos::ArrayView<const GO> myGids = fullMap->getLocalElementList();
+
+  for (size_t k = 0; k < (size_t)myGids.size(); ++k) {
+    if (myGids[k] < n0)
+      gids0.push_back(myGids[k]);
+    else
+      gids1.push_back(myGids[k]);
+  }
+
+  RCP<const Map> map0 = MapFactory::Build(Parameters::getLib(),
+                                          Teuchos::OrdinalTraits<Xpetra::global_size_t>::invalid(),
+                                          gids0(), 0, comm);
+
+  RCP<const Map> map1 = MapFactory::Build(Parameters::getLib(),
+                                          Teuchos::OrdinalTraits<Xpetra::global_size_t>::invalid(),
+                                          gids1(), 0, comm);
+
+  std::vector<RCP<const Map>> maps(2);
+  maps[0] = map0;
+  maps[1] = map1;
+
+  RCP<const Xpetra::MapExtractor<SC, LO, GO, NO>> rangeMapExtractor =
+      Xpetra::MapExtractorFactory<SC, LO, GO, NO>::Build(fullMap, maps, false);
+
+  RCP<const Xpetra::MapExtractor<SC, LO, GO, NO>> domainMapExtractor =
+      Xpetra::MapExtractorFactory<SC, LO, GO, NO>::Build(fullMap, maps, false);
+
+  // Build simple diagonal matrices on the submaps
+  RCP<CrsMatrixWrap> A00, A11;
+  {
+    RCP<CrsMatrix> crs0 = CrsMatrixFactory::Build(map0, 1);
+    for (size_t l = 0; l < (size_t)map0->getLocalNumElements(); ++l) {
+      GO gid = map0->getGlobalElement(l);
+      crs0->insertGlobalValues(gid, Teuchos::tuple<GO>(gid), Teuchos::tuple<SC>(ST::one()));
+    }
+    crs0->fillComplete(map0, map0);
+    A00 = rcp(new CrsMatrixWrap(crs0));
+  }
+  {
+    RCP<CrsMatrix> crs1 = CrsMatrixFactory::Build(map1, 1);
+    for (size_t l = 0; l < (size_t)map1->getLocalNumElements(); ++l) {
+      GO gid = map1->getGlobalElement(l);
+      crs1->insertGlobalValues(gid, Teuchos::tuple<GO>(gid), Teuchos::tuple<SC>(ST::one()));
+    }
+    crs1->fillComplete(map1, map1);
+    A11 = rcp(new CrsMatrixWrap(crs1));
+  }
+
+  // Build 2x2 blocked matrix with only diagonal blocks
+  RCP<Xpetra::BlockedCrsMatrix<SC, LO, GO, NO>> bA =
+      rcp(new Xpetra::BlockedCrsMatrix<SC, LO, GO, NO>(rangeMapExtractor, domainMapExtractor, 2));
+
+  bA->setMatrix(0, 0, A00);
+  bA->setMatrix(1, 1, A11);
+  bA->fillComplete();
+
+  RCP<Matrix> A = bA;
+  setupSmoother(A, smoother, out, success);
+
+  // Exact blocked solution
+  RCP<MultiVector> X0 = MultiVectorFactory::Build(map0, 1);
+  RCP<MultiVector> X1 = MultiVectorFactory::Build(map1, 1);
+  X0->setSeed(846930886);
+  X1->setSeed(846930887);
+  X0->randomize();
+  X1->randomize();
+
+  {
+    Teuchos::Array<magnitude_type> norms(1);
+    X0->norm2(norms);
+    if (norms[0] != MT::zero()) X0->scale(ST::one() / norms[0]);
+    X1->norm2(norms);
+    if (norms[0] != MT::zero()) X1->scale(ST::one() / norms[0]);
+  }
+
+  std::vector<RCP<MultiVector>> xBlocks(2);
+  xBlocks[0] = X0;
+  xBlocks[1] = X1;
+
+  RCP<Xpetra::BlockedMultiVector<SC, LO, GO, NO>> Xexact =
+      rcp(new Xpetra::BlockedMultiVector<SC, LO, GO, NO>(domainMapExtractor->getBlockedMap(), xBlocks));
+
+  // For identity block matrix, RHS = Xexact
+  RCP<MultiVector> RHSmerged = Xexact->Merge();
+
+  RCP<Xpetra::BlockedMultiVector<SC, LO, GO, NO>> RHS =
+      rcp(new Xpetra::BlockedMultiVector<SC, LO, GO, NO>(rangeMapExtractor, RHSmerged));
+
+  // Initial guess
+  RCP<Xpetra::BlockedMultiVector<SC, LO, GO, NO>> X =
+      rcp(new Xpetra::BlockedMultiVector<SC, LO, GO, NO>(domainMapExtractor->getBlockedMap(), 1, true));
+
+  smoother.Apply(*X, *RHS);
+
+  Teuchos::Array<magnitude_type> residualNorms = Utilities::ResidualNorm(*bA, *X->Merge(), *RHS->Merge());
+  out << "||Blocked Residual|| = "
+      << std::setiosflags(std::ios::fixed) << std::setprecision(20)
+      << residualNorms[0] << std::endl;
+
+  TEST_EQUALITY(residualNorms[0] < 100 * MT::eps(), true);
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+void testDirectSolverSingular(MueLu::SmootherPrototype<Scalar, LocalOrdinal, GlobalOrdinal, Node>& smoother,
+                              Teuchos::FancyOStream& out, bool& success) {
+#include "MueLu_UseShortNames.hpp"
+
+  using ST             = Teuchos::ScalarTraits<SC>;
+  using magnitude_type = typename Teuchos::ScalarTraits<SC>::magnitudeType;
+  using MT             = Teuchos::ScalarTraits<magnitude_type>;
+
+  Teuchos::RCP<Matrix> A = TestHelpers::TestFactory<SC, LO, GO, NO>::Build1DPoisson(126);
+
+  {
+    A->resumeFill();
+
+    // Make the matrix singular by switching BCs to Neumann
+    Teuchos::Array<GlobalOrdinal> colidx(1);
+    Teuchos::Array<Scalar> vals(1);
+    GlobalOrdinal rgid;
+
+    rgid      = 0;
+    colidx[0] = rgid;
+    vals[0]   = ST::one();
+    A->replaceGlobalValues(rgid, colidx(), vals());
+
+    rgid      = 125;
+    colidx[0] = rgid;
+    vals[0]   = ST::one();
+    A->replaceGlobalValues(rgid, colidx(), vals());
+
+    A->fillComplete();
+  }
+
+  auto Nullspace = MultiVectorFactory::Build(A->getDomainMap(), 1);
+  Nullspace->putScalar(ST::one());
+
+  smoother.SetParameter("fix nullspace", Teuchos::ParameterEntry(true));
+  Level level;
+  TestHelpers::TestFactory<SC, LO, GO, NO>::createSingleLevelHierarchy(level);
+  level.Set("A", A);
+  level.Set("Nullspace", Nullspace);
+  smoother.Setup(level);
+
+  RCP<MultiVector> X   = MultiVectorFactory::Build(A->getDomainMap(), 1);
+  RCP<MultiVector> RHS = MultiVectorFactory::Build(A->getRangeMap(), 1);
+  X->putScalar((SC)0.0);
+
+  {  // Generate a RHS that has no constant component to make sure we can check the residual
+    auto one    = KokkosKernels::ArithTraits<typename Matrix::impl_scalar_type>::one();
+    auto lclRHS = RHS->getLocalViewHost(Tpetra::Access::OverwriteAll);
+    auto lclMap = RHS->getMap()->getLocalMap();
+    for (size_t k = 0; k < lclRHS.extent(0); ++k) {
+      if (lclMap.getGlobalElement(k) % 2 == 0)
+        lclRHS(k, 0) = one;
+      else
+        lclRHS(k, 0) = -one;
+    }
+  }
+
+  magnitude_type residualNorms = testApply(*A, smoother, *X, *RHS, out, success);
+
+  TEST_EQUALITY(residualNorms < 10000 * MT::eps(), true);
 }
 
 }  // namespace Smoothers

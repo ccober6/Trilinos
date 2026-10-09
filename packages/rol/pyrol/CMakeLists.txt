@@ -27,6 +27,8 @@ TRIBITS_ADD_OPTION_AND_DEFINE(PYROL_BINDER_USE_ONE_FILE
   "Enable the use of one file by Binder."
   OFF )
 
+SET(PYROL_BINDER_NUM_FILES "100" CACHE STRING "Number of files to use when PYROL_USE_ONE_FILE=OFF.")
+
 TRIBITS_ADD_OPTION_AND_DEFINE(PYROL_BINDER_CMAKE_ERROR
   PYROL_CMAKE_ERROR
   "Stop the configuration if Binder fails."
@@ -110,7 +112,7 @@ list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/dyn
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/boundconstraint")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/constraint")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/nlls")
-list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/polyproj")
+list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/projection")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/objective")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/operator")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/function/simopt")
@@ -158,12 +160,14 @@ list(APPEND ROL_all_include_dirs "${LAPACK_DIR}")
 list(APPEND ROL_all_include_dirs "${BLAS_DIR}")
 
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed")
+list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed/algorithm")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed/constraint")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed/factors")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed/objective")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed/objective/het")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed/objective/hom")
 list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed/utilities")
+list(APPEND ROL_all_include_dirs "${${PACKAGE_NAME}_SOURCE_DIR}/src/oed/vector")
 
 IF (PYROL_GENERATE_SRC)
   MESSAGE("-- PyROL_BINDER_EXECUTABLE:")
@@ -282,7 +286,8 @@ IF (PYROL_GENERATE_SRC)
     list(APPEND BINDER_OPTIONS -x cuda --cuda-host-only)
   ENDIF()
   list(APPEND BINDER_OPTIONS ${PyROL_BINDER_FLAGS})
-  list(APPEND BINDER_OPTIONS -std=c++${CMAKE_CXX_STANDARD})
+  #list(APPEND BINDER_OPTIONS -std=c++${CMAKE_CXX_STANDARD})
+  list(APPEND BINDER_OPTIONS -std=c++17)
   list(APPEND BINDER_OPTIONS -I${CMAKE_CURRENT_BINARY_DIR}/include_tmp)
   list(APPEND BINDER_OPTIONS -I${CMAKE_CURRENT_BINARY_DIR}/src)
   list(APPEND BINDER_OPTIONS -I${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -402,6 +407,7 @@ EXECUTE_PROCESS(COMMAND
   )
 MESSAGE(STATUS "pybind11 CMake path: ${pybind11_DIR}")
 
+find_package(Python3 REQUIRED Development.Module)
 find_package(pybind11 REQUIRED)
 
 EXECUTE_PROCESS(COMMAND

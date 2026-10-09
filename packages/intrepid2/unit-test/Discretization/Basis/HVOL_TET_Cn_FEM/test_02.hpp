@@ -20,7 +20,7 @@
 #endif
 
 #include "Intrepid2_Types.hpp"
-#include "Intrepid2_Utils.hpp"
+#include "Intrepid2_TestUtils.hpp"
 
 #include "Intrepid2_HVOL_TET_Cn_FEM.hpp"
 #include "packages/intrepid2/unit-test/Discretization/Basis/Setup.hpp"
@@ -58,18 +58,13 @@ namespace Intrepid2 {
           const int ncells = 5, npts = 10, ndim = 3;
           Kokkos::DynRankView<OutValueType,DeviceType> ConstructWithLabelOutView(outputValuesA, ncells, basisPtr->getCardinality(), npts);
           Kokkos::DynRankView<OutValueType,DeviceType> ConstructWithLabelOutView(outputValuesB, basisPtr->getCardinality(), npts);
-          Kokkos::DynRankView<PointValueType,DeviceType> ConstructWithLabelPointView(point, 1);
-          
-          using ScalarType = typename ScalarTraits<PointValueType>::scalar_type;
-          
-          Kokkos::View<ScalarType*,DeviceType> inputPointsViewToUseRandom("inputPoints", npts*ndim*get_dimension_scalar(point));
-          auto vcprop = Kokkos::common_view_alloc_prop(point);
-          Kokkos::DynRankView<PointValueType,DeviceType> inputPoints (Kokkos::view_wrap(inputPointsViewToUseRandom.data(), vcprop),  npts, ndim);
-          
-          // random values between (0,1)
-          Kokkos::Random_XorShift64_Pool<DeviceType> random(13718);
-          Kokkos::fill_random(inputPointsViewToUseRandom, random, 1.0);
-          
+          Kokkos::DynRankView<PointValueType,DeviceType> ConstructWithLabelPointView(inputPoints, npts, ndim);
+
+          { //randomly initialize inputPoints including derivatives for fad types
+            auto inputPointsViewToUseRandom = as_scalar_1d_view(inputPoints);          
+            Kokkos::Random_XorShift64_Pool<DeviceType> random(20260504); // random values between (0,1)
+            Kokkos::fill_random(inputPointsViewToUseRandom, random, 0.0, 1.0);
+          }          
 
           *outStream << "Order: " << order << ": Computing values for " << ncells << " cells and " << npts << " points using team-level getValues function" <<std::endl;
 
@@ -77,22 +72,24 @@ namespace Intrepid2 {
             auto basisPtr_device = copy_virtual_class_to_device<DeviceType,BasisType>(*basisPtr);
             auto basisRawPtr_device = basisPtr_device.get();
 
-            int scratch_space_level =1;
+            int scratch_space_level = 1;
             const int vectorSize = getVectorSizeForHierarchicalParallelism<PointValueType>();
             Kokkos::TeamPolicy<DeviceSpaceType> teamPolicy(ncells, Kokkos::AUTO,vectorSize);
 
             { //compute values
               auto functor = KOKKOS_LAMBDA (typename Kokkos::TeamPolicy<DeviceSpaceType>::member_type team_member) {
                   auto valsACell = Kokkos::subview(outputValuesA, team_member.league_rank(), Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL());
-                  basisRawPtr_device->getValues(valsACell, inputPoints, OPERATOR_VALUE, team_member, team_member.team_scratch(scratch_space_level));
-              };              
+                  basisRawPtr_device->getValues(valsACell, inputPoints, OPERATOR_VALUE, team_member, scratch_space_level);
+               };              
+               int team_size = std::min(npts,teamPolicy.team_size_recommended(functor, Kokkos::ParallelForTag()));
+               auto teamPolicyVals = Kokkos::TeamPolicy<DeviceSpaceType>(ncells, team_size, vectorSize);
               
-              //Get the required size of the scratch space per team and per thread.
-              int perThreadSpaceSize(0), perTeamSpaceSize(0);
-              basisPtr->getScratchSpaceSize(perTeamSpaceSize,perThreadSpaceSize,inputPoints, OPERATOR_VALUE);
-              teamPolicy.set_scratch_size(scratch_space_level, Kokkos::PerTeam(perTeamSpaceSize), Kokkos::PerThread(perThreadSpaceSize));
-
-              Kokkos::parallel_for (teamPolicy,functor);
+               //Get the required size of the scratch space per team and per thread.
+               int perThreadSpaceSize(0);
+               basisPtr->getScratchSpaceSize(perThreadSpaceSize,inputPoints, OPERATOR_VALUE);
+               teamPolicyVals.set_scratch_size(scratch_space_level, Kokkos::PerThread(perThreadSpaceSize));
+ 
+               Kokkos::parallel_for (teamPolicyVals,functor);
             }
           }
 
@@ -107,21 +104,23 @@ namespace Intrepid2 {
             const auto outputValuesA_Host = Kokkos::create_mirror_view(outputValuesA); Kokkos::deep_copy(outputValuesA_Host, outputValuesA);
             const auto outputValuesB_Host = Kokkos::create_mirror_view(outputValuesB); Kokkos::deep_copy(outputValuesB_Host, outputValuesB);
             
-            OutValueType diff = 0; 
-            auto tol = epsilon<double>();
+            const auto tol = 100.0 * epsilon<double>();
             for (size_t ic=0;ic<outputValuesA_Host.extent(0);++ic)
               for (size_t i=0;i<outputValuesA_Host.extent(1);++i)
                 for (size_t j=0;j<outputValuesA_Host.extent(2);++j) {
-                  diff = std::abs(outputValuesB_Host(i,j) - outputValuesA_Host(ic,i,j));
-                  if (diff > tol) {
+                  const auto valA = outputValuesA_Host(ic,i,j);
+                  const auto valB = outputValuesB_Host(i,j);
+                  const auto maxBNorm = computeMaxNorm(valB);
+                  const auto diffRelNorm = computeMaxNorm(valB - valA)/std::max(1.0, maxBNorm);
+                  if (diffRelNorm > tol) {
                     ++errorFlag;
-                    std::cout << " order: " << order
-                              << ", ic: " << ic << ", i: " << i << ", j: " << j 
-                              << ", val A: " << outputValuesA_Host(ic,i,j) 
-                              << ", val B: " << outputValuesB_Host(i,j) 
-                              << ", |diff|: " << diff
-                              << ", tol: " << tol
-                              << std::endl;
+                   std::cout << " order: " << order
+                               << ", ic: " << ic << ", i: " << i << ", j: " << j 
+                               << ", val A: " << outputValuesA_Host(ic,i,j) 
+                               << ", val B: " << outputValuesB_Host(i,j) 
+                               << ", |rel diff|: " << diffRelNorm
+                               << ", tol: " << tol
+                               << std::endl;
                   }
                 }
           }

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSBLAS1_UPDATE_HPP_
 #define KOKKOSBLAS1_UPDATE_HPP_
@@ -80,13 +67,22 @@ void update(const execution_space& space, const typename XMV::non_const_value_ty
                 "XMV, YMV, and ZMV must either have rank 1 or rank 2.");
 
   // Check compatibility of dimensions at run time.
-  if (X.extent(0) != Y.extent(0) || X.extent(1) != Y.extent(1) || X.extent(0) != Z.extent(0) ||
-      X.extent(1) != Z.extent(1)) {
-    std::ostringstream os;
-    os << "KokkosBlas::update (MV): Dimensions of X, Y, and Z do not match: "
-       << "Z: " << Z.extent(0) << " x " << Z.extent(1) << ", X: " << X.extent(0) << " x " << X.extent(1)
-       << ", Y: " << Y.extent(0) << " x " << Y.extent(1);
-    KokkosKernels::Impl::throw_runtime_exception(os.str());
+  if constexpr (ZMV::rank == 1) {
+    if (X.extent(0) != Y.extent(0) || X.extent(0) != Z.extent(0)) {
+      std::ostringstream os;
+      os << "KokkosBlas::update (MV): Dimensions of X, Y, and Z do not match: "
+         << "Z: " << Z.extent(0) << ", X: " << X.extent(0) << ", Y: " << Y.extent(0);
+      KokkosKernels::Impl::throw_runtime_exception(os.str());
+    }
+  } else if constexpr (ZMV::rank == 2) {
+    if (X.extent(0) != Y.extent(0) || X.extent(1) != Y.extent(1) || X.extent(0) != Z.extent(0) ||
+        X.extent(1) != Z.extent(1)) {
+      std::ostringstream os;
+      os << "KokkosBlas::update (MV): Dimensions of X, Y, and Z do not match: "
+         << "Z: " << Z.extent(0) << " x " << Z.extent(1) << ", X: " << X.extent(0) << " x " << X.extent(1)
+         << ", Y: " << Y.extent(0) << " x " << Y.extent(1);
+      KokkosKernels::Impl::throw_runtime_exception(os.str());
+    }
   }
 
   // Create unmanaged versions of the input Views.  XMV, YMV, and ZMV

@@ -32,8 +32,6 @@
 
 #include <MueLu_Utilities.hpp>
 
-#include <MueLu_MutuallyExclusiveTime.hpp>
-
 #ifdef HAVE_MUELU_BELOS
 #include <BelosConfigDefs.hpp>
 #include <BelosLinearProblem.hpp>
@@ -318,7 +316,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
             std::string filename = runList.get<std::string>("filename");
             if (numReruns > 1)
               filename += "_run" + MueLu::toString(rerunCount);
-            filename += (lib == Xpetra::UseEpetra ? ".epetra" : ".tpetra");
+            filename += ".tpetra";
 
             savedOut  = dup(STDOUT_FILENO);
             openedOut = fopen(filename.c_str(), "w");

@@ -22,7 +22,7 @@
     \li     \f$\xi_j\f$ are points of the subcell manifold
 
     Note: the points \xi_j and tangent vectors t_j are chosen such that the bases \phi_i are
-    uniquely identified by the values \phi_i(\xi_j) \dot t_j.
+    uniquely identified by the values \f$\phi_i(\xi_j) \dot t_j\f$.
 
     \author Created by Kyungjoo Kim
  */
@@ -322,7 +322,7 @@ getCoeffMatrix_HCURL(OutputViewType &output,
     {
       //After solving the system w/ LAPACK, Phi contains A^T (or A^-T)
       // transpose and clean up numerical noise (for permutation matrices)
-      const double eps = tolerence();
+      const double eps = std::sqrt(tolerance()); // NVR: loosened this to allow better noise-cleaning for high-order polynomials
       for (ordinal_type i=0;i<ndofSubcell;++i) {
         auto intmatii = std::round(OrtMat(i,i));
         OrtMat(i,i) = (std::abs(OrtMat(i,i) - intmatii) < eps) ? intmatii : OrtMat(i,i);

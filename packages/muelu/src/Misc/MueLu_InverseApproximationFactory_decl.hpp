@@ -24,7 +24,7 @@
 namespace MueLu {
 
 /*!
-  @class InverseApproximationFactory class.
+  @class InverseApproximationFactory
   @brief Factory for building the approximate inverse of a matrix.
 
   ## Context, assumptions, and use cases ##
@@ -91,6 +91,9 @@ class InverseApproximationFactory : public SingleLevelFactoryBase {
  private:
   //! Sparse inverse calculation method.
   RCP<Matrix> GetSparseInverse(const RCP<Matrix>& A, const RCP<const CrsGraph>& sparsityPattern) const;
+
+  //! Sparse factor inverse calculation method.
+  RCP<Matrix> GetFactoredSparseInverse(const RCP<Matrix>& A, const RCP<const CrsGraph>& sparsityPattern) const;
 
 };  // class InverseApproximationFactory
 

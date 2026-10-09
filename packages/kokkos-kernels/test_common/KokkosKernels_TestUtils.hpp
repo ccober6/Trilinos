@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSKERNELS_TEST_UTILS_HPP
 #define KOKKOSKERNELS_TEST_UTILS_HPP
@@ -21,7 +8,7 @@
 
 #include "KokkosKernels_Utils.hpp"
 #include "KokkosKernels_IOUtils.hpp"
-#include "Kokkos_ArithTraits.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "KokkosBatched_Vector.hpp"
 // Make this include-able from all subdirectories
 #include "../tpls/gtest/gtest/gtest.h"  //for EXPECT_**
@@ -57,6 +44,34 @@
 
 namespace Test {
 
+namespace Impl {
+
+template <class Scalar1, class Scalar2, class Scalar3>
+::testing::AssertionResult kk_expect_near_pred_format(const char* expr1, const char* expr2, const char* expr3,
+                                                      const Scalar1& val1, const Scalar2& val2, const Scalar3& tol) {
+  using scalar1_type = typename std::remove_cv<typename std::remove_reference<Scalar1>::type>::type;
+  using scalar3_type = typename std::remove_cv<typename std::remove_reference<Scalar3>::type>::type;
+  using AT1          = KokkosKernels::ArithTraits<scalar1_type>;
+  using AT3          = KokkosKernels::ArithTraits<scalar3_type>;
+
+  const double abs_diff = static_cast<double>(AT1::abs(val1 - val2));
+  const double abs_tol  = static_cast<double>(AT3::abs(tol));
+
+  if (abs_diff <= abs_tol) {
+    return ::testing::AssertionSuccess();
+  }
+
+  return ::testing::AssertionFailure() << "The difference between " << expr1 << " and " << expr2 << " is " << abs_diff
+                                       << ", which exceeds " << expr3 << ", where\n"
+                                       << expr1 << " evaluates to " << ::testing::PrintToString(val1) << ",\n"
+                                       << expr2 << " evaluates to " << ::testing::PrintToString(val2) << ", and\n"
+                                       << expr3 << " evaluates to " << ::testing::PrintToString(tol) << ".";
+}
+
+}  // namespace Impl
+
+#define KK_EXPECT_NEAR(val1, val2, tol) EXPECT_PRED_FORMAT3(::Test::Impl::kk_expect_near_pred_format, val1, val2, tol)
+
 // Utility class for testing kernels with rank-1 and rank-2 views that may be
 // LayoutStride. Simplifies making a LayoutStride view of a given size that is
 // actually noncontiguous, and host-device transfers for checking results on
@@ -87,13 +102,13 @@ struct view_stride_adapter {
   static constexpr int rank     = ViewType::rank;
 
   using DView = ViewType;
-  using HView = typename DView::HostMirror;
+  using HView = typename DView::host_mirror_type;
   // If not strided, the base view types are the same as DView/HView.
   // But if strided, the base views have one additional dimension, so that
   // d_view/h_view have stride > 1 between consecutive elements.
   using DViewBase = std::conditional_t<
       strided, Kokkos::View<typename ViewType::data_type*, Kokkos::LayoutRight, typename ViewType::device_type>, DView>;
-  using HViewBase = typename DViewBase::HostMirror;
+  using HViewBase = typename DViewBase::host_mirror_type;
 
   view_stride_adapter(const std::string& label, int m, int n = 1) {
     if constexpr (rank == 1) {
@@ -135,8 +150,8 @@ struct view_stride_adapter {
 
 template <class Scalar1, class Scalar2, class Scalar3>
 void EXPECT_NEAR_KK(Scalar1 val1, Scalar2 val2, Scalar3 tol, std::string msg = "") {
-  typedef Kokkos::ArithTraits<Scalar1> AT1;
-  typedef Kokkos::ArithTraits<Scalar3> AT3;
+  typedef KokkosKernels::ArithTraits<Scalar1> AT1;
+  typedef KokkosKernels::ArithTraits<Scalar3> AT3;
   EXPECT_LE((double)AT1::abs(val1 - val2), (double)AT3::abs(tol)) << msg;
 }
 
@@ -144,8 +159,8 @@ template <class Scalar1, class Scalar2, class Scalar3>
 void EXPECT_NEAR_KK_REL(Scalar1 val1, Scalar2 val2, Scalar3 tol, std::string msg = "") {
   typedef typename std::remove_reference<decltype(val1)>::type hv1_type;
   typedef typename std::remove_reference<decltype(val2)>::type hv2_type;
-  const auto ahv1 = Kokkos::ArithTraits<hv1_type>::abs(val1);
-  const auto ahv2 = Kokkos::ArithTraits<hv2_type>::abs(val2);
+  const auto ahv1 = KokkosKernels::ArithTraits<hv1_type>::abs(val1);
+  const auto ahv2 = KokkosKernels::ArithTraits<hv2_type>::abs(val2);
   EXPECT_NEAR_KK(val1, val2, tol * Kokkos::max(ahv1, ahv2), msg);
 }
 
@@ -165,8 +180,8 @@ void EXPECT_NEAR_KK_1DVIEW(ViewType1 v1, ViewType2 v2, Scalar tol) {
   size_t v2_size = v2.extent(0);
   EXPECT_EQ(v1_size, v2_size);
 
-  typename ViewType1::HostMirror h_v1 = Kokkos::create_mirror_view(v1);
-  typename ViewType2::HostMirror h_v2 = Kokkos::create_mirror_view(v2);
+  typename ViewType1::host_mirror_type h_v1 = Kokkos::create_mirror_view(v1);
+  typename ViewType2::host_mirror_type h_v2 = Kokkos::create_mirror_view(v2);
 
   KokkosKernels::Impl::safe_device_to_host_deep_copy(v1.extent(0), v1, h_v1);
   KokkosKernels::Impl::safe_device_to_host_deep_copy(v2.extent(0), v2, h_v2);
@@ -182,8 +197,8 @@ void EXPECT_NEAR_KK_REL_1DVIEW(ViewType1 v1, ViewType2 v2, Scalar tol) {
   size_t v2_size = v2.extent(0);
   EXPECT_EQ(v1_size, v2_size);
 
-  typename ViewType1::HostMirror h_v1 = Kokkos::create_mirror_view(v1);
-  typename ViewType2::HostMirror h_v2 = Kokkos::create_mirror_view(v2);
+  typename ViewType1::host_mirror_type h_v1 = Kokkos::create_mirror_view(v1);
+  typename ViewType2::host_mirror_type h_v2 = Kokkos::create_mirror_view(v2);
 
   KokkosKernels::Impl::safe_device_to_host_deep_copy(v1.extent(0), v1, h_v1);
   KokkosKernels::Impl::safe_device_to_host_deep_copy(v2.extent(0), v2, h_v2);
@@ -226,11 +241,21 @@ template <typename vec_t>
 vec_t create_random_x_vector(vec_t& kok_x, double max_value = 10.0) {
   typedef typename vec_t::value_type scalar_t;
   auto h_x = Kokkos::create_mirror_view(kok_x);
-  for (size_t j = 0; j < h_x.extent(1); ++j) {
-    for (size_t i = 0; i < h_x.extent(0); ++i) {
-      scalar_t r       = static_cast<scalar_t>(rand()) / static_cast<scalar_t>(RAND_MAX / max_value);
-      h_x.access(i, j) = r;
+  if constexpr (vec_t::rank == 2) {
+    for (size_t j = 0; j < h_x.extent(1); ++j) {
+      for (size_t i = 0; i < h_x.extent(0); ++i) {
+        scalar_t r       = static_cast<scalar_t>(rand()) / static_cast<scalar_t>(RAND_MAX / max_value);
+        h_x.access(i, j) = r;
+      }
     }
+  } else if constexpr (vec_t::rank == 1) {
+    for (size_t i = 0; i < h_x.extent(0); ++i) {
+      scalar_t r    = static_cast<scalar_t>(rand()) / static_cast<scalar_t>(RAND_MAX / max_value);
+      h_x.access(i) = r;
+    }
+  } else if constexpr (vec_t::rank == 0) {
+    scalar_t r = static_cast<scalar_t>(rand()) / static_cast<scalar_t>(RAND_MAX / max_value);
+    h_x()      = r;
   }
   Kokkos::deep_copy(kok_x, h_x);
   return kok_x;
@@ -365,9 +390,9 @@ class RandCsMatrix {
   MapViewTypeD map_d_;
   IdViewTypeD ids_d_;
   ValViewTypeD vals_d_;
-  using MapViewTypeH = typename MapViewTypeD::HostMirror;
-  using IdViewTypeH  = typename IdViewTypeD::HostMirror;
-  using ValViewTypeH = typename ValViewTypeD::HostMirror;
+  using MapViewTypeH = typename MapViewTypeD::host_mirror_type;
+  using IdViewTypeH  = typename IdViewTypeD::host_mirror_type;
+  using ValViewTypeH = typename ValViewTypeD::host_mirror_type;
   MapViewTypeH map_;
   IdViewTypeH ids_;
   ValViewTypeH vals_;

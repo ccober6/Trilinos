@@ -122,27 +122,20 @@ namespace Intrepid2 {
 
           typename WorkViewType::pointer_type ptr = _work.data() + _work.extent(0)*ptBegin*get_dimension_scalar(_work);
 
-          auto vcprop = Kokkos::common_view_alloc_prop(_work);
-          WorkViewType  work(Kokkos::view_wrap(ptr,vcprop), (ptEnd-ptBegin)*_work.extent(0));
+          WorkViewType work = createMatchingUnmanagedView<WorkViewType>(_work, ptr, (ptEnd-ptBegin)*_work.extent(0));
 
-          switch (OpType) {
-          case OPERATOR_VALUE : {
+          if constexpr (OpType == OPERATOR_VALUE) {
             auto output = Kokkos::subview( _outputValues, Kokkos::ALL(), ptRange );
             Serial<OpType>::getValues( output, input, work, _vinv, _order );
-            break;
           }
-          case OPERATOR_CURL:
-          case OPERATOR_D1:
-          case OPERATOR_D2:  {
+          else if constexpr ((OpType == OPERATOR_CURL) || (OpType == OPERATOR_D1) || (OpType == OPERATOR_D2))  {
             auto output = Kokkos::subview( _outputValues, Kokkos::ALL(), ptRange, Kokkos::ALL() );
             Serial<OpType>::getValues( output, input, work, _vinv, _order );
-            break;
           }
-          default: {
+          else {
             INTREPID2_TEST_FOR_ABORT( true,
                                       ">>> ERROR: (Intrepid2::Basis_HGRAD_TRI_Cn_FEM::Functor) operator is not supported");
 
-          }
           }
         }
       };
@@ -209,8 +202,7 @@ namespace Intrepid2 {
     }
 
     virtual void 
-    getScratchSpaceSize(      ordinal_type& perTeamSpaceSize,
-                              ordinal_type& perThreadSpaceSize,
+    getScratchSpaceSize(      ordinal_type& perThreadSpaceSize,
                         const PointViewType inputPoints,
                         const EOperator operatorType = OPERATOR_VALUE) const override;
 
@@ -221,7 +213,7 @@ namespace Intrepid2 {
       const PointViewType  inputPoints,
       const EOperator operatorType,
       const typename Kokkos::TeamPolicy<typename DeviceType::execution_space>::member_type& team_member,
-      const typename DeviceType::execution_space::scratch_memory_space & scratchStorage, 
+      const int threadScratchLevel, 
       const ordinal_type subcellDim = -1,
       const ordinal_type subcellOrdinal = -1) const override;
 

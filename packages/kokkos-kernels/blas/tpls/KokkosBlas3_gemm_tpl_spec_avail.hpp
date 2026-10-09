@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSBLAS3_GEMM_TPL_SPEC_AVAIL_HPP_
 #define KOKKOSBLAS3_GEMM_TPL_SPEC_AVAIL_HPP_
@@ -114,16 +101,16 @@ KOKKOSBLAS3_GEMM_TPL_SPEC_AVAIL_CUBLAS(Kokkos::complex<float>, Kokkos::LayoutRig
 // rocBLAS
 #if defined(KOKKOSKERNELS_ENABLE_TPL_ROCBLAS)
 
-#define KOKKOSBLAS3_GEMM_TPL_SPEC_AVAIL_ROCBLAS(SCALAR, LAYOUT, MEMSPACE)                              \
-  template <class ExecSpace>                                                                           \
-  struct gemm_tpl_spec_avail<ExecSpace,                                                                \
-                             Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<ExecSpace, MEMSPACE>, \
-                                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                   \
-                             Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<ExecSpace, MEMSPACE>, \
-                                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                   \
-                             Kokkos::View<SCALAR**, LAYOUT, Kokkos::Device<ExecSpace, MEMSPACE>,       \
-                                          Kokkos::MemoryTraits<Kokkos::Unmanaged> > > {                \
-    enum : bool { value = true };                                                                      \
+#define KOKKOSBLAS3_GEMM_TPL_SPEC_AVAIL_ROCBLAS(SCALAR, LAYOUT, MEMSPACE)                                \
+  template <>                                                                                            \
+  struct gemm_tpl_spec_avail<Kokkos::HIP,                                                                \
+                             Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEMSPACE>, \
+                                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                     \
+                             Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEMSPACE>, \
+                                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                     \
+                             Kokkos::View<SCALAR**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEMSPACE>,       \
+                                          Kokkos::MemoryTraits<Kokkos::Unmanaged> > > {                  \
+    enum : bool { value = true };                                                                        \
   };
 
 KOKKOSBLAS3_GEMM_TPL_SPEC_AVAIL_ROCBLAS(double, Kokkos::LayoutLeft, Kokkos::HIPSpace)

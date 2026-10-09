@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSSPARSE_IMPL_SPMV_BSRMATRIX_IMPL_HPP_
 #define KOKKOSSPARSE_IMPL_SPMV_BSRMATRIX_IMPL_HPP_
@@ -480,7 +467,7 @@ struct BSR_GEMV_Functor {
   typedef typename AMatrix::non_const_value_type value_type;
   typedef typename Kokkos::TeamPolicy<execution_space> team_policy;
   typedef typename team_policy::member_type team_member;
-  typedef Kokkos::ArithTraits<value_type> ATV;
+  typedef KokkosKernels::ArithTraits<value_type> ATV;
 
   //! Nonconst version of the type of column indices in the sparse matrix.
   typedef typename AMatrix::non_const_ordinal_type ordinal_type;
@@ -519,7 +506,7 @@ struct BSR_GEMV_Functor {
         for (ordinal_type ii = 0; ii < block_dim; ++ii) {
           value_type t(0);
           for (ordinal_type jj = 0; jj < block_dim; ++jj) {
-            const auto aval = Kokkos::ArithTraits<value_type>::conj(Aview(ii, jj));
+            const auto aval = KokkosKernels::ArithTraits<value_type>::conj(Aview(ii, jj));
             t += aval * m_x(xstart + jj);
           }
           m_y(ystart + ii) += alpha * t;
@@ -545,7 +532,7 @@ struct BSR_GEMV_Functor {
     const size_type Y_ptEnd = Y_ptBeg + block_dim;
     auto Y_cur              = Kokkos::subview(m_y, ::Kokkos::make_pair(Y_ptBeg, Y_ptEnd));
 
-    const y_value_type val_one = Kokkos::ArithTraits<y_value_type>::one();
+    const y_value_type val_one = KokkosKernels::ArithTraits<y_value_type>::one();
     if (beta != val_one) {
       KokkosBlas::Impl::TeamVectorScaleInternal::invoke(dev, block_dim, beta, Y_cur.data(),
                                                         static_cast<int>(Y_cur.stride(0)));
@@ -598,9 +585,9 @@ void spMatVec_no_transpose(
   // This is required to maintain semantics of KokkosKernels native SpMV:
   // if y contains NaN but beta = 0, the result y should be filled with 0.
   // For example, this is useful for passing in uninitialized y and beta=0.
-  if (beta == Kokkos::ArithTraits<BetaType>::zero())
-    Kokkos::deep_copy(exec, y, Kokkos::ArithTraits<BetaType>::zero());
-  else if (beta != Kokkos::ArithTraits<BetaType>::one())
+  if (beta == KokkosKernels::ArithTraits<BetaType>::zero())
+    Kokkos::deep_copy(exec, y, KokkosKernels::ArithTraits<BetaType>::zero());
+  else if (beta != KokkosKernels::ArithTraits<BetaType>::one())
     KokkosBlas::scal(exec, y, beta, y);
 
   //
@@ -710,7 +697,7 @@ struct BSR_GEMV_Transpose_Functor {
   typedef typename AMatrix::non_const_value_type value_type;
   typedef typename Kokkos::TeamPolicy<execution_space> team_policy;
   typedef typename team_policy::member_type team_member;
-  typedef Kokkos::ArithTraits<value_type> ATV;
+  typedef KokkosKernels::ArithTraits<value_type> ATV;
 
   //! Nonconst version of the type of column indices in the sparse matrix.
   typedef typename AMatrix::non_const_ordinal_type ordinal_type;
@@ -752,7 +739,7 @@ struct BSR_GEMV_Transpose_Functor {
         for (ordinal_type jj = 0; jj < block_dim; ++jj) {
           value_type t(0);
           for (ordinal_type ii = 0; ii < block_dim; ++ii) {
-            const auto aval = Kokkos::ArithTraits<value_type>::conj(Aview(ii, jj));
+            const auto aval = KokkosKernels::ArithTraits<value_type>::conj(Aview(ii, jj));
             t += aval * xview(ii);
           }
           t *= alpha;
@@ -787,7 +774,7 @@ struct BSR_GEMV_Transpose_Functor {
     const auto myRow = m_A.block_row_Const(iBlock);
     const auto count = myRow.length;
 
-    const y_value_type val_zero = Kokkos::ArithTraits<y_value_type>::zero();
+    const y_value_type val_zero = KokkosKernels::ArithTraits<y_value_type>::zero();
     y_value_type *shared_y      = (y_value_type *)dev.team_shmem().get_shmem(block_dim * sizeof(y_value_type));
 
     if (conjugate) {
@@ -847,12 +834,12 @@ void spMatVec_transpose(
   // This is required to maintain semantics of KokkosKernels native SpMV:
   // if y contains NaN but beta = 0, the result y should be filled with 0.
   // For example, this is useful for passing in uninitialized y and beta=0.
-  if (beta == Kokkos::ArithTraits<BetaType>::zero())
-    Kokkos::deep_copy(exec, y, Kokkos::ArithTraits<BetaType>::zero());
-  else if (beta != Kokkos::ArithTraits<BetaType>::one())
+  if (beta == KokkosKernels::ArithTraits<BetaType>::zero())
+    Kokkos::deep_copy(exec, y, KokkosKernels::ArithTraits<BetaType>::zero());
+  else if (beta != KokkosKernels::ArithTraits<BetaType>::one())
     KokkosBlas::scal(exec, y, beta, y);
 
-  if (alpha == Kokkos::ArithTraits<AlphaType>::zero()) return;
+  if (alpha == KokkosKernels::ArithTraits<AlphaType>::zero()) return;
 
   //
   // Treat the case y <- alpha * A^T * x + beta * y
@@ -896,9 +883,9 @@ void spMatVec_transpose(const typename AMatrix::execution_space &exec, Handle *h
 
   const auto block_dim = A.blockDim();
 
-  if (beta == Kokkos::ArithTraits<BetaType>::zero())
-    Kokkos::deep_copy(exec, y, Kokkos::ArithTraits<BetaType>::zero());
-  else if (beta != Kokkos::ArithTraits<BetaType>::one())
+  if (beta == KokkosKernels::ArithTraits<BetaType>::zero())
+    Kokkos::deep_copy(exec, y, KokkosKernels::ArithTraits<BetaType>::zero());
+  else if (beta != KokkosKernels::ArithTraits<BetaType>::one())
     KokkosBlas::scal(exec, y, beta, y);
 
   bool use_dynamic_schedule = handle->force_dynamic_schedule;
@@ -965,7 +952,7 @@ struct BSR_GEMM_Functor {
   typedef typename AMatrix::non_const_value_type value_type;
   typedef typename Kokkos::TeamPolicy<execution_space> team_policy;
   typedef typename team_policy::member_type team_member;
-  typedef Kokkos::ArithTraits<value_type> ATV;
+  typedef KokkosKernels::ArithTraits<value_type> ATV;
 
   //! Nonconst version of the type of column indices in the sparse matrix.
   typedef typename AMatrix::non_const_ordinal_type ordinal_type;
@@ -1016,7 +1003,7 @@ struct BSR_GEMM_Functor {
           for (ordinal_type ii = 0; ii < block_dim; ++ii) {
             value_type t(0);
             for (ordinal_type jj = 0; jj < block_dim; ++jj) {
-              const auto aval = Kokkos::ArithTraits<value_type>::conj(Aview(ii, jj));
+              const auto aval = KokkosKernels::ArithTraits<value_type>::conj(Aview(ii, jj));
               t += aval * m_x(xstart + jj, jr);
             }
             m_y(ystart + ii, jr) += alpha * t;
@@ -1046,7 +1033,7 @@ struct BSR_GEMM_Functor {
     const size_type Y_ptEnd = Y_ptBeg + block_dim;
     auto Y_cur              = Kokkos::subview(m_y, ::Kokkos::make_pair(Y_ptBeg, Y_ptEnd), Kokkos::ALL());
 
-    const y_value_type val_one = Kokkos::ArithTraits<y_value_type>::one();
+    const y_value_type val_one = KokkosKernels::ArithTraits<y_value_type>::one();
     if (beta != val_one) {
       KokkosBlas::Impl::TeamVectorScaleInternal::invoke(dev, block_dim, num_rhs, beta, Y_cur.data(),
                                                         static_cast<int>(Y_cur.stride(0)),
@@ -1064,9 +1051,10 @@ struct BSR_GEMM_Functor {
         const auto X_blkCol = myRow.block_colidx(jBlock);
         const auto X_ptBeg  = X_blkCol * block_dim;
         const auto X_cur    = Kokkos::subview(m_x, ::Kokkos::make_pair(X_ptBeg, X_ptBeg + block_dim), Kokkos::ALL());
-        KokkosBatched::TeamVectorGemmInternal<KokkosBatched::Algo::Gemm::Unblocked, true>::invoke(
-            dev, static_cast<int>(block_dim), static_cast<int>(num_rhs), static_cast<int>(block_dim), alpha,
-            A_cur.data(), static_cast<int>(A_cur.stride(0)), static_cast<int>(A_cur.stride(1)), X_cur.data(),
+        KokkosBatched::Impl::TeamVectorGemmInternal<KokkosBatched::Algo::Gemm::Unblocked>::invoke(
+            dev, KokkosBlas::Impl::OpConj(), KokkosBlas::Impl::OpID(), static_cast<int>(block_dim),
+            static_cast<int>(num_rhs), static_cast<int>(block_dim), alpha, A_cur.data(),
+            static_cast<int>(A_cur.stride(0)), static_cast<int>(A_cur.stride(1)), X_cur.data(),
             static_cast<int>(X_cur.stride(0)), static_cast<int>(X_cur.stride(1)), val_one, Y_cur.data(),
             static_cast<int>(Y_cur.stride(0)), static_cast<int>(Y_cur.stride(1)));
       }
@@ -1076,11 +1064,11 @@ struct BSR_GEMM_Functor {
         const auto X_blkCol = myRow.block_colidx(jBlock);
         const auto X_ptBeg  = X_blkCol * block_dim;
         const auto X_cur    = Kokkos::subview(m_x, ::Kokkos::make_pair(X_ptBeg, X_ptBeg + block_dim), Kokkos::ALL());
-        KokkosBatched::TeamVectorGemmInternal<KokkosBatched::Algo::Gemm::Unblocked, false>::invoke(
-            dev, block_dim, num_rhs, block_dim, alpha, A_cur.data(), static_cast<int>(A_cur.stride(0)),
-            static_cast<int>(A_cur.stride(1)), X_cur.data(), static_cast<int>(X_cur.stride(0)),
-            static_cast<int>(X_cur.stride(1)), val_one, Y_cur.data(), static_cast<int>(Y_cur.stride(0)),
-            static_cast<int>(Y_cur.stride(1)));
+        KokkosBatched::Impl::TeamVectorGemmInternal<KokkosBatched::Algo::Gemm::Unblocked>::invoke(
+            dev, KokkosBlas::Impl::OpID(), KokkosBlas::Impl::OpID(), block_dim, num_rhs, block_dim, alpha, A_cur.data(),
+            static_cast<int>(A_cur.stride(0)), static_cast<int>(A_cur.stride(1)), X_cur.data(),
+            static_cast<int>(X_cur.stride(0)), static_cast<int>(X_cur.stride(1)), val_one, Y_cur.data(),
+            static_cast<int>(Y_cur.stride(0)), static_cast<int>(Y_cur.stride(1)));
       }
     }
   }
@@ -1103,9 +1091,9 @@ void spMatMultiVec_no_transpose(
   // This is required to maintain semantics of KokkosKernels native SpMV:
   // if y contains NaN but beta = 0, the result y should be filled with 0.
   // For example, this is useful for passing in uninitialized y and beta=0.
-  if (beta == Kokkos::ArithTraits<BetaType>::zero())
-    Kokkos::deep_copy(exec, y, Kokkos::ArithTraits<BetaType>::zero());
-  else if (beta != Kokkos::ArithTraits<BetaType>::one())
+  if (beta == KokkosKernels::ArithTraits<BetaType>::zero())
+    Kokkos::deep_copy(exec, y, KokkosKernels::ArithTraits<BetaType>::zero());
+  else if (beta != KokkosKernels::ArithTraits<BetaType>::one())
     KokkosBlas::scal(exec, y, beta, y);
   //
   // Treat the case y <- alpha * A * x + beta * y
@@ -1211,7 +1199,7 @@ struct BSR_GEMM_Transpose_Functor {
   typedef typename AMatrix::non_const_value_type value_type;
   typedef typename Kokkos::TeamPolicy<execution_space> team_policy;
   typedef typename team_policy::member_type team_member;
-  typedef Kokkos::ArithTraits<value_type> ATV;
+  typedef KokkosKernels::ArithTraits<value_type> ATV;
 
   //! Nonconst version of the type of column indices in the sparse matrix.
   typedef typename AMatrix::non_const_ordinal_type ordinal_type;
@@ -1260,7 +1248,7 @@ struct BSR_GEMM_Transpose_Functor {
           for (ordinal_type jj = 0; jj < block_dim; ++jj) {
             value_type t(0);
             for (ordinal_type ii = 0; ii < block_dim; ++ii) {
-              const auto aval = Kokkos::ArithTraits<value_type>::conj(Aview(ii, jj));
+              const auto aval = KokkosKernels::ArithTraits<value_type>::conj(Aview(ii, jj));
               t += aval * xview(ii, jr);
             }
             t *= alpha;
@@ -1298,17 +1286,17 @@ struct BSR_GEMM_Transpose_Functor {
     const auto myRow = m_A.block_row_Const(iBlock);
     const auto count = myRow.length;
 
-    const y_value_type val_zero = Kokkos::ArithTraits<y_value_type>::zero();
+    const y_value_type val_zero = KokkosKernels::ArithTraits<y_value_type>::zero();
     y_value_type *shared_y = (y_value_type *)dev.team_shmem().get_shmem(block_dim * num_rhs * sizeof(y_value_type));
 
     if (conjugate) {
       for (ordinal_type jBlock = 0; jBlock < count; ++jBlock) {
         const auto A_cur = myRow.block(jBlock);
         //
-        KokkosBatched::TeamVectorGemmInternal<KokkosBatched::Algo::Gemm::Unblocked, true>::invoke(
-            dev, block_dim, num_rhs, block_dim, alpha, A_cur.data(), static_cast<int>(A_cur.stride(1)),
-            static_cast<int>(A_cur.stride(0)), X_cur.data(), static_cast<int>(X_cur.stride(0)),
-            static_cast<int>(X_cur.stride(1)), val_zero, shared_y, 1, block_dim);
+        KokkosBatched::Impl::TeamVectorGemmInternal<KokkosBatched::Algo::Gemm::Unblocked>::invoke(
+            dev, KokkosBlas::Impl::OpConj(), KokkosBlas::Impl::OpID(), block_dim, num_rhs, block_dim, alpha,
+            A_cur.data(), static_cast<int>(A_cur.stride(1)), static_cast<int>(A_cur.stride(0)), X_cur.data(),
+            static_cast<int>(X_cur.stride(0)), static_cast<int>(X_cur.stride(1)), val_zero, shared_y, 1, block_dim);
         //
         dev.team_barrier();
         //
@@ -1326,10 +1314,10 @@ struct BSR_GEMM_Transpose_Functor {
       for (ordinal_type jBlock = 0; jBlock < count; ++jBlock) {
         const auto A_cur = myRow.block(jBlock);
         //
-        KokkosBatched::TeamVectorGemmInternal<KokkosBatched::Algo::Gemm::Unblocked, false>::invoke(
-            dev, block_dim, num_rhs, block_dim, alpha, A_cur.data(), static_cast<int>(A_cur.stride(1)),
-            static_cast<int>(A_cur.stride(0)), X_cur.data(), static_cast<int>(X_cur.stride(0)),
-            static_cast<int>(X_cur.stride(1)), val_zero, shared_y, 1, block_dim);
+        KokkosBatched::Impl::TeamVectorGemmInternal<KokkosBatched::Algo::Gemm::Unblocked>::invoke(
+            dev, KokkosBlas::Impl::OpID(), KokkosBlas::Impl::OpID(), block_dim, num_rhs, block_dim, alpha, A_cur.data(),
+            static_cast<int>(A_cur.stride(1)), static_cast<int>(A_cur.stride(0)), X_cur.data(),
+            static_cast<int>(X_cur.stride(0)), static_cast<int>(X_cur.stride(1)), val_zero, shared_y, 1, block_dim);
         //
         dev.team_barrier();
         //
@@ -1362,9 +1350,9 @@ void spMatMultiVec_transpose(
   // This is required to maintain semantics of KokkosKernels native SpMV:
   // if y contains NaN but beta = 0, the result y should be filled with 0.
   // For example, this is useful for passing in uninitialized y and beta=0.
-  if (beta == Kokkos::ArithTraits<BetaType>::zero())
-    Kokkos::deep_copy(exec, y, Kokkos::ArithTraits<BetaType>::zero());
-  else if (beta != Kokkos::ArithTraits<BetaType>::one())
+  if (beta == KokkosKernels::ArithTraits<BetaType>::zero())
+    Kokkos::deep_copy(exec, y, KokkosKernels::ArithTraits<BetaType>::zero());
+  else if (beta != KokkosKernels::ArithTraits<BetaType>::one())
     KokkosBlas::scal(exec, y, beta, y);
   //
   // Treat the case y <- alpha * A^T * x + beta * y
@@ -1399,9 +1387,9 @@ void spMatMultiVec_transpose(const execution_space &exec, Handle *handle, const 
     return;
   }
 
-  if (beta == Kokkos::ArithTraits<BetaType>::zero())
-    Kokkos::deep_copy(exec, y, Kokkos::ArithTraits<BetaType>::zero());
-  else if (beta != Kokkos::ArithTraits<BetaType>::one())
+  if (beta == KokkosKernels::ArithTraits<BetaType>::zero())
+    Kokkos::deep_copy(exec, y, KokkosKernels::ArithTraits<BetaType>::zero());
+  else if (beta != KokkosKernels::ArithTraits<BetaType>::one())
     KokkosBlas::scal(exec, y, beta, y);
 
   bool use_dynamic_schedule = handle->force_dynamic_schedule;

@@ -17,7 +17,9 @@
 #include "Ifpack2_LocalSparseTriangularSolver.hpp"
 #include "Ifpack2_Details_getParamTryingTypes.hpp"
 #include "Ifpack2_Details_getCrsMatrix.hpp"
+#include "Ifpack2_Details_Behavior.hpp"
 #include "Kokkos_Sort.hpp"
+#include "KokkosSparse_spiluk.hpp"
 #include "KokkosSparse_Utils.hpp"
 #include "KokkosKernels_Sorting.hpp"
 #include "KokkosSparse_IOUtils.hpp"
@@ -43,8 +45,9 @@ struct IlukImplType {
 }  // namespace Details
 
 template <class MatrixType>
-RILUK<MatrixType>::RILUK(const Teuchos::RCP<const row_matrix_type>& Matrix_in)
+RILUK<MatrixType>::RILUK(const Teuchos::RCP<const row_matrix_type>& Matrix_in, const Teuchos::RCP<const coord_type>& Matrix_in_coordinates)
   : A_(Matrix_in)
+  , A_coordinates_(Matrix_in_coordinates)
   , LevelOfFill_(0)
   , Overalloc_(2.)
   , isAllocated_(false)
@@ -62,13 +65,15 @@ RILUK<MatrixType>::RILUK(const Teuchos::RCP<const row_matrix_type>& Matrix_in)
   , isKokkosKernelsSpiluk_(false)
   , isKokkosKernelsStream_(false)
   , num_streams_(0)
-  , hasStreamReordered_(false) {
+  , hasStreamReordered_(false)
+  , hasStreamsWithRCB_(false) {
   allocateSolvers();
 }
 
 template <class MatrixType>
-RILUK<MatrixType>::RILUK(const Teuchos::RCP<const crs_matrix_type>& Matrix_in)
+RILUK<MatrixType>::RILUK(const Teuchos::RCP<const crs_matrix_type>& Matrix_in, const Teuchos::RCP<const coord_type>& Matrix_in_coordinates)
   : A_(Matrix_in)
+  , A_coordinates_(Matrix_in_coordinates)
   , LevelOfFill_(0)
   , Overalloc_(2.)
   , isAllocated_(false)
@@ -86,7 +91,8 @@ RILUK<MatrixType>::RILUK(const Teuchos::RCP<const crs_matrix_type>& Matrix_in)
   , isKokkosKernelsSpiluk_(false)
   , isKokkosKernelsStream_(false)
   , num_streams_(0)
-  , hasStreamReordered_(false) {
+  , hasStreamReordered_(false)
+  , hasStreamsWithRCB_(false) {
   allocateSolvers();
 }
 
@@ -142,6 +148,13 @@ void RILUK<MatrixType>::setMatrix(const Teuchos::RCP<const row_matrix_type>& A) 
     U_ = Teuchos::null;
     D_ = Teuchos::null;
     A_ = A;
+  }
+}
+
+template <class MatrixType>
+void RILUK<MatrixType>::setCoord(const Teuchos::RCP<const coord_type>& A_coordinates) {
+  if (A_coordinates.getRawPtr() != A_coordinates_.getRawPtr()) {
+    A_coordinates_ = A_coordinates;
   }
 }
 
@@ -380,6 +393,9 @@ void RILUK<MatrixType>::
     // Will we do reordering in streams?
     if (params.isParameter("fact: kspiluk reordering in streams"))
       hasStreamReordered_ = params.get<bool>("fact: kspiluk reordering in streams");
+
+    if (params.isParameter("fact: kspiluk streams use rcb"))
+      hasStreamsWithRCB_ = params.get<bool>("fact: kspiluk streams use rcb");
   } else {
     this->isKokkosKernelsStream_ = false;
   }
@@ -410,6 +426,12 @@ template <class MatrixType>
 Teuchos::RCP<const typename RILUK<MatrixType>::crs_matrix_type>
 RILUK<MatrixType>::getCrsMatrix() const {
   return Teuchos::rcp_dynamic_cast<const crs_matrix_type>(A_, true);
+}
+
+template <class MatrixType>
+Teuchos::RCP<const typename RILUK<MatrixType>::coord_type>
+RILUK<MatrixType>::getCoord() const {
+  return A_coordinates_;
 }
 
 template <class MatrixType>
@@ -545,9 +567,37 @@ void RILUK<MatrixType>::initialize() {
 
         auto lclMtx = A_local_crs_->getLocalMatrixDevice();
         if (!hasStreamReordered_) {
-          KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_sequential(lclMtx, A_local_diagblks_v_);
+          if (hasStreamsWithRCB_) {
+            TEUCHOS_TEST_FOR_EXCEPTION(A_coordinates_.is_null(), std::runtime_error, prefix << "The coordinates associated with rows of the input matrix is null while RILUK uses streams with RCB.  Please call setCoord() with a nonnull input before calling this method.");
+            auto A_coordinates_lcl = A_coordinates_->getLocalViewDevice(Tpetra::Access::ReadOnly);
+            perm_rcb_              = perm_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "perm_rcb_"), A_coordinates_lcl.extent(0));
+#if KOKKOS_VERSION >= 50100
+            reverse_perm_rcb_ = perm_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "reverse_perm_rcb_"), A_coordinates_lcl.extent(0));
+#endif
+            coors_rcb_ = coors_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "coors_rcb_"), A_coordinates_lcl.extent(0), A_coordinates_lcl.extent(1));
+            Kokkos::deep_copy(coors_rcb_, A_coordinates_lcl);
+#if KOKKOS_VERSION >= 50100
+            local_ordinal_type n_levels = static_cast<local_ordinal_type>(std::log2(static_cast<double>(num_streams_)) + 1);
+            partition_sizes_rcb_        = KokkosGraph::Experimental::recursive_coordinate_bisection(coors_rcb_, perm_rcb_, reverse_perm_rcb_, n_levels);
+            KokkosSparse::Experimental::kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential(lclMtx, perm_rcb_, reverse_perm_rcb_, partition_sizes_rcb_,
+                                                                                                 A_local_diagblks_v_);
+#else
+            KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential(lclMtx, coors_rcb_,
+                                                                                         A_local_diagblks_v_, perm_rcb_);
+#endif
+          } else {
+#if KOKKOS_VERSION >= 50100
+            KokkosSparse::Experimental::kk_extract_diagonal_blocks_crsmatrix_sequential(lclMtx, A_local_diagblks_v_);
+#else
+            KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_sequential(lclMtx, A_local_diagblks_v_);
+#endif
+          }
         } else {
+#if KOKKOS_VERSION >= 50100
+          perm_v_ = KokkosSparse::Experimental::kk_extract_diagonal_blocks_crsmatrix_sequential(lclMtx, A_local_diagblks_v_, true);
+#else
           perm_v_ = KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_sequential(lclMtx, A_local_diagblks_v_, true);
+#endif
           reverse_perm_v_.resize(perm_v_.size());
           for (size_t istream = 0; istream < perm_v_.size(); ++istream) {
             using perm_type        = typename lno_nonzero_view_t::non_const_type;
@@ -676,6 +726,14 @@ void RILUK<MatrixType>::
   using Teuchos::REDUCE_SUM;
   using Teuchos::reduceAll;
   typedef Tpetra::Map<local_ordinal_type, global_ordinal_type, node_type> map_type;
+  typedef Tpetra::CrsGraph<local_ordinal_type,
+                           global_ordinal_type,
+                           node_type>
+      crs_graph_type;
+
+  auto crsMat = Details::getCrsMatrix(A_);
+  if (!crsMat.is_null())
+    Teuchos::rcp_const_cast<crs_graph_type>(crsMat->getCrsGraph())->computeGlobalConstants();
 
   size_t NumIn = 0, NumL = 0, NumU = 0;
   bool DiagFound         = false;
@@ -997,7 +1055,10 @@ void RILUK<MatrixType>::compute_kkspiluk_stream() {
     KernelHandle_rawptr_v_[i] = KernelHandle_v_[i].getRawPtr();
   }
 
-  {
+  if (hasStreamReordered_) {
+    // NOTE: For now, only do the value copying if RCM reordering is enabled in streams.
+    //       Otherwise, value copying was taken care prior to entering this function.
+    //       TODO: revisit this later.
     auto lclMtx = A_local_crs_->getLocalMatrixDevice();
     // A_local_diagblks was already setup during initialize, just copy the corresponding
     // values from A_local_crs_ in parallel now.
@@ -1103,7 +1164,23 @@ void RILUK<MatrixType>::compute() {
     } else {
       // If streams are on, we potentially have to refresh A_local_diagblks_values_v_
       auto lclMtx = A_local_crs_->getLocalMatrixDevice();
-      KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_sequential(lclMtx, A_local_diagblks_v_, hasStreamReordered_);
+      if (!hasStreamsWithRCB_) {
+#if KOKKOS_VERSION >= 50100
+        KokkosSparse::Experimental::kk_extract_diagonal_blocks_crsmatrix_sequential(lclMtx, A_local_diagblks_v_, hasStreamReordered_);
+#else
+        KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_sequential(lclMtx, A_local_diagblks_v_, hasStreamReordered_);
+#endif
+      } else {
+#if KOKKOS_VERSION >= 50100
+        KokkosSparse::Experimental::kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential(lclMtx, perm_rcb_, reverse_perm_rcb_, partition_sizes_rcb_,
+                                                                                             A_local_diagblks_v_);
+#else
+        auto A_coordinates_lcl = A_coordinates_->getLocalViewDevice(Tpetra::Access::ReadOnly);
+        Kokkos::deep_copy(coors_rcb_, A_coordinates_lcl);
+        KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential(lclMtx, coors_rcb_,
+                                                                                     A_local_diagblks_v_, perm_rcb_);
+#endif
+      }
       for (int i = 0; i < num_streams_; i++) {
         A_local_diagblks_values_v_[i] = A_local_diagblks_v_[i].values;
       }
@@ -1156,8 +1233,7 @@ void RILUK<MatrixType>::
       "Ifpack2::RILUK::apply: mode = Teuchos::CONJ_TRANS is not implemented for "
       "complex Scalar type.  Please talk to the Ifpack2 developers to get this "
       "fixed.  There is a FIXME in this file about this very issue.");
-#ifdef HAVE_IFPACK2_DEBUG
-  {
+  if (Ifpack2::Details::Behavior::debug()) {
     if (!isKokkosKernelsStream_) {
       const magnitude_type D_nrm1 = D_->norm1();
       TEUCHOS_TEST_FOR_EXCEPTION(STM::isnaninf(D_nrm1), std::runtime_error, "Ifpack2::RILUK::apply: The 1-norm of the stored diagonal is NaN or Inf.");
@@ -1173,7 +1249,6 @@ void RILUK<MatrixType>::
     }
     TEUCHOS_TEST_FOR_EXCEPTION(!good, std::runtime_error, "Ifpack2::RILUK::apply: The 1-norm of the input X is NaN or Inf.");
   }
-#endif  // HAVE_IFPACK2_DEBUG
 
   const scalar_type one  = STS::one();
   const scalar_type zero = STS::zero();
@@ -1183,30 +1258,40 @@ void RILUK<MatrixType>::
   {  // Start timing
     Teuchos::TimeMonitor timeMon(timer);
     if (alpha == one && beta == zero) {
-      if (isKokkosKernelsSpiluk_ && isKokkosKernelsStream_ && hasStreamReordered_) {
+      if (isKokkosKernelsSpiluk_ && isKokkosKernelsStream_ && (hasStreamReordered_ || hasStreamsWithRCB_)) {
         Impl::resetMultiVecIfNeeded(reordered_x_, X.getMap(), X.getNumVectors(), false);
         Impl::resetMultiVecIfNeeded(reordered_y_, Y.getMap(), Y.getNumVectors(), false);
         Kokkos::fence();
+
         for (size_t j = 0; j < X.getNumVectors(); j++) {
-          auto X_j                        = X.getVector(j);
-          auto ReorderedX_j               = reordered_x_->getVectorNonConst(j);
-          auto X_lcl                      = X_j->getLocalViewDevice(Tpetra::Access::ReadOnly);
-          auto ReorderedX_lcl             = ReorderedX_j->getLocalViewDevice(Tpetra::Access::ReadWrite);
-          local_ordinal_type stream_begin = 0;
-          local_ordinal_type stream_end;
-          for (int i = 0; i < num_streams_; i++) {
-            auto perm_i             = perm_v_[i];
-            stream_end              = stream_begin + perm_i.extent(0);
-            auto X_lcl_sub          = Kokkos::subview(X_lcl, Kokkos::make_pair(stream_begin, stream_end), 0);
-            auto ReorderedX_lcl_sub = Kokkos::subview(ReorderedX_lcl, Kokkos::make_pair(stream_begin, stream_end), 0);
+          auto X_j            = X.getVector(j);
+          auto ReorderedX_j   = reordered_x_->getVectorNonConst(j);
+          auto X_lcl          = X_j->getLocalViewDevice(Tpetra::Access::ReadOnly);
+          auto ReorderedX_lcl = ReorderedX_j->getLocalViewDevice(Tpetra::Access::ReadWrite);
+          if (hasStreamReordered_) {
+            local_ordinal_type stream_begin = 0;
+            local_ordinal_type stream_end;
+            for (int i = 0; i < num_streams_; i++) {
+              auto perm_i             = perm_v_[i];
+              stream_end              = stream_begin + perm_i.extent(0);
+              auto X_lcl_sub          = Kokkos::subview(X_lcl, Kokkos::make_pair(stream_begin, stream_end), 0);
+              auto ReorderedX_lcl_sub = Kokkos::subview(ReorderedX_lcl, Kokkos::make_pair(stream_begin, stream_end), 0);
+              Kokkos::parallel_for(
+                  Kokkos::RangePolicy<execution_space>(exec_space_instances_[i], 0, static_cast<int>(perm_i.extent(0))), KOKKOS_LAMBDA(const int& ii) {
+                    ReorderedX_lcl_sub(perm_i(ii)) = X_lcl_sub(ii);
+                  });
+              stream_begin = stream_end;
+            }
+          } else {  // hasStreamsWithRCB_
+            auto perm = perm_rcb_;
             Kokkos::parallel_for(
-                Kokkos::RangePolicy<execution_space>(exec_space_instances_[i], 0, static_cast<int>(perm_i.extent(0))), KOKKOS_LAMBDA(const int& ii) {
-                  ReorderedX_lcl_sub(perm_i(ii)) = X_lcl_sub(ii);
+                Kokkos::RangePolicy<execution_space>(0, static_cast<int>(X_lcl.extent(0))), KOKKOS_LAMBDA(const int& ii) {
+                  ReorderedX_lcl(perm(ii), 0) = X_lcl(ii, 0);
                 });
-            stream_begin = stream_end;
           }
         }
         Kokkos::fence();
+
         if (mode == Teuchos::NO_TRANS) {  // Solve L (U Y) = X for Y.
           // Solve L Y = X for Y.
           L_solver_->apply(*reordered_x_, Y, mode);
@@ -1220,22 +1305,30 @@ void RILUK<MatrixType>::
         }
 
         for (size_t j = 0; j < Y.getNumVectors(); j++) {
-          auto Y_j                        = Y.getVectorNonConst(j);
-          auto ReorderedY_j               = reordered_y_->getVector(j);
-          auto Y_lcl                      = Y_j->getLocalViewDevice(Tpetra::Access::ReadWrite);
-          auto ReorderedY_lcl             = ReorderedY_j->getLocalViewDevice(Tpetra::Access::ReadOnly);
-          local_ordinal_type stream_begin = 0;
-          local_ordinal_type stream_end;
-          for (int i = 0; i < num_streams_; i++) {
-            auto perm_i             = perm_v_[i];
-            stream_end              = stream_begin + perm_i.extent(0);
-            auto Y_lcl_sub          = Kokkos::subview(Y_lcl, Kokkos::make_pair(stream_begin, stream_end), 0);
-            auto ReorderedY_lcl_sub = Kokkos::subview(ReorderedY_lcl, Kokkos::make_pair(stream_begin, stream_end), 0);
+          auto Y_j            = Y.getVectorNonConst(j);
+          auto ReorderedY_j   = reordered_y_->getVector(j);
+          auto Y_lcl          = Y_j->getLocalViewDevice(Tpetra::Access::ReadWrite);
+          auto ReorderedY_lcl = ReorderedY_j->getLocalViewDevice(Tpetra::Access::ReadOnly);
+          if (hasStreamReordered_) {
+            local_ordinal_type stream_begin = 0;
+            local_ordinal_type stream_end;
+            for (int i = 0; i < num_streams_; i++) {
+              auto perm_i             = perm_v_[i];
+              stream_end              = stream_begin + perm_i.extent(0);
+              auto Y_lcl_sub          = Kokkos::subview(Y_lcl, Kokkos::make_pair(stream_begin, stream_end), 0);
+              auto ReorderedY_lcl_sub = Kokkos::subview(ReorderedY_lcl, Kokkos::make_pair(stream_begin, stream_end), 0);
+              Kokkos::parallel_for(
+                  Kokkos::RangePolicy<execution_space>(exec_space_instances_[i], 0, static_cast<int>(perm_i.extent(0))), KOKKOS_LAMBDA(const int& ii) {
+                    Y_lcl_sub(ii) = ReorderedY_lcl_sub(perm_i(ii));
+                  });
+              stream_begin = stream_end;
+            }
+          } else {  // hasStreamsWithRCB_
+            auto perm = perm_rcb_;
             Kokkos::parallel_for(
-                Kokkos::RangePolicy<execution_space>(exec_space_instances_[i], 0, static_cast<int>(perm_i.extent(0))), KOKKOS_LAMBDA(const int& ii) {
-                  Y_lcl_sub(ii) = ReorderedY_lcl_sub(perm_i(ii));
+                Kokkos::RangePolicy<execution_space>(0, static_cast<int>(Y_lcl.extent(0))), KOKKOS_LAMBDA(const int& ii) {
+                  Y_lcl(ii, 0) = ReorderedY_lcl(perm(ii), 0);
                 });
-            stream_begin = stream_end;
           }
         }
         Kokkos::fence();
@@ -1324,8 +1417,7 @@ void RILUK<MatrixType>::
     }
   }  // end timing
 
-#ifdef HAVE_IFPACK2_DEBUG
-  {
+  if (Ifpack2::Details::Behavior::debug()) {
     Teuchos::Array<magnitude_type> norms(Y.getNumVectors());
     Y.norm1(norms());
     bool good = true;
@@ -1337,7 +1429,6 @@ void RILUK<MatrixType>::
     }
     TEUCHOS_TEST_FOR_EXCEPTION(!good, std::runtime_error, "Ifpack2::RILUK::apply: The 1-norm of the output Y is NaN or Inf.");
   }
-#endif  // HAVE_IFPACK2_DEBUG
 
   ++numApply_;
   applyTime_ += (timer.wallTime() - startTime);
@@ -1395,9 +1486,11 @@ std::string RILUK<MatrixType>::description() const {
   if (A_.is_null()) {
     os << "Matrix: null";
   } else {
+    auto crsMat = Details::getCrsMatrix(A_);
     os << "Global matrix dimensions: ["
-       << A_->getGlobalNumRows() << ", " << A_->getGlobalNumCols() << "]"
-       << ", Global nnz: " << A_->getGlobalNumEntries();
+       << A_->getGlobalNumRows() << ", " << A_->getGlobalNumCols() << "]";
+    if (!crsMat.is_null() && crsMat->haveGlobalConstants())
+      os << ", Global nnz: " << A_->getGlobalNumEntries();
   }
 
   if (!L_solver_.is_null()) os << ", " << L_solver_->description();

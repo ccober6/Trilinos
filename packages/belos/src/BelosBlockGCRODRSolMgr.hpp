@@ -21,7 +21,6 @@
 #include "BelosGmresIteration.hpp"
 #include "BelosBlockGCRODRIter.hpp"
 #include "BelosBlockGmresIter.hpp"
-#include "BelosBlockFGmresIter.hpp"
 #include "BelosStatusTestMaxIters.hpp"
 #include "BelosStatusTestGenResNorm.hpp"
 #include "BelosStatusTestCombo.hpp"
@@ -90,19 +89,18 @@ namespace Belos{
 /// multiple right-hand sides at a time; thus, it can solve sequences of block systems.
 ///
 
-template<class ScalarType, class MV, class OP>
-class BlockGCRODRSolMgr : public SolverManager<ScalarType, MV, OP> {
+template<class ScalarType, class MV, class OP, class DM = DefaultDenseMatrix<int,ScalarType>>
+class BlockGCRODRSolMgr : public SolverManager<ScalarType, MV, OP, DM> {
 private:
 
-  typedef MultiVecTraits<ScalarType,MV> MVT;
+  typedef MultiVecTraits<ScalarType,MV, DM> MVT;
   typedef OperatorTraits<ScalarType,MV,OP> OPT;
   typedef Teuchos::ScalarTraits<ScalarType> SCT;
   typedef typename Teuchos::ScalarTraits<ScalarType>::magnitudeType MagnitudeType;
   typedef Teuchos::ScalarTraits<MagnitudeType> MT;
   typedef Teuchos::ScalarTraits<MagnitudeType> SMT;
-  typedef OrthoManagerFactory<ScalarType, MV, OP> ortho_factory_type;
+  typedef OrthoManagerFactory<ScalarType, MV, OP, DM> ortho_factory_type;
   typedef Teuchos::SerialDenseMatrix<int,ScalarType> SDM;
-  typedef Teuchos::SerialDenseVector<int,ScalarType> SDV;
 
 public:
   //! @name Constructors/Destructor
@@ -140,12 +138,17 @@ public:
    * - "Timer Label": the string to use as a prefix for the timer labels. Default: "Belos"
    * - "Orthogonalization Constant": a \c MagnitudeType corresponding to the "depTol" parameter of DGKS orthogonalization. Ignored unless DGKS orthogonalization is used. DGKS decides the default value.
    */
-  BlockGCRODRSolMgr (const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > &problem,
+  BlockGCRODRSolMgr (const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > &problem,
                      const Teuchos::RCP<Teuchos::ParameterList> &pl);
 
   //! Destructor.
   virtual ~BlockGCRODRSolMgr() {};
   //@}
+
+  //! clone for Inverted Injection (DII)
+  Teuchos::RCP<SolverManager<ScalarType, MV, OP, DM> > clone () const override {
+    return Teuchos::rcp(new BlockGCRODRSolMgr<ScalarType,MV,OP,DM>);
+  }
 
   /** \name Implementation of the Teuchos::Describable interface */
   //@{
@@ -160,7 +163,7 @@ public:
   //@{
 
   //! Get current linear problem being solved for in this object.
-  const LinearProblem<ScalarType,MV,OP>& getProblem() const {
+  const LinearProblem<ScalarType,MV,OP,DM>& getProblem() const {
     return *problem_;
   }
 
@@ -187,23 +190,34 @@ public:
   //@{
 
   /// \brief Set the linear problem to solve on the next call to \c solve().
-  void setProblem (const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> >& problem) {
+  void setProblem (const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> >& problem) {
     TEUCHOS_TEST_FOR_EXCEPTION(problem.is_null(), std::invalid_argument,
       "Belos::BlockGCRODRSolMgr::setProblem: The input LinearProblem cannot be null.");
 
     // Check state of problem object before proceeding
     if (! problem->isProblemSet()) {
       const bool success = problem->setProblem();
-      TEUCHOS_TEST_FOR_EXCEPTION(success, std::runtime_error,
+      TEUCHOS_TEST_FOR_EXCEPTION(! success, std::runtime_error,
         "Belos::BlockGCRODRSolMgr::setProblem: Calling the input LinearProblem's setProblem() method failed.  This likely means that the "
         "LinearProblem has a missing (null) matrix A, solution vector X, or right-hand side vector B.  Please set these items in the LinearProblem and try again.");
     }
 
     problem_ = problem;
+    // Force the status tests to be rebuilt on the next solve() so that a
+    // status test installed via setDebugStatusTest() is wired into sTest_.
+    isSet_ = false;
   }
 
   //! Set the parameters the solver should use to solve the linear problem.
   void setParameters( const Teuchos::RCP<Teuchos::ParameterList> &params );
+
+  //! Set a debug status test, OR-combined into the top-level status test.
+  void setDebugStatusTest( const Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> >& debugStatusTest ) override {
+    debugStatusTest_ = debugStatusTest;
+    // Force the status-test tree to be rebuilt on the next solve() so the
+    // debug test gets OR-combined into sTest_.
+    isSet_ = false;
+  }
 
   //@}
 
@@ -265,7 +279,7 @@ private:
   //  "AugKryl" indicates  it is specialized for building a recycle space from the augmented Krylov subspace
 
   // Functions which control the building of a recycle space
-  void buildRecycleSpaceKryl(int& keff, Teuchos::RCP<BlockGmresIter<ScalarType,MV,OP> > block_gmres_iter);
+  void buildRecycleSpaceKryl(int& keff, Teuchos::RCP<BlockGmresIter<ScalarType,MV,OP,DM> > block_gmres_iter);
   void buildRecycleSpaceAugKryl(Teuchos::RCP<BlockGCRODRIter<ScalarType,MV,OP> > gcrodr_iter);
 
   // Recycling with Harmonic Ritz Vectors
@@ -292,7 +306,7 @@ private:
   Teuchos::LAPACK<int,ScalarType> lapack;
 
   //! The current linear problem to solve.
-  Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > problem_;
+  Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > problem_;
 
   //Output Manager
   Teuchos::RCP<OutputManager<ScalarType> > printer_;
@@ -302,8 +316,9 @@ private:
   Teuchos::RCP<StatusTest<ScalarType,MV,OP> > sTest_;
   Teuchos::RCP<StatusTestMaxIters<ScalarType,MV,OP> > maxIterTest_;
   Teuchos::RCP<StatusTest<ScalarType,MV,OP> > convTest_;
-  Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP> > expConvTest_, impConvTest_;
+  Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP,DM> > expConvTest_, impConvTest_;
   Teuchos::RCP<StatusTestOutput<ScalarType,MV,OP> > outputTest_;
+  Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > debugStatusTest_;
 
   //! Factory for creating MatOrthoManager subclass instances.
   ortho_factory_type orthoFactory_;
@@ -391,25 +406,25 @@ private:
   //
   // Set default solver values
   //
-  template<class ScalarType, class MV, class OP>
-  const bool BlockGCRODRSolMgr<ScalarType,MV,OP>::adaptiveBlockSize_default_ = true;
+  template<class ScalarType, class MV, class OP, class DM>
+  const bool BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::adaptiveBlockSize_default_ = true;
 
-  template<class ScalarType, class MV, class OP>
-  const std::string BlockGCRODRSolMgr<ScalarType,MV,OP>::recycleMethod_default_ = "harmvecs";
+  template<class ScalarType, class MV, class OP, class DM>
+  const std::string BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::recycleMethod_default_ = "harmvecs";
 
   //
   // Method definitions
   //
 
-  template<class ScalarType, class MV, class OP>
-  BlockGCRODRSolMgr<ScalarType,MV,OP>::BlockGCRODRSolMgr() {
+  template<class ScalarType, class MV, class OP, class DM>
+  BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::BlockGCRODRSolMgr() {
     init();
   }
 
   //Basic Constructor
-  template<class ScalarType, class MV, class OP>
-  BlockGCRODRSolMgr<ScalarType,MV,OP>::
-  BlockGCRODRSolMgr(const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > &problem,
+  template<class ScalarType, class MV, class OP, class DM>
+  BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::
+  BlockGCRODRSolMgr(const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > &problem,
                     const Teuchos::RCP<Teuchos::ParameterList> &pl ) {
     // Initialize local pointers to null, and initialize local
     // variables to default values.
@@ -427,8 +442,8 @@ private:
       setParameters (pl);
   }
 
-  template<class ScalarType, class MV, class OP>
-  void BlockGCRODRSolMgr<ScalarType,MV,OP>::init() {
+  template<class ScalarType, class MV, class OP, class DM>
+  void BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::init() {
     adaptiveBlockSize_ = adaptiveBlockSize_default_;
     recycleMethod_ = recycleMethod_default_;
     isSet_ = false;
@@ -473,8 +488,8 @@ private:
     }
 
     // Convenience typedefs
-    typedef Belos::StatusTestCombo<ScalarType,MV,OP>  StatusTestCombo_t;
-    typedef Belos::StatusTestGenResNorm<ScalarType,MV,OP>  StatusTestResNorm_t;
+    typedef Belos::StatusTestCombo<ScalarType,MV,OP,DM>  StatusTestCombo_t;
+    typedef Belos::StatusTestGenResNorm<ScalarType,MV,OP,DM>  StatusTestResNorm_t;
 
     if (impConvTest_.is_null()) {
       impConvTest_ = rcp (new StatusTestResNorm_t (convTol_));
@@ -504,8 +519,8 @@ private:
   }
 
   //  This method requires the solver manager to return a string that describes itself.
-  template<class ScalarType, class MV, class OP>
-  std::string BlockGCRODRSolMgr<ScalarType,MV,OP>::description() const {
+  template<class ScalarType, class MV, class OP, class DM>
+  std::string BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::description() const {
     std::ostringstream oss;
     oss << "Belos::BlockGCRODRSolMgr<" << SCT::name() << ", ...>";
     oss << "{";
@@ -518,9 +533,9 @@ private:
     return oss.str();
   }
 
-   template<class ScalarType, class MV, class OP>
+   template<class ScalarType, class MV, class OP, class DM>
    Teuchos::RCP<const Teuchos::ParameterList>
-   BlockGCRODRSolMgr<ScalarType,MV,OP>::getValidParameters() const {
+   BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::getValidParameters() const {
      using Teuchos::ParameterList;
      using Teuchos::parameterList;
      using Teuchos::RCP;
@@ -604,9 +619,9 @@ private:
      return defaultParams_;
    }
 
-   template<class ScalarType, class MV, class OP>
+   template<class ScalarType, class MV, class OP, class DM>
    void
-   BlockGCRODRSolMgr<ScalarType,MV,OP>::
+   BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::
    setParameters (const Teuchos::RCP<Teuchos::ParameterList> &params) {
      using Teuchos::isParameterType;
      using Teuchos::getParameter;
@@ -909,8 +924,8 @@ private:
      }
 
      // Convergence
-     typedef Belos::StatusTestCombo<ScalarType,MV,OP>  StatusTestCombo_t;
-     typedef Belos::StatusTestGenResNorm<ScalarType,MV,OP>  StatusTestResNorm_t;
+     typedef Belos::StatusTestCombo<ScalarType,MV,OP,DM>  StatusTestCombo_t;
+     typedef Belos::StatusTestGenResNorm<ScalarType,MV,OP,DM>  StatusTestResNorm_t;
 
      // Check for convergence tolerance
      convTol_ = params_->get<MagnitudeType> ("Convergence Tolerance");
@@ -1005,6 +1020,16 @@ private:
      // reached, or if the convergence test passes."
      sTest_ = rcp (new StatusTestCombo_t (StatusTestCombo_t::OR,
                                           maxIterTest_, convTest_));
+
+     // Add a debug status test if one was provided (e.g. a wall-clock time limit).
+     // OR-combining it into the top-level test lets it stop the solve; the
+     // dispatch in solve() treats such a stop as an unconverged (recoverable)
+     // termination.
+     if (Teuchos::nonnull(debugStatusTest_)) {
+       sTest_ = rcp (new StatusTestCombo_t (StatusTestCombo_t::OR,
+                                            sTest_, debugStatusTest_));
+     }
+
      // Create the status test output class.
      // This class manages and formats the output from the status test.
      StatusTestOutputFactory<ScalarType,MV,OP> stoFactory (outputStyle_);
@@ -1020,9 +1045,9 @@ private:
    }
 
   // initializeStateStorage.
-  template<class ScalarType, class MV, class OP>
+  template<class ScalarType, class MV, class OP, class DM>
   void
-  BlockGCRODRSolMgr<ScalarType,MV,OP>::initializeStateStorage()
+  BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::initializeStateStorage()
   {
 
     ScalarType zero = Teuchos::ScalarTraits<ScalarType>::zero();
@@ -1173,8 +1198,8 @@ private:
 
   }
 
-template<class ScalarType, class MV, class OP>
-void BlockGCRODRSolMgr<ScalarType,MV,OP>::buildRecycleSpaceKryl(int& keff, Teuchos::RCP<BlockGmresIter<ScalarType,MV,OP> > block_gmres_iter){
+template<class ScalarType, class MV, class OP, class DM>
+void BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::buildRecycleSpaceKryl(int& keff, Teuchos::RCP<BlockGmresIter<ScalarType,MV,OP,DM> > block_gmres_iter){
 
   ScalarType one = Teuchos::ScalarTraits<ScalarType>::one();
   ScalarType zero = Teuchos::ScalarTraits<ScalarType>::zero();
@@ -1267,8 +1292,8 @@ MVT::MvTimesMatAddMv( one, *U1tmp, Rtmp, zero, *Utmp );
 return;
 } // end buildRecycleSpaceKryl defnition
 
-template<class ScalarType, class MV, class OP>
-void BlockGCRODRSolMgr<ScalarType,MV,OP>::buildRecycleSpaceAugKryl(Teuchos::RCP<BlockGCRODRIter<ScalarType,MV,OP> > block_gcrodr_iter){
+template<class ScalarType, class MV, class OP, class DM>
+void BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::buildRecycleSpaceAugKryl(Teuchos::RCP<BlockGCRODRIter<ScalarType,MV,OP> > block_gcrodr_iter){
   const MagnitudeType one = Teuchos::ScalarTraits<ScalarType>::one();
   const ScalarType zero = Teuchos::ScalarTraits<ScalarType>::zero();
 
@@ -1436,8 +1461,8 @@ void BlockGCRODRSolMgr<ScalarType,MV,OP>::buildRecycleSpaceAugKryl(Teuchos::RCP<
 
 } //end buildRecycleSpaceAugKryl definition
 
-template<class ScalarType, class MV, class OP>
-int BlockGCRODRSolMgr<ScalarType,MV,OP>::getHarmonicVecsAugKryl(int keff, int m, const SDM& GG, const Teuchos::RCP<const MV>& VV, SDM& PP){
+template<class ScalarType, class MV, class OP, class DM>
+int BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::getHarmonicVecsAugKryl(int keff, int m, const SDM& GG, const Teuchos::RCP<const MV>& VV, SDM& PP){
   int i, j;
   int m2 = GG.numCols();
   bool xtraVec = false;
@@ -1569,8 +1594,8 @@ int BlockGCRODRSolMgr<ScalarType,MV,OP>::getHarmonicVecsAugKryl(int keff, int m,
 
 } //end getHarmonicVecsAugKryl definition
 
-template<class ScalarType, class MV, class OP>
-int BlockGCRODRSolMgr<ScalarType,MV,OP>::getHarmonicVecsKryl(int m, const SDM& HH, SDM& PP){
+template<class ScalarType, class MV, class OP, class DM>
+int BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::getHarmonicVecsKryl(int m, const SDM& HH, SDM& PP){
   bool xtraVec = false;
   ScalarType one = Teuchos::ScalarTraits<ScalarType>::one();
   ScalarType zero = Teuchos::ScalarTraits<ScalarType>::zero();
@@ -1704,8 +1729,8 @@ int BlockGCRODRSolMgr<ScalarType,MV,OP>::getHarmonicVecsKryl(int m, const SDM& H
 } //end getHarmonicVecsKryl
 
 // This method sorts list of n floating-point numbers and return permutation vector
-template<class ScalarType, class MV, class OP>
-void BlockGCRODRSolMgr<ScalarType,MV,OP>::sort(std::vector<MagnitudeType>& dlist, int n, std::vector<int>& iperm) {
+template<class ScalarType, class MV, class OP, class DM>
+void BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::sort(std::vector<MagnitudeType>& dlist, int n, std::vector<int>& iperm) {
   int l, r, j, i, flag;
   int    RR2;
   MagnitudeType dRR, dK;
@@ -1764,13 +1789,18 @@ void BlockGCRODRSolMgr<ScalarType,MV,OP>::sort(std::vector<MagnitudeType>& dlist
   iperm[0] = RR2;
 } //end sort() definition
 
-template<class ScalarType, class MV, class OP>
-ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
+template<class ScalarType, class MV, class OP, class DM>
+ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP,DM>::solve() {
   using Teuchos::RCP;
   using Teuchos::rcp;
   using Teuchos::rcp_const_cast;
 
-  // MLP: NEED TO ADD CHECK IF PARAMETERS ARE SET LATER
+  ReturnType retType = Undetermined;
+
+  // Set the current parameters if they were not set before.
+  // NOTE:  This may occur if the user generated the solver manager with the default constructor and
+  // then didn't set any parameters using setParameters().
+  if (!isSet_) { setParameters( params_ ); }
 
   ScalarType one = Teuchos::ScalarTraits<ScalarType>::one();
   ScalarType zero = Teuchos::ScalarTraits<ScalarType>::zero();
@@ -1941,8 +1971,8 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
         primeList.set("Num Blocks",numBlocks_-1);
       }
       //Create Block GMRES iteration object to perform one cycle of GMRES
-      Teuchos::RCP<BlockGmresIter<ScalarType,MV,OP> > block_gmres_iter;
-      block_gmres_iter = Teuchos::rcp( new BlockGmresIter<ScalarType,MV,OP>(problem_,printer_,outputTest_,ortho_,primeList) );
+      Teuchos::RCP<BlockGmresIter<ScalarType,MV,OP,DM> > block_gmres_iter;
+      block_gmres_iter = Teuchos::rcp( new BlockGmresIter<ScalarType,MV,OP,DM>(problem_,printer_,outputTest_,ortho_,primeList) );
 
       // MLP: ADD LOGIC TO DEAL WITH USER ASKING TO GENERATE A LARGER SPACE THAN dim AS IN HEIDI'S BlockGmresSolMgr CODE (DIDN'T WE ALREADY DO THIS SOMEWHERE?)
       block_gmres_iter->setSize( blockSize_, numBlocks_-1 );
@@ -1966,13 +1996,14 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
       // MLP: ADD EXCEPTION IF INITIAL BLOCK IS RANK DEFFICIENT
 
       // Set the new state and initialize the iteration.
-      GmresIterationState<ScalarType,MV> newstate;
+      GmresIterationState<ScalarType,MV,DM> newstate;
       newstate.V = V_0;
       newstate.z = z_0;
       newstate.curDim = 0;
       block_gmres_iter->initializeGmres(newstate);
 
       bool primeConverged = false;
+      bool debugTestPassed = false;
 
       try {
         printer_->stream(Debug) << " Preparing to Iterate!!!!" << std::endl << std::endl;
@@ -1997,6 +2028,18 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
           // we don't have convergence
           primeConverged = false;
         }
+        // **********************************************
+        // Check for a debug status test requesting termination
+        // **********************************************
+        else if (Teuchos::nonnull(debugStatusTest_) &&
+                 debugStatusTest_->getStatus() == Passed) {
+          // A debug status test stopped the priming iteration. Treat it as an
+          // unconverged termination rather than building an invalid recycle
+          // space from a partially completed priming cycle.
+          retType = Unconverged;
+          isConverged = false;
+          debugTestPassed = true;
+        }
         // ****************************************************************
         // We need to recycle and continue, print a message indicating this
         // ****************************************************************
@@ -2018,20 +2061,24 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
           block_gmres_iter->updateLSQR( block_gmres_iter->getCurSubspaceDim() );
           // Check to see if the most recent least-squares solution yielded convergence.
           sTest_->checkStatus( &*block_gmres_iter );
-          if (convTest_->getStatus() != Passed)
+          if (convTest_->getStatus() != Passed) {
+            retType = OrthonormFailure;
             isConverged = false;
+          }
         }
       } // end catch (const GmresIterationOrthoFailure &e)
       catch (const StatusTestNaNError& e) {
         // A NaN was detected in the solver.  Set the solution to zero and return unconverged.
+        retType = NaNDetected;
         achievedTol_ = MT::one();
         Teuchos::RCP<MV> X = problem_->getLHS();
         MVT::MvInit( *X, SCT::zero() );
         printer_->stream(Warnings) << "Belos::BlockGCRODRSolMgr::solve(): Warning! NaN has been detected!" 
                                      << std::endl;
-        return Unconverged;
+        return retType;
       }
       catch (const std::exception &e) {
+        retType = NonspecificException;
         printer_->stream(Errors) << "Error! Caught std::exception in BlockGmresIter::iterate() at iteration "
                                  << block_gmres_iter->getNumIters() << std::endl
                                  << e.what() << std::endl;
@@ -2040,6 +2087,10 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
 
       // Record number of iterations in generating initial recycle spacec
       //prime_iterations = block_gmres_iter->getNumIters();//instantiated here because it is not needed outside of else{} scope;  we'll see if this is true or not
+
+      if (debugTestPassed) {
+        break;
+      }
 
       // Update the linear problem.
       RCP<MV> update = block_gmres_iter->getCurrentUpdate();
@@ -2170,6 +2221,7 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
         // ***********************************
         else if(maxIterTest_->getStatus() == Passed ){
           // no convergence; hit maxit
+          retType = MaxItersReached;
           isConverged = false;
           break; // from while(1)
         } //end elseif reached maxit
@@ -2189,6 +2241,7 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
           printer_->stream(Debug) << " Generated new recycled subspace using RHS index " << currIdx[0] << " of dimension " << keff << std::endl << std::endl;
           // NOTE: If we have hit the maximum number of restarts, then we will quit
           if(numRestarts >= maxRestarts_) {
+            retType = MaxRestartsReached;
             isConverged = false;
             break; //from while(1)
           } //end if max restarts
@@ -2222,11 +2275,25 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
 
         } //end else if need to restart
 
+        // **********************************************
+        // Check for a debug status test requesting termination
+        // **********************************************
+        else if (Teuchos::nonnull(debugStatusTest_) &&
+                 debugStatusTest_->getStatus() == Passed) {
+          // A debug status test (e.g. a wall-clock time limit) stopped the
+          // iteration. Treat as an unconverged termination rather than an
+          // inconsistent state.
+          retType = Unconverged;
+          isConverged = false;
+          break; // from while(1)
+        } // end elseif debug status test
+
         // ****************************************************************
         // We returned from iterate(), but none of our status tests passed.
         // Something is wrong, and it is probably our fault.
         // ****************************************************************
         else {
+          retType = InconsistentState;
           TEUCHOS_TEST_FOR_EXCEPTION(true,std::logic_error,"Belos::BlockGCRODRSolMgr::solve(): Invalid return from BlockGCRODRIter::iterate().");
         } //end else (no status test passed)
 
@@ -2236,7 +2303,10 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
         block_gcrodr_iter->updateLSQR( block_gcrodr_iter->getCurSubspaceDim() );
         // Check to see if the most recent least-squares solution yielded convergence.
         sTest_->checkStatus( &*block_gcrodr_iter );
-        if (convTest_->getStatus() != Passed) isConverged = false;
+        if (convTest_->getStatus() != Passed) {
+          retType = OrthonormFailure;
+	  isConverged = false;
+        }
         break;
       }  // end catch orthogonalization failure
       catch(const std::exception &e){
@@ -2328,8 +2398,8 @@ ReturnType BlockGCRODRSolMgr<ScalarType,MV,OP>::solve() {
   // just for the vectors from the last deflation?
   achievedTol_ = *std::max_element (pTestValues->begin(), pTestValues->end());
 
-  if (!isConverged) return Unconverged; // return from BlockGCRODRSolMgr::solve()
-    return Converged; // return from BlockGCRODRSolMgr::solve()
+  if (!isConverged) return retType; // return from BlockGCRODRSolMgr::solve()
+  return Converged; // return from BlockGCRODRSolMgr::solve()
 } //end solve()
 
 } //End Belos Namespace

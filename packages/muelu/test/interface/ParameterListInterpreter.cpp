@@ -18,9 +18,7 @@
 
 #include <MueLu.hpp>
 
-#if defined(HAVE_MUELU_AMESOS2)
 #include <Amesos2_config.h>  // needed for check whether KLU2 is available
-#endif
 
 #include <MueLu_Exceptions.hpp>
 #include <MueLu_TestHelpers.hpp>
@@ -115,14 +113,6 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
       dirList.push_back(prefix + "FactoryParameterListInterpreter/");
     }
   }
-#if defined(HAVE_MPI) && defined(HAVE_MUELU_ISORROPIA) && defined(HAVE_AMESOS2_KLU2)
-  // The ML interpreter have internal ifdef, which means that the resulting
-  // output would depend on configuration (reguarl interpreter does not have
-  // that). Therefore, we need to stabilize the configuration here.
-  // In addition, we run ML parameter list tests only if KLU is available
-  dirList.push_back(prefix + "MLParameterListInterpreter/");
-  dirList.push_back(prefix + "MLParameterListInterpreter2/");
-#endif
   int numLists = dirList.size();
 
   bool failed  = false;
@@ -141,6 +131,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
 
       // Reset (potentially) cached value of the estimate
       A->SetMaxEigenvalueEstimate(-Teuchos::ScalarTraits<SC>::one());
+      if (A->IsView("stridedMaps")) A->RemoveView("stridedMaps");
 
       std::string xmlFile;
       std::string outFile;
@@ -174,7 +165,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
       if (myRank == 0)
         std::cout << "Testing: " << xmlFile << std::endl;
 
-      baseFile             = baseFile + (lib == Xpetra::UseEpetra ? "_epetra" : "_tpetra");
+      baseFile             = baseFile + "_tpetra";
       std::string goldFile = baseFile + ".gold";
       std::ifstream f(goldFile.c_str());
       if (!f.good()) {
@@ -201,6 +192,11 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
       else if (dirList[k] == prefix + "MLParameterListInterpreter/" || dirList[k] == prefix + "MLParameterListInterpreter2/")
         paramList.set("ML output", 666);
 
+#ifndef HAVE_MUELU_BELOS
+      if ((paramList.isParameter("multigrid algorithm") && paramList.get<std::string>("multigrid algorithm") == "emin"))
+        continue;
+#endif
+
       try {
         timer.start();
         Teuchos::RCP<HierarchyManager> mueluFactory;
@@ -223,7 +219,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
           if (paramList.isParameter("parameter list: syntax"))
             paramList.remove("parameter list: syntax");
 
-          RCP<Teuchos::ParameterList> mueluParamList = Teuchos::getParametersFromXmlString(MueLu::ML2MueLuParameterTranslator::translate(paramList, "SA"));
+          RCP<Teuchos::ParameterList> mueluParamList = MueLu::ML2MueLuParameterTranslator::translate(paramList, "SA");
           mueluParamList->set("multigrid algorithm", "sa");
           mueluParamList->set("use kokkos refactor", useKokkos);
 
@@ -240,7 +236,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
           mueluFactory = Teuchos::rcp(new ParameterListInterpreter(*mueluParamList));
 
         } else if (dirList[k] == prefix + "MLParameterListInterpreter2/") {
-          RCP<Teuchos::ParameterList> mueluParamList = Teuchos::getParametersFromXmlString(MueLu::ML2MueLuParameterTranslator::translate(paramList, "SA"));
+          RCP<Teuchos::ParameterList> mueluParamList = MueLu::ML2MueLuParameterTranslator::translate(paramList, "SA");
 
           mueluParamList->set("multigrid algorithm", "sa");
           mueluParamList->set("use kokkos refactor", useKokkos);
@@ -328,8 +324,6 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
         // using different seed, and may have different algorithm from one
         // gcc version to another, or to another compiler (like clang)
         // This leads to us always failing this test.
-        // NOTE1 : Epetra, on the other hand, rolls out its out random number
-        // generator, which always produces same results
 
         // make sure complex tests pass
         run_sed("'s/relaxation: damping factor = (1,0)/relaxation: damping factor = 1/'", baseFile);
@@ -341,6 +335,12 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
 
         // Ignore the value of "lambdaMin"
         run_sed("'s/lambdaMin: [0-9]*.[0-9]*/lambdaMin = <ignored>/'", baseFile);
+
+        // Ignore Chebyshev eigenvalue
+        run_sed("'s/chebyshev: max eigenvalue (calculated by Ifpack2) = [0-9]*.[0-9]*/chebyshev: max eigenvalue (calculated by Ifpack2) = <ignored>/'", baseFile);
+
+        // Ignore prolongator damping factor
+        run_sed("'s/Prolongator damping factor = [0-9]*.[0-9]* (|[0-9]*.[0-9]* \\/ [0-9]*.[0-9]*|)/Prolongator damping factor = <ignored>/'", baseFile);
 
         // Ignore the value of "chebyshev: max eigenvalue"
         // NOTE: we skip lines with default value ([default])

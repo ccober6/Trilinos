@@ -19,7 +19,9 @@
 #include <stk_mesh/base/GetEntities.hpp>
 #include <stk_mesh/base/Relation.hpp>
 #include <Akri_MasterElementDeterminer.hpp>
+#include <Akri_SimplexGradient.hpp>
 #include <Akri_Surface_Identifier.hpp>
+#include <stk_util/parallel/ParallelReduceBool.hpp>
 
 namespace krino {
 
@@ -652,9 +654,32 @@ std::vector<stk::mesh::Entity> LevelSetInterfaceGeometry::get_active_elements_th
   return possibleCutElements;
 }
 
+static bool is_levelset_field_zero_everywhere_locally(const stk::mesh::BulkData & mesh, const FieldRef lsField)
+{
+  for(const auto & bucketPtr : mesh.get_buckets(stk::topology::NODE_RANK, stk::mesh::selectField(lsField.field())))
+    for(const auto & node : *bucketPtr)
+      if (*field_data<double>(lsField, node) != 0)
+        return false;
+  return true;
+}
+
+static std::vector<LS_Field> get_levelset_fields_that_are_not_all_zero(const stk::mesh::BulkData & mesh, const std::vector<LS_Field> & LSFieldsToCheck)
+{
+  std::vector<LS_Field> nonzeroLSFields;
+  for (auto & lsField : LSFieldsToCheck)
+  {
+    if (!stk::is_true_on_all_procs(mesh.parallel(), is_levelset_field_zero_everywhere_locally(mesh, lsField.isovar)))
+      nonzeroLSFields.push_back(lsField);
+    else
+      krinolog << "Will not refine near the interfaces of level set field " << lsField.isovar.name() << " because it is zero everywhere.\n";
+  }
+  return nonzeroLSFields;
+}
+
 std::vector<stk::mesh::Entity> LevelSetInterfaceGeometry::get_possibly_cut_elements(const stk::mesh::BulkData & mesh) const
 {
-  return get_active_elements_that_may_be_cut_by_levelsets(mesh, myActivePart, myLSFields);
+  const std::vector<LS_Field> LSFields = myPhaseSupport.has_one_levelset_per_phase() ? get_levelset_fields_that_are_not_all_zero(mesh, myLSFields) : myLSFields;
+  return get_active_elements_that_may_be_cut_by_levelsets(mesh, myActivePart, LSFields);
 }
 
 static void fill_node_levelset(const stk::mesh::BulkData & mesh, const LS_Field & LSField, const stk::mesh::Entity elem, std::vector<double> & nodeLS)
@@ -1193,6 +1218,31 @@ void LevelSetInterfaceGeometry::store_phase_for_elements_that_will_be_uncut_afte
       }
     }
   }
+}
+
+FieldRef LevelSetInterfaceGeometry::get_coordinates_field(const stk::mesh::BulkData & mesh) const
+{
+  FieldRef coordsField = myCdfemSupport.get_coords_field();
+  if (!coordsField.valid())
+  {
+    coordsField = mesh.mesh_meta_data().coordinate_field();
+    STK_ThrowRequireMsg(coordsField.valid(), "No valid coordinates field.");
+  }
+  return coordsField;
+}
+
+stk::math::Vector3d LevelSetInterfaceGeometry::compute_interface_normal(const stk::mesh::BulkData & mesh, const Surface_Identifier surfaceIdentifier, const stk::mesh::Entity element) const
+{
+  const LS_Field & lsField = get_ls_field_with_identifier(surfaceIdentifier);
+  if (!stk::mesh::selectField(lsField.isovar.field())(mesh.bucket(element)))
+    return stk::math::Vector3d::ZERO;
+  std::vector<stk::math::Vector3d> elemNodesCoords;
+  fill_element_node_coordinates(mesh, element, get_coordinates_field(mesh), elemNodesCoords);
+  std::vector<double> elemNodesDist;
+  fill_node_levelset(mesh, lsField, element, elemNodesDist);
+  stk::math::Vector3d grad = calculate_simplex_gradient(elemNodesCoords, elemNodesDist);
+  grad.unitize();
+  return grad;
 }
 
 }

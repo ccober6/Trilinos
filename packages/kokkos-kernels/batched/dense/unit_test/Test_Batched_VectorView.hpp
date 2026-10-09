@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 /// \author Kyungjoo Kim (kyukim@sandia.gov)
 
 // Note: Luc Berger-Vergiat 04/14/21
@@ -36,34 +23,42 @@ using namespace KokkosBatched;
 
 namespace Test {
 
+template <int extent_id, typename VectorViewType>
+inline int get_extent(const VectorViewType& v) {
+  if constexpr (extent_id < VectorViewType::rank) {
+    return v.extent(extent_id);
+  } else
+    return 1;
+}
+
 template <typename VectorViewType>
 void impl_init_vector_view(const VectorViewType& a) {
   int cnt = 0;
-  for (int i0 = 0, i0end = a.extent(0); i0 < i0end; ++i0)
-    for (int i1 = 0, i1end = a.extent(1); i1 < i1end; ++i1)
-      for (int i2 = 0, i2end = a.extent(2); i2 < i2end; ++i2)
-        for (int i3 = 0, i3end = a.extent(3); i3 < i3end; ++i3)
-          for (int i4 = 0, i4end = a.extent(4); i4 < i4end; ++i4)
-            for (int i5 = 0, i5end = a.extent(5); i5 < i5end; ++i5)
-              for (int i6 = 0, i6end = a.extent(6); i6 < i6end; ++i6)
-                for (int i7 = 0, i7end = a.extent(7); i7 < i7end; ++i7)
+  for (int i0 = 0, i0end = get_extent<0>(a); i0 < i0end; ++i0)
+    for (int i1 = 0, i1end = get_extent<1>(a); i1 < i1end; ++i1)
+      for (int i2 = 0, i2end = get_extent<2>(a); i2 < i2end; ++i2)
+        for (int i3 = 0, i3end = get_extent<3>(a); i3 < i3end; ++i3)
+          for (int i4 = 0, i4end = get_extent<4>(a); i4 < i4end; ++i4)
+            for (int i5 = 0, i5end = get_extent<5>(a); i5 < i5end; ++i5)
+              for (int i6 = 0, i6end = get_extent<6>(a); i6 < i6end; ++i6)
+                for (int i7 = 0, i7end = get_extent<7>(a); i7 < i7end; ++i7)
                   a.access(i0, i1, i2, i3, i4, i5, i6, i7) = cnt++;
 }
-#define TEST_LOOP                                                     \
-  for (int i0 = 0, i0end = b.extent(0); i0 < i0end; ++i0)             \
-    for (int i1 = 0, i1end = b.extent(1); i1 < i1end; ++i1)           \
-      for (int i2 = 0, i2end = b.extent(2); i2 < i2end; ++i2)         \
-        for (int i3 = 0, i3end = b.extent(3); i3 < i3end; ++i3)       \
-          for (int i4 = 0, i4end = b.extent(4); i4 < i4end; ++i4)     \
-            for (int i5 = 0, i5end = b.extent(5); i5 < i5end; ++i5)   \
-              for (int i6 = 0, i6end = b.extent(6); i6 < i6end; ++i6) \
-                for (int i7 = 0, i7end = b.extent(7); i7 < i7end; ++i7)
+#define TEST_LOOP                                                          \
+  for (int i0 = 0, i0end = get_extent<0>(b); i0 < i0end; ++i0)             \
+    for (int i1 = 0, i1end = get_extent<1>(b); i1 < i1end; ++i1)           \
+      for (int i2 = 0, i2end = get_extent<2>(b); i2 < i2end; ++i2)         \
+        for (int i3 = 0, i3end = get_extent<3>(b); i3 < i3end; ++i3)       \
+          for (int i4 = 0, i4end = get_extent<4>(b); i4 < i4end; ++i4)     \
+            for (int i5 = 0, i5end = get_extent<5>(b); i5 < i5end; ++i5)   \
+              for (int i6 = 0, i6end = get_extent<6>(b); i6 < i6end; ++i6) \
+                for (int i7 = 0, i7end = get_extent<7>(b); i7 < i7end; ++i7)
 
 template <typename VectorViewType>
 void impl_verify_vector_view(const VectorViewType& a, const SimdViewAccess<VectorViewType, PackDim<0> >& b) {
   typedef typename VectorViewType::value_type vector_type;
   constexpr int vl = vector_type::vector_length;
-  typedef Kokkos::ArithTraits<typename vector_type::value_type> ats;
+  typedef KokkosKernels::ArithTraits<typename vector_type::value_type> ats;
   const typename ats::mag_type eps = 1.0e3 * ats::epsilon();
   TEST_LOOP
   EXPECT_NEAR_KK(a.access(i0 / vl, i1, i2, i3, i4, i5, i6, i7)[i0 % vl], b(i0, i1, i2, i3, i4, i5, i6, i7), eps);
@@ -72,7 +67,7 @@ template <typename VectorViewType>
 void impl_verify_vector_view(const VectorViewType& a, const SimdViewAccess<VectorViewType, PackDim<1> >& b) {
   typedef typename VectorViewType::value_type vector_type;
   constexpr int vl = vector_type::vector_length;
-  typedef Kokkos::ArithTraits<typename vector_type::value_type> ats;
+  typedef KokkosKernels::ArithTraits<typename vector_type::value_type> ats;
   const typename ats::mag_type eps = 1.0e3 * ats::epsilon();
   TEST_LOOP
   EXPECT_NEAR_KK(a.access(i0, i1 / vl, i2, i3, i4, i5, i6, i7)[i1 % vl], b(i0, i1, i2, i3, i4, i5, i6, i7), eps);
@@ -81,7 +76,7 @@ template <typename VectorViewType>
 void impl_verify_vector_view(const VectorViewType& a, const SimdViewAccess<VectorViewType, PackDim<2> >& b) {
   typedef typename VectorViewType::value_type vector_type;
   constexpr int vl = vector_type::vector_length;
-  typedef Kokkos::ArithTraits<typename vector_type::value_type> ats;
+  typedef KokkosKernels::ArithTraits<typename vector_type::value_type> ats;
   const typename ats::mag_type eps = 1.0e3 * ats::epsilon();
   TEST_LOOP
   EXPECT_NEAR_KK(a.access(i0, i1, i2 / vl, i3, i4, i5, i6, i7)[i2 % vl], b(i0, i1, i2, i3, i4, i5, i6, i7), eps);
@@ -90,7 +85,7 @@ template <typename VectorViewType>
 void impl_verify_vector_view(const VectorViewType& a, const SimdViewAccess<VectorViewType, PackDim<3> >& b) {
   typedef typename VectorViewType::value_type vector_type;
   constexpr int vl = vector_type::vector_length;
-  typedef Kokkos::ArithTraits<typename vector_type::value_type> ats;
+  typedef KokkosKernels::ArithTraits<typename vector_type::value_type> ats;
   const typename ats::mag_type eps = 1.0e3 * ats::epsilon();
   TEST_LOOP
   EXPECT_NEAR_KK(a.access(i0, i1, i2, i3 / vl, i4, i5, i6, i7)[i3 % vl], b(i0, i1, i2, i3, i4, i5, i6, i7), eps);
@@ -99,7 +94,7 @@ template <typename VectorViewType>
 void impl_verify_vector_view(const VectorViewType& a, const SimdViewAccess<VectorViewType, PackDim<4> >& b) {
   typedef typename VectorViewType::value_type vector_type;
   constexpr int vl = vector_type::vector_length;
-  typedef Kokkos::ArithTraits<typename vector_type::value_type> ats;
+  typedef KokkosKernels::ArithTraits<typename vector_type::value_type> ats;
   const typename ats::mag_type eps = 1.0e3 * ats::epsilon();
   TEST_LOOP
   EXPECT_NEAR_KK(a.access(i0, i1, i2, i3, i4 / vl, i5, i6, i7)[i4 % vl], b(i0, i1, i2, i3, i4, i5, i6, i7), eps);
@@ -108,7 +103,7 @@ template <typename VectorViewType>
 void impl_verify_vector_view(const VectorViewType& a, const SimdViewAccess<VectorViewType, PackDim<5> >& b) {
   typedef typename VectorViewType::value_type vector_type;
   constexpr int vl = vector_type::vector_length;
-  typedef Kokkos::ArithTraits<typename vector_type::value_type> ats;
+  typedef KokkosKernels::ArithTraits<typename vector_type::value_type> ats;
   const typename ats::mag_type eps = 1.0e3 * ats::epsilon();
   TEST_LOOP
   EXPECT_NEAR_KK(a.access(i0, i1, i2, i3, i4, i5 / vl, i6, i7)[i5 % vl], b(i0, i1, i2, i3, i4, i5, i6, i7), eps);
@@ -117,7 +112,7 @@ template <typename VectorViewType>
 void impl_verify_vector_view(const VectorViewType& a, const SimdViewAccess<VectorViewType, PackDim<6> >& b) {
   typedef typename VectorViewType::value_type vector_type;
   constexpr int vl = vector_type::vector_length;
-  typedef Kokkos::ArithTraits<typename vector_type::value_type> ats;
+  typedef KokkosKernels::ArithTraits<typename vector_type::value_type> ats;
   const typename ats::mag_type eps = 1.0e3 * ats::epsilon();
   TEST_LOOP
   EXPECT_NEAR_KK(a.access(i0, i1, i2, i3, i4, i5, i6 / vl, i7)[i6 % vl], b(i0, i1, i2, i3, i4, i5, i6, i7), eps);
@@ -126,7 +121,7 @@ template <typename VectorViewType>
 void impl_verify_vector_view(const VectorViewType& a, const SimdViewAccess<VectorViewType, PackDim<7> >& b) {
   typedef typename VectorViewType::value_type vector_type;
   constexpr int vl = vector_type::vector_length;
-  typedef Kokkos::ArithTraits<typename vector_type::value_type> ats;
+  typedef KokkosKernels::ArithTraits<typename vector_type::value_type> ats;
   const typename ats::mag_type eps = 1.0e3 * ats::epsilon();
   TEST_LOOP
   EXPECT_NEAR_KK(a.access(i0, i1, i2, i3, i4, i5, i6, i7 / vl)[i7 % vl], b(i0, i1, i2, i3, i4, i5, i6, i7), eps);

@@ -88,6 +88,7 @@
 #include "StkIoUtils.hpp"                           // for part_primary_enti...
 #include "mpi.h"                                    // for MPI_COMM_SELF
 #include "stk_io/FieldAndName.hpp"                  // for FieldAndName
+#include "stk_io/IOHelpers.hpp"
 #include "stk_mesh/base/Bucket.hpp"                 // for Bucket
 #include "stk_mesh/base/Entity.hpp"                 // for Entity
 #include "stk_mesh/base/EntityKey.hpp"              // for operator<<
@@ -131,7 +132,7 @@ stk::mesh::EntityRank get_entity_rank(const Ioss::GroupingEntity *entity,
   {
     const Ioss::SideSet *sset = dynamic_cast<const Ioss::SideSet*>(entity);
     assert(sset != nullptr);
-    int my_rank = sset->max_parametric_dimension();
+    int my_rank = get_max_par_dimension(sset);
     if (my_rank == 2)
       return stk::topology::FACE_RANK;
     if (my_rank == 1)
@@ -147,8 +148,8 @@ stk::mesh::EntityRank get_entity_rank(const Ioss::GroupingEntity *entity,
     const Ioss::SideBlock *sblk = dynamic_cast<const Ioss::SideBlock*>(entity);
     assert(sblk != nullptr);
 
-    bool useShellAllFaceSides = sblk->get_database()->get_region()->property_exists("ENABLE_ALL_FACE_SIDES_SHELL");
-    if (sblk->parent_element_topology()->is_shell() && useShellAllFaceSides) {
+    if (should_use_all_face_sides(sblk))
+    {
       return stk::topology::FACE_RANK;
     }
 
@@ -175,6 +176,66 @@ stk::mesh::EntityRank get_entity_rank(const Ioss::GroupingEntity *entity,
   default:
     return stk::mesh::InvalidEntityRank;
   }
+}
+
+bool should_use_all_face_sides(const Ioss::EntityBlock* entity)
+{
+  if (entity->type() == Ioss::SIDEBLOCK)
+  {
+    return should_use_all_face_sides(dynamic_cast<const Ioss::SideBlock*>(entity));
+  } else
+  {
+    auto useShellAllFaceSides = entity->get_database()->get_region()->property_exists("ENABLE_ALL_FACE_SIDES_SHELL");
+    return entity->topology()->is_shell() && useShellAllFaceSides;
+  }
+}
+
+bool should_use_all_face_sides(const Ioss::SideBlock* block)
+{
+    Ioss::Region *region = block->owner()->get_database()->get_region();
+    bool useShellAllFaceSides = region->property_exists("ENABLE_ALL_FACE_SIDES_SHELL");  
+
+    const Ioss::ElementTopology* parentTopo = block->parent_element_topology();
+    const Ioss::ElementTopology* sideTopo   = block->topology();
+    return sideTopo->parametric_dimension() == 1 && 
+           parentTopo->spatial_dimension()  == 3 && parentTopo->is_shell() && 
+           useShellAllFaceSides; 
+}
+
+
+int get_max_par_dimension(const Ioss::SideBlock* block)
+{
+    int par_dim = block->topology()->parametric_dimension();
+    if (should_use_all_face_sides(block))
+    {
+        par_dim++;
+    }
+    
+    STK_ThrowAssertMsg(block->topology()->name() == "unknown" || par_dim == 1 || par_dim == 2, "SideBlock parametric dimension must be 1 or 2");
+    return par_dim;
+}
+
+int get_max_par_dimension(const Ioss::SideSet* sset)
+{
+    int max_par_dim = 0;
+    for (size_t i=0; i < sset->block_count(); ++i)
+    {
+      Ioss::SideBlock* block = sset->get_block(i);
+      max_par_dim = std::max(max_par_dim, get_max_par_dimension(block));      
+    }
+
+    if (max_par_dim == 0)
+    {
+        max_par_dim = sset->max_parametric_dimension();
+    }
+
+    return max_par_dim;
+}
+
+stk::mesh::EntityRank get_side_rank(const Ioss::SideBlock *block)
+{
+    int par_dim = get_max_par_dimension(block);
+    return par_dim == 1 ? stk::topology::EDGE_RANK : stk::topology::FACE_RANK;
 }
 
 }
@@ -305,29 +366,30 @@ void internal_field_data_to_ioss(const stk::mesh::BulkData& mesh,
   if (!(ioEntity->type() & supports)) {
     return;
   }
-  int iossFieldLength = ioField.transformed_storage()->component_count();
-  size_t entityCount = entities.size();
+  const int iossFieldLength = ioField.transformed_storage()->component_count();
+  const size_t entityCount = entities.size();
 
   std::vector<T> ioFieldData(entityCount*iossFieldLength);
 
   stk::mesh::field_data_execute<T, stk::mesh::ReadOnly>(*field,
     [&](auto& fieldData) {
-      for (size_t i=0; i < entityCount; ++i) {
-        if (mesh.is_valid(entities[i]) && mesh.entity_rank(entities[i]) == field->entity_rank()) {
-          if (field->defined_on(entities[i])) {
-            auto fldData = fieldData.entity_values(entities[i]);
-            int stkFieldLength = fldData.num_scalars();
-            STK_ThrowRequireMsg((iossFieldLength >= stkFieldLength), "Field " << field->name() << " scalars-per-entity="
-                                << static_cast<int>(stkFieldLength) << " doesn't match Ioss iossFieldLength(="
+      T* ioFieldDataPtr = ioFieldData.data();
+      for (stk::mesh::Entity entity : entities) {
+        if (mesh.is_valid(entity) && mesh.entity_rank(entity) == field->entity_rank()) {
+          auto fldData = fieldData.entity_values(entity);
+          const int stkFieldLength = fldData.num_scalars();
+          if (stkFieldLength > 0) {
+            STK_ThrowAssertMsg((iossFieldLength >= stkFieldLength), "Field " << field->name() << " scalars-per-entity="
+                                << stkFieldLength << " doesn't match Ioss iossFieldLength(="
                                 << iossFieldLength << ") for io_entity " << ioEntity->name());
-            stk::mesh::ScalarIdx length ( std::min(iossFieldLength, stkFieldLength) );
-
-            T* ioFieldDataPtr = ioFieldData.data()+i*iossFieldLength;
+            stk::mesh::ScalarIdx length ( iossFieldLength > stkFieldLength ? stkFieldLength : iossFieldLength );
 
             for(stk::mesh::ScalarIdx j(0); j<length; ++j) {
               ioFieldDataPtr[j] = fldData(j);
             }
+
           }
+          ioFieldDataPtr += iossFieldLength;
         }
       }
     }
@@ -336,16 +398,12 @@ void internal_field_data_to_ioss(const stk::mesh::BulkData& mesh,
   size_t ioEntityCount = ioEntity->put_field_data(ioField.get_name(), ioFieldData);
   assert(ioFieldData.size() == entities.size() * iossFieldLength);
 
-  if (ioEntityCount != entityCount) {
-    std::ostringstream errmsg;
-    errmsg << "ERROR: Field count mismatch for IO field '"
-           << ioField.get_name()
-           << "' on " << ioEntity->type_string() << " " << ioEntity->name()
-           << ". The IO system has " << ioEntityCount
-           << " entries, but the stk:mesh system has " << entityCount
-           << " entries. The two counts must match.";
-    throw std::runtime_error(errmsg.str());
-  }
+  STK_ThrowRequireMsg(ioEntityCount == entityCount, "ERROR: Field count mismatch for IO field '"
+                                                    << ioField.get_name()
+                                                    << "' on " << ioEntity->type_string() << " " << ioEntity->name()
+                                                    << ". The IO system has " << ioEntityCount
+                                                    << " entries, but stk::mesh has " << entityCount
+                                                    << " entries. The two counts must match.");
 }
 
 bool will_output_lower_rank_fields(const stk::mesh::Part &part, stk::mesh::EntityRank rank)
@@ -1171,6 +1229,23 @@ std::vector<std::string> get_assembly_names(const stk::mesh::MetaData& meta)
   return assemblyNames;
 }
 
+std::vector<const stk::mesh::Part*> get_surface_assemblies(const stk::mesh::MetaData& meta)
+{
+  std::vector<const stk::mesh::Part*> surfaceAssemblies;
+  for (const stk::mesh::Part* part : meta.get_parts()) {
+    if (!is_part_assembly_io_part(*part)) {
+      continue;
+    }
+    if (std::any_of(part->subsets().begin(), part->subsets().end(),
+                 [](const auto* subset) {
+          return subset->primary_entity_rank() == stk::topology::FACE_RANK;
+        })) {
+      surfaceAssemblies.push_back(part);
+    }
+  }
+  return surfaceAssemblies;
+}
+
 bool is_in_subsets_of_parts(const stk::mesh::Part& part,
                             const stk::mesh::PartVector& parts)
 {
@@ -1471,8 +1546,7 @@ void internal_part_processing(Ioss::EntityBlock *entity, stk::mesh::MetaData &me
       set_original_topology_type_from_ioss(entity, *part);
     }
 
-    auto useShellAllFaceSides = entity->get_database()->get_region()->property_exists("ENABLE_ALL_FACE_SIDES_SHELL");
-    stk::topology stkTopology = map_ioss_topology_to_stk(topology, meta.spatial_dimension(), useShellAllFaceSides);
+    stk::topology stkTopology = map_ioss_topology_to_stk(topology, meta.spatial_dimension(), should_use_all_face_sides(entity));
     if (stkTopology != stk::topology::INVALID_TOPOLOGY) {
       if (stkTopology.rank() != part->primary_entity_rank() && entity->entity_count() == 0) {
         std::ostringstream os;
@@ -2404,6 +2478,13 @@ void define_side_block(stk::io::OutputParams &params,
     }
   }
 
+  if(elementTopo == nullptr && parentElementBlock != nullptr) {
+    std::string tmpTopoName = map_stk_topology_to_ioss(parentElementBlock->topology());
+    elementTopo = Ioss::ElementTopology::factory(tmpTopoName, true);
+    stkElementTopology = parentElementBlock->topology();
+    elementTopoName = map_stk_topology_to_ioss(stkElementTopology);
+  }
+
   const Ioss::ElementTopology* iossSideTopo = Ioss::ElementTopology::factory(ioTopo, true);
   int64_t sideOffset = get_side_offset(iossSideTopo, elementTopo);
   size_t sideCount = get_number_sides_in_sideset(params, part, stkElementTopology, parentElementBlock, sideOffset);
@@ -2653,7 +2734,7 @@ void define_assembly_hierarchy(stk::io::OutputParams &params,
       std::string iossSubAssemblyName = getPartName(*subAssemblyPart);
       const Ioss::Assembly* subAssembly = ioRegion.get_assembly(iossSubAssemblyName);
       if(subAssembly == nullptr) {
-        stk::RuntimeWarning() << "Failed to find subAssembly "<<iossSubAssemblyName;
+        stk::RuntimeWarningP0() << "Failed to find subAssembly "<<iossSubAssemblyName;
         continue;
       }
       if(assembly->get_member(subAssembly->name())==nullptr) {
@@ -2668,7 +2749,7 @@ void define_assembly_hierarchy(stk::io::OutputParams &params,
       std::string iossLeafPartName = getPartName(*leafPart);
       const Ioss::GroupingEntity* leafEntity = ioRegion.get_entity(iossLeafPartName);
       if (leafEntity == nullptr) {
-        stk::RuntimeWarning() << "Failed to find ioss entity: '" << iossLeafPartName << "' in assembly: '" << name
+        stk::RuntimeWarningP0() << "Failed to find ioss entity: '" << iossLeafPartName << "' in assembly: '" << name
                               << "'";
       }
       if (can_add_to_assembly(params, assembly, leafEntity, leafPart)) {
@@ -3030,7 +3111,7 @@ struct part_compare_by_name {
   }
 };
 
-bool has_io_subset_but_no_non_assembly_io_superset(const stk::mesh::Part& part)
+bool has_no_non_assembly_io_superset(const stk::mesh::Part& part)
 {
   for(const stk::mesh::Part* superset : part.supersets()) {
     if (stk::io::is_part_io_part(*superset) &&
@@ -3038,23 +3119,19 @@ bool has_io_subset_but_no_non_assembly_io_superset(const stk::mesh::Part& part)
       return false;
     }
   }
-  for(const stk::mesh::Part* subset : part.subsets()) {
-    if (stk::io::is_part_io_part(*subset)) {
-      return true;
-    }
-  }
-  return false;
+
+  return true;
 }
 
 bool is_edge_rank_sideset_part(const stk::mesh::Part& part)
 {
-  if (!stk::io::is_part_edge_block_io_part(part)) {
+  if (part.primary_entity_rank() == stk::topology::EDGE_RANK && !stk::io::is_part_edge_block_io_part(part)) {
     const unsigned spatialDim = part.mesh_meta_data().spatial_dimension();
     if (part.primary_entity_rank() == stk::topology::EDGE_RANK) {
       if (spatialDim == 2) {
         return true;
       }
-      if (spatialDim == 3 && has_io_subset_but_no_non_assembly_io_superset(part)) {
+      if (spatialDim == 3 && has_no_non_assembly_io_superset(part)) {
         return true;
       }
     }
@@ -3134,7 +3211,7 @@ void define_output_db_within_state_define(stk::io::OutputParams &params,
   }
 
   for (const stk::mesh::Part* part : *parts) {
-    if (is_part_assembly_io_part(*part)) {
+    if (is_part_io_part(*part) && is_part_assembly_io_part(*part)) {
       define_assembly_hierarchy(params, *part);
     }
   }
@@ -4143,7 +4220,8 @@ void write_node_sharing_info(Ioss::DatabaseIO *dbo, const EntitySharingInfo &nod
 Ioss::DatabaseIO *create_database_for_subdomain(const std::string &baseFilename,
                                                 int indexSubdomain,
                                                 int numSubdomains,
-                                                bool use64Bit)
+                                                bool use64Bit,
+                                                Ioss::DatabaseUsage databaseUsage)
 {
   std::string parallelFilename{construct_filename_for_serial_or_parallel(baseFilename, numSubdomains, indexSubdomain)};
   Ioss::PropertyManager properties;
@@ -4154,7 +4232,7 @@ Ioss::DatabaseIO *create_database_for_subdomain(const std::string &baseFilename,
   }
 
   std::string dbtype("exodusII");
-  Ioss::DatabaseIO *dbo = Ioss::IOFactory::create(dbtype, parallelFilename, Ioss::WRITE_RESULTS, MPI_COMM_SELF, properties);
+  Ioss::DatabaseIO *dbo = Ioss::IOFactory::create(dbtype, parallelFilename, databaseUsage, MPI_COMM_SELF, properties);
 
   return dbo;
 }

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #include <cstdio>
 
@@ -58,9 +45,11 @@ int test_crs_matrix_singlevec(Ordinal numRows, Ordinal numCols, int test, const 
 
   srand(17312837);
   matrix_type A;
-  if (filename)
-    A = KokkosSparse::Impl::read_kokkos_crst_matrix<matrix_type>(filename);
-  else {
+  if (filename) {
+    A       = KokkosSparse::Impl::read_kokkos_crst_matrix<matrix_type>(filename);
+    numRows = A.numRows();
+    numCols = A.numCols();
+  } else {
     Offset nnz = 10 * numRows;
     // note: the help text says the bandwidth is fixed at 0.01 * numRows
     // CAVEAT:  small problem sizes are problematic, b/c of 0.01*numRows
@@ -86,8 +75,8 @@ int test_crs_matrix_singlevec(Ordinal numRows, Ordinal numCols, int test, const 
   // Performance Output
   double matrix_size =
       1.0 * ((test_data.nnz * (sizeof(Scalar) + sizeof(Ordinal)) + numRows * sizeof(Offset))) / 1024 / 1024;
-  double vector_size      = 2.0 * numRows * sizeof(Scalar) / 1024 / 1024;
-  double vector_readwrite = (test_data.nnz + numCols) * sizeof(Scalar) / 1024 / 1024;
+  double vector_size      = (numRows + numCols) * sizeof(Scalar) / 1024 / 1024;
+  double vector_readwrite = (numRows + numRows + numCols) * sizeof(Scalar) / 1024 / 1024;
 
   double problem_size = matrix_size + vector_size;
   printf(
@@ -95,9 +84,9 @@ int test_crs_matrix_singlevec(Ordinal numRows, Ordinal numCols, int test, const 
       "MinBandwidth(GB/s) MaxBandwidth(GB/s) AveGFlop MinGFlop MaxGFlop "
       "aveTime(ms) maxTime(ms) minTime(ms) numErrors\n");
   printf(
-      "%i %i %i %6.2lf ( %6.2lf %6.2lf %6.2lf ) ( %6.3lf %6.3lf %6.3lf ) ( "
+      "%zd %zd %zd %6.2lf ( %6.2lf %6.2lf %6.2lf ) ( %6.3lf %6.3lf %6.3lf ) ( "
       "%6.3lf %6.3lf %6.3lf ) %i RESULT\n",
-      test_data.nnz, numRows, numCols, problem_size,
+      (size_t)test_data.nnz, (size_t)numRows, (size_t)numCols, problem_size,
       (matrix_size + vector_readwrite) / test_data.ave_time * loop / 1024,
       (matrix_size + vector_readwrite) / test_data.max_time / 1024,
       (matrix_size + vector_readwrite) / test_data.min_time / 1024,

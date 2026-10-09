@@ -19,16 +19,21 @@
 #include "Teko_InverseLibrary.hpp"
 #include "Teko_InverseFactory.hpp"
 
-#ifdef TEKO_HAVE_EPETRA
-#include "Thyra_EpetraOperatorViewExtractorBase.hpp"
-#include "Epetra_Operator.h"
-#endif
-
 namespace Teko {
 
-/** \brief Concrete preconditioner factory subclass based on ML.
+/** \brief Adapts Teko block preconditioners to the Stratimikos framework.
  *
- * ToDo: Finish documentation!
+ * This factory is what registers Teko as a Stratimikos preconditioner named
+ * <tt>"Teko"</tt> (see Teko::addTekoToStratimikosBuilder). Once registered, an entire
+ * Teko block preconditioner can be configured from the Stratimikos parameter list /
+ * XML: the top-level keys describe how to segregate the monolithic operator into blocks
+ * (<tt>"Strided Blocking"</tt>, <tt>"Reorder Type"</tt>) and which named inverse to apply
+ * to the whole system (<tt>"Inverse Type"</tt>), while the <tt>"Inverse Factory Library"</tt>
+ * sublist defines every named inverse. The complete list of valid parameters is returned by
+ * getValidParameters().
+ *
+ * See the \ref teko_config_model "Configuration Model" page of the Teko user's guide for
+ * the parameter reference and worked XML examples.
  */
 class StratimikosFactory : public Thyra::PreconditionerFactoryBase<double> {
  public:
@@ -41,18 +46,6 @@ class StratimikosFactory : public Thyra::PreconditionerFactoryBase<double> {
   StratimikosFactory(const Teuchos::RCP<Teko::RequestHandler> &rh);
   StratimikosFactory(const Teuchos::RCP<Stratimikos::DefaultLinearSolverBuilder> &builder,
                      const Teuchos::RCP<Teko::RequestHandler> &rh);
-
-#ifdef TEKO_HAVE_EPETRA
-  /** \brief Set the strategy object used to extract an
-   * <tt>Epetra_Operator</tt> view of an input forward operator.
-   *
-   * This view will then be dynamically casted to <tt>Epetra_RowMatrix</tt>
-   * before it is used.
-   *
-   * The default implementation used is <tt>EpetraOperatorViewExtractorBase</tt>.
-   */
-  STANDARD_COMPOSITION_MEMBERS(Thyra::EpetraOperatorViewExtractorBase, epetraFwdOpViewExtractor);
-#endif
 
   //@}
 
@@ -109,14 +102,6 @@ class StratimikosFactory : public Thyra::PreconditionerFactoryBase<double> {
                             Thyra::PreconditionerBase<double> *prec,
                             const Thyra::ESupportSolveUse supportSolveUse) const;
 
-#ifdef TEKO_HAVE_EPETRA
-  /** Setup an epetra preconditioner.
-   */
-  void initializePrec_Epetra(const Teuchos::RCP<const Thyra::LinearOpSourceBase<double> > &fwdOp,
-                             Thyra::PreconditionerBase<double> *prec,
-                             const Thyra::ESupportSolveUse supportSolveUse) const;
-#endif
-
   /** Access to the application communication request handling mechnism
    */
   void setRequestHandler(const Teuchos::RCP<Teko::RequestHandler> &rh) { reqHandler_ = rh; }
@@ -129,35 +114,6 @@ class StratimikosFactory : public Thyra::PreconditionerFactoryBase<double> {
   const std::vector<int> &getDecomposition() const { return decomp_; }
 
  private:
-#ifdef TEKO_HAVE_EPETRA
-  /** Build the segragated jacobian operator according to
-   * the input parameter list.
-   *
-   * \param[in] Jac Epetra_CrsMatrix (assumed) to be decomposed.
-   * \param[in] wrapInput RCP to an Epetra operator that was either previously
-   *                      wrapped, or it is <code>Teuchos::null</code>
-   * \param[in] out Stream for use when reporting testing results
-   *
-   * \returns Blocked operator that was requested, if <code>wrapInput</code> is not
-   *          null, then the returned pointer will match (i.e. wrapInput will be over-
-   *          written).
-   */
-  Teuchos::RCP<Epetra_Operator> buildWrappedEpetraOperator(
-      const Teuchos::RCP<const Epetra_Operator> &Jac,
-      const Teuchos::RCP<Epetra_Operator> &wrapInput, std::ostream &out) const;
-
-  /** Build strided vectors using the operator range map and
-   * the decomposition vectors.
-   *
-   * \param[in] Jac Epetra_CrsMatrix (assumed) to be decomposed.
-   * \param[in] decomp Decomposition vector.
-   * \param[in,out] vars Vector of vectors of global ids specifying
-   *                     how the operator is to be blocked.
-   */
-  void buildStridedVectors(const Epetra_Operator &Jac, const std::vector<int> &decomp,
-                           std::vector<std::vector<int> > &vars) const;
-#endif  // TEKO_HAVE_EPETRA
-
   Teuchos::RCP<Teuchos::ParameterList> paramList_;
 
   mutable Teuchos::RCP<Teko::InverseLibrary> invLib_;

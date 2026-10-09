@@ -10,7 +10,7 @@
 #ifndef IFPACK2_CONTAINER_DECL_HPP
 #define IFPACK2_CONTAINER_DECL_HPP
 
-/// \file Ifpack2_Container.hpp
+/// \file Ifpack2_Container_decl.hpp
 /// \brief Ifpack2::Container class declaration
 
 #include "Ifpack2_ConfigDefs.hpp"
@@ -98,7 +98,7 @@ class Container : public Teuchos::Describable {
                 "Ifpack2::Container: Please use MatrixType = Tpetra::RowMatrix.");
 
   //! Internal representation of Scalar in Kokkos::View
-  using ISC = typename Kokkos::ArithTraits<SC>::val_type;
+  using ISC = typename KokkosKernels::ArithTraits<SC>::val_type;
 
   //! HostView (the host-space internal representation for Tpetra::Multivector) is the
   //! type of the vector arguments of DoJacobi, DoGaussSeidel, and DoSGS.
@@ -111,8 +111,7 @@ class Container : public Teuchos::Describable {
   /// \param matrix [in] The original input matrix.  This Container
   ///   will construct local diagonal blocks from its rows according to
   ///   <tt>partitions</tt>.
-  /// \param partitioner [in] The Partitioner object that assigns
-  ///   local rows of the input matrix to blocks.
+  /// \param partitions [in] Partitioning of local rows into blocks.
   /// \param pointIndexed [in] If the input matrix is a \c Tpetra::BlockCrsMatrix,
   ///    whether elements of \c partitions[k] identify rows within blocks (true) or
   ///    whole blocks (false).
@@ -324,7 +323,7 @@ class ContainerImpl : public Container<MatrixType> {
   using typename Container<MatrixType>::ISC;
   //! The internal representation of LocalScalarType in Kokkos::View
   using LSC  = LocalScalarType;
-  using LISC = typename Kokkos::ArithTraits<LSC>::val_type;
+  using LISC = typename KokkosKernels::ArithTraits<LSC>::val_type;
 
   using local_mv_type = Tpetra::MultiVector<LSC, LO, GO, NO>;
 

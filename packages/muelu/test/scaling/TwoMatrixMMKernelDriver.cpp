@@ -114,9 +114,9 @@ void MM2_MKL(const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> &A,
   RCP<const crs_matrix_type> Cu  = toTpetra(rcp(&C, false));
   RCP<crs_matrix_type> Cnc       = Teuchos::rcp_const_cast<crs_matrix_type>(Cu);
 
-  const KCRS &Amat  = Au->getLocalMatrixDevice();
-  const KCRS &B1mat = B1u->getLocalMatrixDevice();
-  const KCRS &B2mat = B2u->getLocalMatrixDevice();
+  const KCRS Amat  = Au->getLocalMatrixDevice();
+  const KCRS B1mat = B1u->getLocalMatrixDevice();
+  const KCRS B2mat = B2u->getLocalMatrixDevice();
 
   if (A.getLocalNumRows() != C.getLocalNumRows()) throw std::runtime_error("C is not sized correctly");
 
@@ -280,7 +280,7 @@ void MM2_MKL(const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> &A,
 #include "TpetraExt_MatrixMatrix_ExtraKernels_def.hpp"
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-void MM2_Wrapper(const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> &A, const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> &B1, Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> &B2, Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> &C, Teuchos::RCP<const Xpetra::Map<LocalOrdinal, GlobalOrdinal, Node> > &Ccolmap, std::string algorithm_name, int team_work_size) {
+void MM2_Wrapper(const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> &A, const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> & /*B1*/, Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> & /*B2*/, Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> & /*C*/, Teuchos::RCP<const Xpetra::Map<LocalOrdinal, GlobalOrdinal, Node> > & /*Ccolmap*/, std::string algorithm_name, int /*team_work_size*/) {
 #include <MueLu_UseShortNames.hpp>
   using Teuchos::RCP;
   using Teuchos::rcp;

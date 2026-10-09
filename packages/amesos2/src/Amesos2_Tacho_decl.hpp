@@ -181,6 +181,14 @@ private:
   bool loadA_impl(EPhase current_phase);
 
 
+  /** 
+   * \brief Prints the status information about the current solver with some level
+   * of verbosity
+   */
+  void describe_impl(Teuchos::FancyOStream &out,
+                     const Teuchos::EVerbosityLevel verbLevel) const;
+
+
   /**
    * \brief can we optimize size_type and ordinal_type for straight pass through
    */
@@ -197,7 +205,9 @@ private:
     int streams;
     bool verbose;
     int dofs_per_node;
+    bool diag_shift;
     bool pivot_pert;
+    bool team_on_user_stream;
     // int num_kokkos_threads;
     // int max_num_superblocks;
   } data_;
@@ -216,6 +226,7 @@ private:
   device_value_type_array device_nzvals_view_;
 
   // symbolic is done on host for Tacho so store these versions as well
+  bool tacho_initialized_;
   host_size_type_array host_row_ptr_view_;
   host_ordinal_type_array host_cols_view_;
 };                              // End class Tacho

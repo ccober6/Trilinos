@@ -8,6 +8,7 @@
 // @HEADER
 
 #include "Sacado.hpp"
+#include <iostream>
 
 //
 // A simple example showing how to use Sacado with Kokkos
@@ -146,9 +147,9 @@ int main(int argc, char* argv[]) {
     // into a standard view of one higher rank, with the extra dimension equal
     // to p+1
     Kokkos::View<FadType*> c2("c",m,p+1);
-    Kokkos::View<double***> A_flat = A;
-    Kokkos::View<double**>  b_flat = b;
-    Kokkos::View<double**>  c_flat = c2;
+    Kokkos::View<double***> A_flat(A.data(), A.extent(0), A.extent(1), A.accessor().fad_size() + 1);
+    Kokkos::View<double**> b_flat(b.data(), b.extent(0), b.accessor().fad_size() + 1);
+    Kokkos::View<double**> c_flat(c2.data(), c2.extent(0), c2.accessor().fad_size() + 1);
     run_mat_vec_deriv(A_flat, b_flat, c_flat);
 
     // Print result

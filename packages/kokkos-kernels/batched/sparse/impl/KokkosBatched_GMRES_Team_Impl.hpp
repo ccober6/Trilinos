@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSBATCHED_GMRES_TEAM_IMPL_HPP
 #define KOKKOSBATCHED_GMRES_TEAM_IMPL_HPP
 
@@ -46,10 +33,10 @@ KOKKOS_INLINE_FUNCTION int TeamGMRES<MemberType>::invoke(const MemberType& membe
                                                          const ArnoldiViewType& ArnoldiView,
                                                          const TMPViewType& TMPView) {
   typedef int OrdinalType;
-  typedef typename Kokkos::ArithTraits<typename VectorViewType::non_const_value_type>::mag_type MagnitudeType;
-  typedef Kokkos::ArithTraits<MagnitudeType> ATM;
+  typedef typename KokkosKernels::ArithTraits<typename VectorViewType::non_const_value_type>::mag_type MagnitudeType;
+  typedef KokkosKernels::ArithTraits<MagnitudeType> ATM;
 
-  using TeamCopy1D = TeamCopy<MemberType, Trans::NoTranspose, 1>;
+  using TeamCopy1D = TeamCopy<MemberType, Trans::NoTranspose>;
 
   const OrdinalType numMatrices = X.extent(0);
   const OrdinalType numRows     = X.extent(1);
@@ -96,7 +83,7 @@ KOKKOS_INLINE_FUNCTION int TeamGMRES<MemberType>::invoke(const MemberType& membe
   P.template apply<Trans::NoTranspose, Mode::Team, 1>(member, W, W);
   member.team_barrier();
 
-  TeamDot<MemberType>::invoke(member, W, W, tmp);
+  TeamDot<MemberType, Trans::ConjTranspose, 1>::invoke(member, W, W, tmp);
   member.team_barrier();
 
   Kokkos::parallel_for(Kokkos::TeamThreadRange(member, 0, numMatrices), [&](const OrdinalType& i) {
@@ -150,7 +137,7 @@ KOKKOS_INLINE_FUNCTION int TeamGMRES<MemberType>::invoke(const MemberType& membe
     if (handle.get_ortho_strategy() == 1) {
       for (size_t i = 0; i < j + 1; ++i) {
         auto V_i = Kokkos::subview(V_view, Kokkos::ALL, i, Kokkos::ALL);
-        TeamDot<MemberType>::invoke(member, W, V_i, tmp);
+        TeamDot<MemberType, Trans::ConjTranspose, 1>::invoke(member, W, V_i, tmp);
         member.team_barrier();
         TeamCopy1D::invoke(member, tmp, Kokkos::subview(H_view, Kokkos::ALL, j, i));
         member.team_barrier();
@@ -164,7 +151,7 @@ KOKKOS_INLINE_FUNCTION int TeamGMRES<MemberType>::invoke(const MemberType& membe
       }
     }
 
-    TeamDot<MemberType>::invoke(member, W, W, tmp);
+    TeamDot<MemberType, Trans::ConjTranspose, 1>::invoke(member, W, W, tmp);
     member.team_barrier();
     Kokkos::parallel_for(Kokkos::TeamThreadRange(member, 0, numMatrices), [&](const OrdinalType& i) {
       H_view(i, j, j + 1) = ATM::sqrt(tmp(i));
@@ -217,7 +204,7 @@ KOKKOS_INLINE_FUNCTION int TeamGMRES<MemberType>::invoke(const MemberType& membe
         G(l, j + 1) = 0.;
       }
 
-      auto res_norm = Kokkos::ArithTraits<double>::abs(G(l, j + 1)) / G(l, 0);
+      auto res_norm = KokkosKernels::ArithTraits<double>::abs(G(l, j + 1)) / G(l, 0);
 
       handle.set_norm(member.league_rank(), l, j + 1, res_norm);
 
@@ -271,7 +258,7 @@ KOKKOS_INLINE_FUNCTION int TeamGMRES<MemberType>::invoke(const MemberType& membe
     member.team_barrier();
     P.template apply<Trans::NoTranspose, Mode::Team, 1>(member, W, W);
     member.team_barrier();
-    TeamDot<MemberType>::invoke(member, W, W, tmp);
+    TeamDot<MemberType, Trans::ConjTranspose, 1>::invoke(member, W, W, tmp);
     member.team_barrier();
 
     Kokkos::parallel_for(Kokkos::TeamThreadRange(member, 0, numMatrices), [&](const OrdinalType& i) {

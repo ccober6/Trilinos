@@ -111,7 +111,7 @@ protected:
     stk::mesh::get_entities(bulk, meta.side_rank(), selector, faces);
     EXPECT_EQ(expectedNumFaces, faces.size());
 
-    auto ssFieldData = ssFieldExtracted->data<double,stk::mesh::ReadOnly>();
+    auto ssFieldData = ssFieldExtracted->data<double>();
     for(stk::mesh::Entity face : faces) {
       stk::mesh::ConnectedEntities faceNodes = bulk.get_connected_entities(face, stk::topology::NODE_RANK);
       unsigned numFaceNodes = faceNodes.size();
@@ -743,30 +743,26 @@ void check_shell_edge_side(const stk::mesh::BulkData& bulk, stk::mesh::Connectiv
   EXPECT_EQ(expectedZeroBasedOrd, ords[0]);
 }
 
-TEST(ShellSideSidesets, DISABLED_create3DEdgesFromShellSides)
+TEST(ShellSideSidesets, create3DEdgesFromShellSides)
 {
   if (stk::parallel_machine_size(MPI_COMM_WORLD) > 1) { GTEST_SKIP(); }
 
-  std::string meshDesc = "textmesh: 0,1,SHELL_QUAD_4,1,2,3,4 |coordinates: 0,0,0, 1,0,0, 1,1,0, 0,1,0 |sideset:name=surface_1; data=1,3";
+  std::string meshDesc = "textmesh: 0,1,SHELL_QUAD_4,1,2,3,4 |coordinates: 0,0,0, 1,0,0, 1,1,0, 0,1,0 |sideset:name=surface_1; data=1,3; split=topology";
 
   const unsigned spatialDim = 3;
   std::shared_ptr<stk::mesh::BulkData> bulk = build_mesh_no_simple_fields(spatialDim, MPI_COMM_WORLD, stk::mesh::BulkData::NO_AUTO_AURA);
-  std::cout<<"reading mesh from textmesh"<<std::endl;
   EXPECT_NO_THROW(stk::io::fill_mesh(meshDesc, *bulk));
 
-  std::cout<<"checking mesh created from textmesh:"<<std::endl;
   stk::mesh::ConnectivityOrdinal expectedSideOrdinal = 3;
   check_shell_edge_side(*bulk, expectedSideOrdinal);
 
   std::string fileName("shell_edge_side.g");
-  std::cout<<"writing mesh"<<std::endl;
   stk::io::write_mesh(fileName, *bulk);
  
   std::shared_ptr<stk::mesh::BulkData> bulk2 = build_mesh_no_simple_fields(spatialDim, MPI_COMM_WORLD, stk::mesh::BulkData::NO_AUTO_AURA);
-  std::cout<<"reading mesh from file"<<std::endl;
   EXPECT_NO_THROW(stk::io::fill_mesh(fileName, *bulk2));
+  unlink(fileName.c_str());
 
-  std::cout<<"checking mesh written-then-read from stk-io:"<<std::endl;
   check_shell_edge_side(*bulk2, expectedSideOrdinal);
 }
 

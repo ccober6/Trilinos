@@ -34,7 +34,7 @@
 
 // #######################  Start Clang Header Tool Managed Headers ########################
 // clang-format off
-#include "Legendre.hpp"
+#include "stk_unit_test_utils/Legendre.hpp"
 
 #include <cmath>
 #include <algorithm>

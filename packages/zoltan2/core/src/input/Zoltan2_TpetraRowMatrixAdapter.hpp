@@ -168,13 +168,13 @@ public:
 // The MatrixAdapter Interface
 /////////////////////////////////////////////////////////////////
 
-  size_t getLocalNumRows() const;
+  size_t getLocalNumRows() const override;
 
-  size_t getLocalNumColumns() const;
+  size_t getLocalNumColumns() const override;
 
-  size_t getLocalNumEntries() const;
+  size_t getLocalNumEntries() const override;
 
-  bool CRSViewAvailable() const;
+  bool CRSViewAvailable() const override;
 
   void getRowIDsView(const gno_t *&rowIds) const override;
 
@@ -185,7 +185,7 @@ public:
       typename Base::ConstIdsDeviceView &rowIds) const override;
 
   void getCRSView(ArrayRCP<const offset_t> &offsets,
-                  ArrayRCP<const gno_t> &colIds) const;
+                  ArrayRCP<const gno_t> &colIds) const override;
 
   void getCRSHostView(
       typename Base::ConstOffsetsHostView &offsets,
@@ -197,7 +197,7 @@ public:
 
   void getCRSView(ArrayRCP<const offset_t> &offsets,
                   ArrayRCP<const gno_t> &colIds,
-                  ArrayRCP<const scalar_t> &values) const;
+                  ArrayRCP<const scalar_t> &values) const override;
 
   void getCRSHostView(
       typename Base::ConstOffsetsHostView &offsets,
@@ -209,24 +209,24 @@ public:
       typename Base::ConstIdsDeviceView &colIds,
       typename Base::ConstScalarsDeviceView &values) const override;
 
-  int getNumWeightsPerRow() const;
+  int getNumWeightsPerRow() const override;
 
   void getRowWeightsView(const scalar_t *&weights, int &stride,
-                         int idx = 0) const;
+                         int idx = 0) const override;
 
   void getRowWeightsDeviceView(typename Base::WeightsDeviceView1D &weights,
-                                  int idx = 0) const;
+                                  int idx = 0) const override;
 
   void getRowWeightsDeviceView(
       typename Base::WeightsDeviceView &weights) const override;
 
   void getRowWeightsHostView(typename Base::WeightsHostView1D &weights,
-                                int idx = 0) const;
+                                int idx = 0) const override;
 
   void getRowWeightsHostView(
       typename Base::WeightsHostView &weights) const override;
 
-  bool useNumNonzerosAsRowWeight(int idx) const;
+  bool useNumNonzerosAsRowWeight(int idx) const override;
 
   template <typename Adapter>
   void applyPartitioningSolution(
@@ -305,7 +305,7 @@ TpetraRowMatrixAdapter<User, UserCoord>::TpetraRowMatrixAdapter(
     for (offset_t e = offsHost_(r), i = 0; e < offsHost_(r + 1); e++) {
       colIdsHost_(e) = matrix_->getColMap()->getGlobalElement(localColInds(i++));
     }
-    for (size_t j = 0; j < nnz; j++) {
+    for (size_t j = 0; j < numEntries; j++) {
       valuesHost_(r) = localVals[j];
     }
   }
@@ -401,9 +401,10 @@ void TpetraRowMatrixAdapter<User, UserCoord>::setRowWeightsDevice(
   AssertCondition((idx >= 0) and (idx < nWeightsPerRow_),
                   "Invalid row weight index: " + std::to_string(idx));
 
+  auto rowWeightsDevice = this->rowWeightsDevice_;
     Kokkos::parallel_for(
-      rowWeightsDevice_.extent(0), KOKKOS_CLASS_LAMBDA(const int rowID) {
-        rowWeightsDevice_(rowID, idx) = weights(rowID);
+      rowWeightsDevice.extent(0), KOKKOS_LAMBDA(const int rowID) {
+        rowWeightsDevice(rowID, idx) = weights(rowID);
       });
 
   Kokkos::fence();
@@ -605,9 +606,10 @@ void TpetraRowMatrixAdapter<User, UserCoord>::getRowWeightsDeviceView(
   const auto size = rowWeightsDevice_.extent(0);
   weights = typename Base::WeightsDeviceView1D("weights", size);
 
+  auto rowWeightsDevice = this->rowWeightsDevice_;
   Kokkos::parallel_for(
-      size, KOKKOS_CLASS_LAMBDA(const int id) {
-        weights(id) = rowWeightsDevice_(id, idx);
+      size, KOKKOS_LAMBDA(const int id) {
+        weights(id) = rowWeightsDevice(id, idx);
       });
 
   Kokkos::fence();

@@ -18,7 +18,7 @@
 #define KOKKOS_EXAMPLE_BELOS_SOLVE
 
 // Tpetra
-#include "Kokkos_ArithTraits.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "Tpetra_MultiVector.hpp"
 #include "Tpetra_CrsMatrix.hpp"
 
@@ -97,8 +97,8 @@ belos_solve(
   const int use_mean_based,
   const Teuchos::RCP<Teuchos::ParameterList>& fenlParams,
   const unsigned max_iter = 200,
-  const typename Kokkos::ArithTraits<SV>::mag_type tolerance =
-    Kokkos::ArithTraits<SV>::epsilon())
+  const typename KokkosKernels::ArithTraits<SV>::mag_type tolerance =
+    KokkosKernels::ArithTraits<SV>::epsilon())
 {
   typedef Tpetra::Operator<SM,LO,GO,N> OperatorType;
   typedef Tpetra::MultiVector<SV,LO,GO,N> VectorType;
@@ -240,8 +240,8 @@ belos_solve(
   const int use_mean_based,
   const Teuchos::RCP<Teuchos::ParameterList>& fenlParams,
   const unsigned max_iter = 200,
-  const typename Kokkos::ArithTraits<SV>::mag_type tolerance =
-    Kokkos::ArithTraits<SV>::epsilon())
+  const typename KokkosKernels::ArithTraits<SV>::mag_type tolerance =
+    KokkosKernels::ArithTraits<SV>::epsilon())
 {
   TEUCHOS_TEST_FOR_EXCEPTION(true, std::runtime_error,
                              "Belos solver requested but not compiled!");

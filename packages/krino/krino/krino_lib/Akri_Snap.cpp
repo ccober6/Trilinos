@@ -17,7 +17,7 @@
 #include <Akri_MasterElementDeterminer.hpp>
 #include <Akri_MeshHelpers.hpp>
 #include <Akri_Phase_Support.hpp>
-#include <Akri_Quality.hpp>
+#include <Akri_MeshQuality.hpp>
 #include <Akri_QualityMetric.hpp>
 #include <Akri_SharpFeature.hpp>
 #include <Akri_SnapIndependentSetFinder.hpp>
@@ -801,7 +801,6 @@ static void fill_interpolation_nodes_and_weights_at_node_location_in_previous_co
 
 static std::vector<InterpolationPoint> build_interpolation_points_for_snapping(const stk::mesh::BulkData & mesh, const stk::mesh::Part & activePart, const FieldRef coordsField, const FieldRef cdfemSnapField, const std::vector<stk::mesh::Entity> & snapNodes)
 {
-  stk::mesh::Entity containingElem;
   std::vector<stk::mesh::Entity> interpNodes;
   std::vector<double> interpWeights;
 

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 /// \author Yuuichi Asahi (yuuichi.asahi@cea.fr)
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
@@ -37,7 +24,6 @@ struct Functor_BatchedSerialGetrf {
   AViewType m_a;
   PivViewType m_ipiv;
 
-  KOKKOS_INLINE_FUNCTION
   Functor_BatchedSerialGetrf(const AViewType &a, const PivViewType &ipiv) : m_a(a), m_ipiv(ipiv) {}
 
   KOKKOS_INLINE_FUNCTION
@@ -66,7 +52,6 @@ struct Functor_BatchedSerialGetrs {
   BViewType m_b;
   PivViewType m_ipiv;
 
-  KOKKOS_INLINE_FUNCTION
   Functor_BatchedSerialGetrs(const AViewType &a, const PivViewType &ipiv, const BViewType &b)
       : m_a(a), m_b(b), m_ipiv(ipiv) {}
 
@@ -102,7 +87,6 @@ struct Functor_BatchedSerialGemv {
   yViewType m_y;
   ScalarType m_alpha, m_beta;
 
-  KOKKOS_INLINE_FUNCTION
   Functor_BatchedSerialGemv(const ScalarType alpha, const AViewType &a, const xViewType &x, const ScalarType beta,
                             const yViewType &y)
       : m_a(a), m_x(x), m_y(y), m_alpha(alpha), m_beta(beta) {}
@@ -140,12 +124,12 @@ struct Functor_BatchedSerialGemv {
 ///            [1, -2]]
 ///       piv: [0, 1]
 ///
-/// \param N [in] Batch size of RHS (banded matrix can also be batched matrix)
-/// \param k [in] Number of superdiagonals or subdiagonals of matrix A
-/// \param BlkSize [in] Block size of matrix A
+/// \param[in] N  Batch size of RHS (banded matrix can also be batched matrix)
+/// \param[in] k Number of superdiagonals or subdiagonals of matrix A
+/// \param[in] BlkSize Block size of matrix A
 template <typename DeviceType, typename ScalarType, typename LayoutType, typename ParamTagType, typename AlgoTagType>
 void impl_test_batched_getrs_analytical(const int N) {
-  using ats           = typename Kokkos::ArithTraits<ScalarType>;
+  using ats           = typename KokkosKernels::ArithTraits<ScalarType>;
   using RealType      = typename ats::mag_type;
   using View2DType    = Kokkos::View<ScalarType **, LayoutType, DeviceType>;
   using View3DType    = Kokkos::View<ScalarType ***, LayoutType, DeviceType>;
@@ -198,12 +182,12 @@ void impl_test_batched_getrs_analytical(const int N) {
 
 /// \brief Implementation details of batched getrs test
 ///
-/// \param N [in] Batch size of RHS (banded matrix can also be batched matrix)
-/// \param k [in] Number of superdiagonals or subdiagonals of matrix A
-/// \param BlkSize [in] Block size of matrix A
+/// \param[in] N  Batch size of RHS (banded matrix can also be batched matrix)
+/// \param[in] k Number of superdiagonals or subdiagonals of matrix A
+/// \param[in] BlkSize Block size of matrix A
 template <typename DeviceType, typename ScalarType, typename LayoutType, typename ParamTagType, typename AlgoTagType>
 void impl_test_batched_getrs(const int N, const int BlkSize) {
-  using ats           = typename Kokkos::ArithTraits<ScalarType>;
+  using ats           = typename KokkosKernels::ArithTraits<ScalarType>;
   using RealType      = typename ats::mag_type;
   using View2DType    = Kokkos::View<ScalarType **, LayoutType, DeviceType>;
   using View3DType    = Kokkos::View<ScalarType ***, LayoutType, DeviceType>;

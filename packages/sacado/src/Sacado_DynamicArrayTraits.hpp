@@ -191,6 +191,18 @@ namespace Sacado {
         else
           m = static_cast<T* >(operator new(sz*sizeof(T)));
       }
+#elif defined(__SYCL_DEVICE_ONLY__)
+      // SYCL device code has no heap:  operator new does not resolve, and a
+      // mere reference to it fails the whole device module at JIT time -- even
+      // from a kernel that never runs, since the default device code split
+      // groups kernels that share device functions.  Fail here instead, so the
+      // symbol is never referenced and only a real allocation is an error.
+      Kokkos::abort("Sacado: cannot allocate a Fad derivative array in SYCL "
+                    "device code.  SYCL has no device heap.  A DFad in a "
+                    "Kokkos::View is fine -- its array belongs to the View -- "
+                    "but a DFad value cannot be built inside a kernel.");
+      T* m = 0;
+      (void) sz;
 #else
       T* m = 0;
       if (sz > 0) {
@@ -223,6 +235,11 @@ namespace Sacado {
         else
           operator delete((void*) m);
       }
+#elif defined(__SYCL_DEVICE_ONLY__)
+      // See ds_alloc():  operator delete does not resolve in SYCL device code.
+      // Nothing can have been allocated, so there is nothing to release.
+      (void) m;
+      (void) sz;
 #else
       if (sz > 0)
         operator delete((void*) m);
@@ -329,7 +346,7 @@ namespace Sacado {
     }
   };
 
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL_DFAD) && !defined(SACADO_DISABLE_CUDA_IN_KOKKOS) && defined(__CUDA_ARCH__)
+#if defined(SACADO_GPU_HIERARCHICAL_DFAD) && !defined(SACADO_DISABLE_CUDA_IN_KOKKOS) && defined(__CUDA_ARCH__)
 
   namespace Impl {
 
@@ -480,7 +497,7 @@ namespace Sacado {
     }
   };
 
-#elif defined(SACADO_VIEW_CUDA_HIERARCHICAL_DFAD_STRIDED) && !defined(SACADO_DISABLE_CUDA_IN_KOKKOS) && defined(__CUDA_ARCH__)
+#elif defined(SACADO_GPU_HIERARCHICAL_DFAD_STRIDED) && !defined(SACADO_DISABLE_CUDA_IN_KOKKOS) && defined(__CUDA_ARCH__)
 
   namespace Impl {
 
@@ -657,7 +674,7 @@ namespace Sacado {
     SACADO_INLINE_FUNCTION
     static T* get_and_fill(int sz) {
       T* m = Impl::ds_alloc<T>(sz);
-#if defined(__CUDACC__ ) || defined(__HIPCC__ )
+#if defined(__CUDACC__ ) || defined(__HIPCC__ ) || defined(__SYCL_DEVICE_ONLY__)
       for (int i=0; i<sz; ++i)
         m[i] = 0.0;
 #else
@@ -695,7 +712,7 @@ namespace Sacado {
     SACADO_INLINE_FUNCTION
     static void copy(const T* src, T* dest, int sz) {
       if (sz > 0 && dest != NULL && src != NULL)
-#if defined( __CUDACC__) || defined(__HIPCC__ )
+#if defined( __CUDACC__) || defined(__HIPCC__ ) || defined(__SYCL_DEVICE_ONLY__)
         for (int i=0; i<sz; ++i)
           dest[i] = src[i];
 #else
@@ -718,7 +735,7 @@ namespace Sacado {
     SACADO_INLINE_FUNCTION
     static void zero(T* dest, int sz) {
       if (sz > 0 && dest != NULL)
-#if defined(__CUDACC__ ) || defined(__HIPCC__ )
+#if defined(__CUDACC__ ) || defined(__HIPCC__ ) || defined(__SYCL_DEVICE_ONLY__)
         for (int i=0; i<sz; ++i)
           dest[i] = T(0.);
 #else

@@ -40,7 +40,7 @@
 #include "LOCA_Stepper.H"
 #include "NOX_SolverStats.hpp"
 #include "NOX_Observer.hpp"
-#include "NOX_Observer_Vector.cpp"
+#include "NOX_Observer_Vector.hpp"
 
 // For solution io
 #include "Thyra_TpetraVector.hpp"
@@ -143,7 +143,7 @@ public:
 
   ~WriteParametersObserver() { file_.close(); }
 
-  void runPreSolve(const NOX::Solver::Generic& solver)
+  void runPreSolve(const NOX::Solver::Generic&  /*solver*/)
   {
     if (first_ && on_print_rank_) {
       file_.open(file_name_,std::ios::trunc);

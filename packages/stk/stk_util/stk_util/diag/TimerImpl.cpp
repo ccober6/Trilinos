@@ -32,6 +32,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
+#include "stk_util/stk_config.h"
 #include "stk_util/diag/TimerImpl.hpp"
 #include "stk_util/diag/Timer.hpp"
 
@@ -94,7 +95,6 @@ TimerImpl::reset()
   m_wallTime.reset();
   m_MPICount.reset();
   m_MPIByteCount.reset();
-  m_heapAlloc.reset();
 }
 
 
@@ -141,7 +141,6 @@ TimerImpl::start()
       m_wallTime.m_lapStop = m_wallTime.m_lapStart = value_now<WallTime>();
       m_MPICount.m_lapStop = m_MPICount.m_lapStart = value_now<MPICount>();
       m_MPIByteCount.m_lapStop = m_MPIByteCount.m_lapStart = value_now<MPIByteCount>();
-      m_heapAlloc.m_lapStop = m_heapAlloc.m_lapStart = value_now<HeapAlloc>();
       if(m_parentTimer)
         m_parentTimer->child_notifies_of_start();
     }
@@ -160,7 +159,6 @@ TimerImpl::lap()
       m_wallTime.m_lapStop = value_now<WallTime>();
       m_MPICount.m_lapStop = value_now<MPICount>();
       m_MPIByteCount.m_lapStop = value_now<MPIByteCount>();
-      m_heapAlloc.m_lapStop = value_now<HeapAlloc>();
     }
   }
 
@@ -204,14 +202,12 @@ TimerImpl::stop()
       m_wallTime.m_lapStop = value_now<WallTime>();
       m_MPICount.m_lapStop = value_now<MPICount>();
       m_MPIByteCount.m_lapStop = value_now<MPIByteCount>();
-      m_heapAlloc.m_lapStop = value_now<HeapAlloc>();
 
       m_lapCount.addLap();
       m_cpuTime.addLap();
       m_wallTime.addLap();
       m_MPICount.addLap();
       m_MPIByteCount.addLap();
-      m_heapAlloc.addLap();
       if(m_parentTimer)
         m_parentTimer->child_notifies_of_stop();
     }
@@ -244,7 +240,6 @@ TimerImpl::checkpoint() const
   m_wallTime.checkpoint();
   m_MPICount.checkpoint();
   m_MPIByteCount.checkpoint();
-  m_heapAlloc.checkpoint();
 
   for (TimerList::const_iterator it = m_subtimerList.begin(); it != m_subtimerList.end(); ++it)
     (*it).m_timerImpl->checkpoint();
@@ -259,14 +254,12 @@ TimerImpl::updateRootTimer(TimerImpl *root_timer)
   root_timer->m_wallTime.m_lapStop = value_now<WallTime>();
   root_timer->m_MPICount.m_lapStop = value_now<MPICount>();
   root_timer->m_MPIByteCount.m_lapStop = value_now<MPIByteCount>();
-  root_timer->m_heapAlloc.m_lapStop = value_now<HeapAlloc>();
 
   root_timer->m_lapCount.m_accumulatedLap = root_timer->m_lapCount.m_lapStop - root_timer->m_lapCount.m_lapStart;
   root_timer->m_cpuTime.m_accumulatedLap = root_timer->m_cpuTime.m_lapStop - root_timer->m_cpuTime.m_lapStart;
   root_timer->m_wallTime.m_accumulatedLap = root_timer->m_wallTime.m_lapStop - root_timer->m_wallTime.m_lapStart;
   root_timer->m_MPICount.m_accumulatedLap = root_timer->m_MPICount.m_lapStop - root_timer->m_MPICount.m_lapStart;
   root_timer->m_MPIByteCount.m_accumulatedLap = root_timer->m_MPIByteCount.m_lapStop - root_timer->m_MPIByteCount.m_lapStart;
-  root_timer->m_heapAlloc.m_accumulatedLap = root_timer->m_heapAlloc.m_lapStop - root_timer->m_heapAlloc.m_lapStart;
 }
 
 

@@ -31,6 +31,8 @@
 #include <Teuchos_SerialDenseMatrix.hpp>
 #include <Teuchos_Hashtable.hpp>
 
+#include <Tpetra_Filter.hpp>
+
 /** \file Xpetra_CrsMatrixWrap.hpp
 
   Declarations for the class Xpetra::CrsMatrixWrap.
@@ -52,14 +54,12 @@ class CrsMatrixWrap : public Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> {
   typedef Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> CrsMatrix;
   typedef Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> Matrix;
   typedef Xpetra::CrsGraph<LocalOrdinal, GlobalOrdinal, Node> CrsGraph;
-#ifdef HAVE_XPETRA_TPETRA
   typedef Xpetra::TpetraCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> TpetraCrsMatrix;
-#endif
   typedef Xpetra::CrsMatrixFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node> CrsMatrixFactory;
   typedef Xpetra::MatrixView<Scalar, LocalOrdinal, GlobalOrdinal, Node> MatrixView;
-#ifdef HAVE_XPETRA_TPETRA
-  typedef typename CrsMatrix::local_matrix_type local_matrix_type;
-#endif
+  using local_matrix_type        = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_type;
+  using local_matrix_device_type = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_device_type;
+  using local_matrix_host_type   = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_host_type;
 
  public:
   //! @name Constructor/Destructor Methods
@@ -82,7 +82,6 @@ class CrsMatrixWrap : public Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> {
   //! Constructor specifying fixed number of entries for each row and column map
   CrsMatrixWrap(const RCP<const Map> &rowMap, const RCP<const Map> &colMap, const ArrayRCP<const size_t> &NumEntriesPerRowToAlloc);
 
-#ifdef HAVE_XPETRA_TPETRA
   //! Constructor specifying fixed number of entries for each row and column map
   CrsMatrixWrap(const RCP<const Map> &rowMap, const RCP<const Map> &colMap, const local_matrix_type &lclMatrix, const Teuchos::RCP<Teuchos::ParameterList> &params = null);
 
@@ -90,11 +89,6 @@ class CrsMatrixWrap : public Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> {
   CrsMatrixWrap(const local_matrix_type &lclMatrix, const RCP<const Map> &rowMap, const RCP<const Map> &colMap,
                 const RCP<const Map> &domainMap = Teuchos::null, const RCP<const Map> &rangeMap = Teuchos::null,
                 const Teuchos::RCP<Teuchos::ParameterList> &params = null);
-#else
-#ifdef __GNUC__
-#warning "Xpetra Kokkos interface for CrsMatrix is enabled (HAVE_XPETRA_KOKKOS_REFACTOR) but Tpetra is disabled. The Kokkos interface needs Tpetra to be enabled, too."
-#endif
-#endif
 
   CrsMatrixWrap(RCP<CrsMatrix> matrix);
 
@@ -419,18 +413,8 @@ class CrsMatrixWrap : public Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> {
   void setObjectLabel(const std::string &objectLabel);
   //@}
 
-#ifdef HAVE_XPETRA_TPETRA
   virtual local_matrix_type getLocalMatrixDevice() const;
-#if KOKKOS_VERSION >= 40799
   virtual typename local_matrix_type::host_mirror_type getLocalMatrixHost() const;
-#else
-  virtual typename local_matrix_type::HostMirror getLocalMatrixHost() const;
-#endif
-#else
-#ifdef __GNUC__
-#warning "Xpetra Kokkos interface for CrsMatrix is enabled (HAVE_XPETRA_KOKKOS_REFACTOR) but Tpetra is disabled. The Kokkos interface needs Tpetra to be enabled, too."
-#endif
-#endif
 
   // JG: Added:
 
@@ -660,6 +644,63 @@ toTpetraRowMatrix(const Teuchos::RCP<const Xpetra::Operator<Scalar, LocalOrdinal
     auto tRow = Teuchos::rcp_dynamic_cast<const Tpetra::RowMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(tOp, true);
     return tRow;
   }
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node, class filter_type>
+RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> applyFilter_vals(const RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> &crsA, const filter_type &filter) {
+  Teuchos::RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> crsFiltered;
+  auto tpCrsA = Teuchos::rcp_dynamic_cast<Xpetra::TpetraCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(crsA);
+  if (!tpCrsA.is_null()) {
+    auto tpCrsFiltered = Tpetra::applyFilter_vals(*tpCrsA, filter);
+    crsFiltered        = Teuchos::rcp_dynamic_cast<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(tpCrsFiltered);
+  }
+  return crsFiltered;
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node, class filter_type>
+RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> applyFilter_vals(const RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> &A, const filter_type &filter) {
+  auto crsA        = Teuchos::rcp_dynamic_cast<Xpetra::CrsMatrixWrap<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(A)->getCrsMatrix();
+  auto crsFiltered = applyFilter_vals(crsA, filter);
+  auto filtered    = rcp(new Xpetra::CrsMatrixWrap<Scalar, LocalOrdinal, GlobalOrdinal, Node>(crsFiltered));
+  return filtered;
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node, class filter_type>
+RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> applyFilter_LID(const RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> &crsA, const filter_type &filter) {
+  Teuchos::RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> crsFiltered;
+  auto tpCrsA = Teuchos::rcp_dynamic_cast<Xpetra::TpetraCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(crsA);
+  if (!tpCrsA.is_null()) {
+    auto tpCrsFiltered = Tpetra::applyFilter_LID(*tpCrsA, filter);
+    crsFiltered        = Teuchos::rcp_dynamic_cast<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(tpCrsFiltered);
+  }
+  return crsFiltered;
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node, class filter_type>
+RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> applyFilter_LID(const RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> &A, const filter_type &filter) {
+  auto crsA        = Teuchos::rcp_dynamic_cast<Xpetra::CrsMatrixWrap<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(A)->getCrsMatrix();
+  auto crsFiltered = applyFilter_LID(crsA, filter);
+  auto filtered    = rcp(new Xpetra::CrsMatrixWrap<Scalar, LocalOrdinal, GlobalOrdinal, Node>(crsFiltered));
+  return filtered;
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node, class filter_type>
+RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> applyFilter_GID(const RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> &crsA, const filter_type &filter) {
+  Teuchos::RCP<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> crsFiltered;
+  auto tpCrsA = Teuchos::rcp_dynamic_cast<Xpetra::TpetraCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(crsA);
+  if (!tpCrsA.is_null()) {
+    auto tpCrsFiltered = Tpetra::applyFilter_GID(*tpCrsA, filter);
+    crsFiltered        = Teuchos::rcp_dynamic_cast<Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(tpCrsFiltered);
+  }
+  return crsFiltered;
+}
+
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node, class filter_type>
+RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> applyFilter_GID(const RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> &A, const filter_type &filter) {
+  auto crsA        = Teuchos::rcp_dynamic_cast<Xpetra::CrsMatrixWrap<Scalar, LocalOrdinal, GlobalOrdinal, Node>>(A)->getCrsMatrix();
+  auto crsFiltered = applyFilter_GID(crsA, filter);
+  auto filtered    = rcp(new Xpetra::CrsMatrixWrap<Scalar, LocalOrdinal, GlobalOrdinal, Node>(crsFiltered));
+  return filtered;
 }
 
 }  // namespace Xpetra

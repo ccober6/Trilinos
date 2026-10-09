@@ -41,852 +41,753 @@
 #include <stk_mesh/base/Selector.hpp>
 #include <stk_mesh/base/DataTraits.hpp>
 #include <stk_mesh/base/MetaData.hpp>
-#include <stk_mesh/base/NgpField.hpp>
-#include <stk_mesh/base/GetNgpField.hpp>
 #include <stk_mesh/base/NgpMesh.hpp>
 #include <stk_mesh/base/GetNgpMesh.hpp>
 #include <stk_mesh/base/NgpForEachEntity.hpp>
-#include <stk_mesh/base/FieldBLAS.hpp>
+#include "stk_mesh/base/NgpReductions.hpp"
+#include "stk_mesh/base/Types.hpp"
+#include "stk_util/ngp/NgpSpaces.hpp"
+#include <stk_util/parallel/ParallelReduce.hpp>
+#include <Kokkos_StdAlgorithms.hpp>
 
-#include <complex>
-#include <string>
-#include <iostream>
-#include <algorithm>
-
-namespace stk {
-namespace ngp_field_blas {
-namespace impl {
+namespace stk::ngp_field_blas::impl {
 
 //************ implementation detail, not for public use ********************
 //************ public functions are in stk_mesh/base/NgpFieldBLAS.hpp ************
 
-template<class EXEC_SPACE>
-constexpr bool operate_on_ngp_mesh()
-{
-#ifdef STK_USE_DEVICE_MESH
-
-#ifdef STK_ENABLE_GPU
-  constexpr bool isActuallyDeviceExecSpace = !Kokkos::SpaceAccessibility<EXEC_SPACE, stk::ngp::HostExecSpace::memory_space>::accessible;
-  constexpr bool operateOnNgpMesh = isActuallyDeviceExecSpace;
-#else
-  constexpr bool operateOnNgpMesh = true;
-#endif
-
-#else
-  constexpr bool operateOnNgpMesh = false;
-#endif
-
-  return operateOnNgpMesh;
-}
-
-template<class EXEC_SPACE>
-bool mark_modified_on_device(
-    const EXEC_SPACE& /*execSpace*/,
-    bool isDeviceExecSpaceUserOverride = (!std::is_same_v<stk::ngp::HostExecSpace,EXEC_SPACE>))
-{
-  return operate_on_ngp_mesh<EXEC_SPACE>() || isDeviceExecSpaceUserOverride;
-}
-
-template <typename EXEC_SPACE>
-void mark_field_modified(const mesh::FieldBase& field, EXEC_SPACE execSpace, bool isDeviceExecSpaceUserOverride)
-{
-  field.clear_sync_state();
-  if (ngp_field_blas::impl::mark_modified_on_device(execSpace, isDeviceExecSpaceUserOverride)) {
-    field.modify_on_device();
-  }
-  else {
-    field.modify_on_host();
-  }
-}
-
-template<typename FieldViewType>
-void construct_device_fields(FieldViewType& ngpFields)
-{
-  using NgpFieldType = typename FieldViewType::value_type;
-  Kokkos::parallel_for(stk::ngp::DeviceRangePolicy(0, ngpFields.size()),
-                       KOKKOS_LAMBDA(const unsigned& i) {
-                         new (&ngpFields(i)) NgpFieldType();
-                       });
-}
-
-template<class Scalar, class NGP_FIELD_TYPE, typename ExecSpace>
+template<typename Scalar, typename FieldDataType, typename NgpSpace>
 class FieldFill {
 public:
-  FieldFill(const NGP_FIELD_TYPE* fields, int fieldCount, Scalar inputAlpha)
-  : ngpFieldsDynamic("ngp_fields", 0), alpha(inputAlpha), nfields(fieldCount)
+  FieldFill(const std::vector<const mesh::FieldBase*>& fields, const stk::NgpVector<unsigned>& inputIds, Scalar inputAlpha, const typename NgpSpace::exec_space& execSpace)
+  : bucketIds(inputIds),
+    alpha(inputAlpha),
+    nfields(fields.size())
   {
     if (nfields <= STATIC_FIELD_LIMIT)
     {
       for (int i=0; i < nfields; ++i)
       {
-        ngpFieldsStatic[i] = fields[i];
+        fieldDataStatic[i] = fields[i]->template data<Scalar, mesh::OverwriteAll, NgpSpace>(execSpace);
       }
     } else
     {
-      constexpr bool accessible = Kokkos::SpaceAccessibility<stk::ngp::HostExecSpace, MemorySpace>::accessible;
-  
-      if (accessible) {
-        Kokkos::resize(ngpFieldsDynamic, nfields);
-      }
-      else {
-        Kokkos::resize(Kokkos::WithoutInitializing, ngpFieldsDynamic, nfields);
-        construct_device_fields(ngpFieldsDynamic);
-      }
-
-      auto ngpFieldsDynamicHost = Kokkos::create_mirror_view(ngpFieldsDynamic);
-
+      fieldDataDynamic = FieldDataView("fieldDataDynamic", fields.size());
+      auto fieldDataDynamicHost = Kokkos::create_mirror_view(stk::ngp::HostPinnedSpace{}, fieldDataDynamic);
       for (int i=0; i < nfields; ++i)
       {
-        ngpFieldsDynamicHost[i] = fields[i];
+        fieldDataDynamicHost(i) = fields[i]->template data<Scalar, mesh::OverwriteAll, NgpSpace>(execSpace);
       }
-      Kokkos::deep_copy(ngpFieldsDynamic, ngpFieldsDynamicHost);
+
+      Kokkos::Experimental::copy(execSpace, fieldDataDynamicHost, fieldDataDynamic);
     }
   }
 
   KOKKOS_FUNCTION ~FieldFill() { }
 
   KOKKOS_FUNCTION
-  void operator()(const stk::mesh::FastMeshIndex& entityIndex) const
+  void operator()(const typename stk::ngp::TeamPolicy<typename NgpSpace::exec_space>::member_type& team) const
   {
-    if (nfields <= STATIC_FIELD_LIMIT)
-    {
-      for (int i=0; i < nfields; ++i)
-      {
-        setComponents(ngpFieldsStatic[i], entityIndex);
-      }
-    } else
-    {
-      for (int i=0; i < nfields; ++i)
-      {
-        setComponents(ngpFieldsDynamic[i], entityIndex);
-      }
-    }
+    const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank() / nfields);
+    const int i = team.league_rank() % nfields;
+    auto xValues = (nfields <= STATIC_FIELD_LIMIT) ? fieldDataStatic[i].bucket_values(bucketIndex) : fieldDataDynamic[i].bucket_values(bucketIndex);
+    const unsigned numValues = xValues.num_entities() * xValues.num_scalars();
+    const unsigned numEntities = xValues.num_entities();
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                         [&](const unsigned idx) {
+                           const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                           const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                           xValues(entityIdx, scalarIdx) = alpha;
+                         });
   }
 
-  KOKKOS_INLINE_FUNCTION
-  void setComponents(const NGP_FIELD_TYPE& ngpField, const stk::mesh::FastMeshIndex& entityIndex) const
-  {
-    const int numComponents = ngpField.get_num_components_per_entity(entityIndex);
-    for(int component=0; component<numComponents; ++component) {
-      ngpField(entityIndex, component) = alpha;
-    }
-  }
-
-  using FieldView = Kokkos::View<NGP_FIELD_TYPE*, ExecSpace>;
-  using FieldHostView = typename FieldView::host_mirror_type;
-  using MemorySpace = typename FieldView::traits::memory_space;
+  using FieldDataView = Kokkos::View<FieldDataType*, typename NgpSpace::mem_space>;
+  using HostPinnedFieldDataView = Kokkos::View<FieldDataType*, stk::ngp::HostPinnedSpace>;
   static constexpr int STATIC_FIELD_LIMIT = 4;
-  NGP_FIELD_TYPE ngpFieldsStatic[STATIC_FIELD_LIMIT];
-  FieldView ngpFieldsDynamic;
+  FieldDataType fieldDataStatic[STATIC_FIELD_LIMIT];
+  FieldDataView fieldDataDynamic;
+  stk::NgpVector<unsigned> bucketIds;
   Scalar alpha;
   int nfields;
 };
 
-template<class Scalar, typename NGP_FIELD_TYPE, typename ExecSpace>
+template<class Scalar, typename FieldDataType, typename NgpSpace>
 class FieldFillComponent {
 public:
-  static_assert(std::is_same_v<NGP_FIELD_TYPE, stk::mesh::HostField<Scalar>> ||
-                std::is_same_v<NGP_FIELD_TYPE, stk::mesh::DeviceField<Scalar>>);
-  FieldFillComponent(const NGP_FIELD_TYPE* fields, int fieldCount, Scalar inputAlpha, int inputComponent)
-  : ngpFieldsDynamic("ngp_fields", 0), alpha(inputAlpha), component(inputComponent), nfields(fieldCount)
+  FieldFillComponent(const std::vector<const mesh::FieldBase*>& fields, const stk::NgpVector<unsigned>& inputIds, Scalar inputAlpha, int inputComponent, const typename NgpSpace::exec_space& execSpace)
+  : fieldDataDynamic("fieldDataDynamic", (fields.size() <= STATIC_FIELD_LIMIT) ? 0 : fields.size()),
+    bucketIds(inputIds),
+    alpha(inputAlpha),
+    component(inputComponent),
+    nfields(fields.size())
   {
     if (nfields <= STATIC_FIELD_LIMIT)
     {
       for (int i=0; i < nfields; ++i)
       {
-        ngpFieldsStatic[i] = fields[i];
+        fieldDataStatic[i] = fields[i]->template data<Scalar, mesh::ReadWrite, NgpSpace>(execSpace);
       }
     } else
     {
-      constexpr bool accessible = Kokkos::SpaceAccessibility<stk::ngp::HostExecSpace, MemorySpace>::accessible;
-  
-      if constexpr (accessible) {
-        Kokkos::resize(ngpFieldsDynamic, nfields);
-      }
-      else {
-        Kokkos::resize(Kokkos::WithoutInitializing, ngpFieldsDynamic, nfields);
-        construct_device_fields(ngpFieldsDynamic);
-      }
-
-      auto ngpFieldsDynamicHost = Kokkos::create_mirror_view(ngpFieldsDynamic);
-
+      auto fieldDataDynamicHost = HostPinnedFieldDataView("fieldDataDynamicHost", fieldDataDynamic.extent(0));
       for (int i=0; i < nfields; ++i)
       {
-        ngpFieldsDynamicHost(i) = fields[i];
+        fieldDataDynamicHost(i) = fields[i]->template data<Scalar, mesh::OverwriteAll, NgpSpace>(execSpace);
       }
 
-      Kokkos::deep_copy(ngpFieldsDynamic, ngpFieldsDynamicHost);
+      Kokkos::Experimental::copy(execSpace, fieldDataDynamicHost, fieldDataDynamic);
     }
   }
 
   KOKKOS_FUNCTION
-  void operator()(const stk::mesh::FastMeshIndex& entityIndex) const
+  void operator()(const typename stk::ngp::TeamPolicy<typename NgpSpace::exec_space>::member_type& team) const
   {
-    if (nfields <= STATIC_FIELD_LIMIT)
-    {
-      for (int i=0; i < nfields; ++i)
-      {
-        setComponent(ngpFieldsStatic[i], entityIndex);
-      }
-    } else
-    {
-      for (int i=0; i < nfields; ++i)
-      {
-        setComponent(ngpFieldsDynamic(i), entityIndex);
-      }
-    }
+    const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank() / nfields);
+    const int i = team.league_rank() % nfields;
+    auto xValues = (nfields <= STATIC_FIELD_LIMIT) ? fieldDataStatic[i].bucket_values(bucketIndex) : fieldDataDynamic[i].bucket_values(bucketIndex);
+    const unsigned numEntities = xValues.num_entities();
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numEntities),
+                         [&](const unsigned idx) {
+                           const auto entityIdx = mesh::EntityIdx(idx);
+                           const auto scalarIdx = mesh::ScalarIdx(component);
+                           xValues(entityIdx, scalarIdx) = alpha;
+                         });
   }
 
-  KOKKOS_INLINE_FUNCTION
-  void setComponent(const NGP_FIELD_TYPE& ngpField, const stk::mesh::FastMeshIndex& entityIndex) const
-  {
-      for (int i=0; i < nfields; ++i)
-      {
-        const int numComponents = ngpField.get_num_components_per_entity(entityIndex);
-        STK_NGP_ThrowRequire(component < numComponents);
-        ngpField(entityIndex, component) = alpha;
-      }
-  }
-
-  using FieldView = Kokkos::View<NGP_FIELD_TYPE*, ExecSpace>;
-  using FieldHostView = typename FieldView::host_mirror_type;
-  using MemorySpace = typename FieldView::traits::memory_space;
+  using FieldDataView = Kokkos::View<FieldDataType*, typename NgpSpace::mem_space>;
+  using HostPinnedFieldDataView = Kokkos::View<FieldDataType*, stk::ngp::HostPinnedSpace>;
   static constexpr int STATIC_FIELD_LIMIT = 4;
-  NGP_FIELD_TYPE ngpFieldsStatic[STATIC_FIELD_LIMIT];
-  FieldView ngpFieldsDynamic;
+  FieldDataType fieldDataStatic[STATIC_FIELD_LIMIT];
+  FieldDataView fieldDataDynamic;
+  stk::NgpVector<unsigned> bucketIds;
   Scalar alpha;
   int component;
   int nfields;
 };
 
-template<class Scalar, class NGP_MESH_TYPE, class NGP_FIELD_TYPE, class EXEC_SPACE>
-void field_fill_for_each_entity(const NGP_MESH_TYPE& ngpMesh,
-                                const NGP_FIELD_TYPE* ngpFields,
-                                int nfields,
-                                Scalar alpha,
-                                int component,
-                                const stk::mesh::Selector& selector,
-                                const EXEC_SPACE& execSpace)
-{
-  if (component == -1) {
-    FieldFill<Scalar, NGP_FIELD_TYPE, EXEC_SPACE> fieldFill(ngpFields, nfields, alpha);
-    stk::mesh::for_each_entity_run(ngpMesh, ngpFields[0].get_rank(), selector, fieldFill, execSpace);
-    Kokkos::fence();
-  }
-  else {
-    FieldFillComponent<Scalar, NGP_FIELD_TYPE, EXEC_SPACE> fieldFill(ngpFields, nfields, alpha, component);
-    stk::mesh::for_each_entity_run(ngpMesh, ngpFields[0].get_rank(), selector, fieldFill, execSpace);
-    Kokkos::fence();
-  }
-}
-
-template<class Scalar, typename EXEC_SPACE>
+template<typename NgpSpace, typename Scalar>
 void field_fill_impl(const Scalar alpha,
-                     const stk::mesh::FieldBase*const* fields,
-                     int nfields,
+                     const stk::mesh::FieldBase & xField,
                      int component,
-                     const stk::mesh::Selector* selectorPtr,
-                     const EXEC_SPACE& execSpace,
-                     bool isDeviceExecSpaceUserOverride)
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
 {
-  STK_ThrowRequireMsg(nfields > 0, "must have one or more fields");
-  for (int i=0; i < nfields; ++i)
-  {
-    fields[i]->clear_sync_state();
-  }
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto xData = xField.data<Scalar, mesh::ReadWrite, NgpSpace>(execSpace);
 
-  std::unique_ptr<stk::mesh::Selector> fieldSelector;
-  if (selectorPtr == nullptr) {
-    fieldSelector = std::make_unique<stk::mesh::Selector>(stk::mesh::Selector(*fields[0]));
-    for (int i=1; i < nfields; ++i) {
-      *(fieldSelector.get()) &= stk::mesh::Selector(*fields[i]);
-    }
-  }
-  const stk::mesh::Selector& selector = selectorPtr != nullptr ? *selectorPtr : *(fieldSelector.get());
-
-  if constexpr (operate_on_ngp_mesh<EXEC_SPACE>()) {
-    stk::mesh::NgpMesh& ngpMesh = stk::mesh::get_updated_ngp_mesh(fields[0]->get_mesh());
-    if (nfields == 1)
-    {
-      stk::mesh::NgpField<Scalar> ngpField = stk::mesh::get_updated_ngp_field<Scalar>(*fields[0]);
-      field_fill_for_each_entity(ngpMesh, &ngpField, nfields, alpha, component, selector, execSpace);
-    } else
-    {
-      std::vector<stk::mesh::NgpField<Scalar>> ngpFields;
-      for (int i=0; i < nfields; ++i)
-      {
-        ngpFields.push_back(stk::mesh::get_updated_ngp_field<Scalar>(*fields[i]));
-      }
-      field_fill_for_each_entity(ngpMesh, ngpFields.data(), nfields, alpha, component, selector, execSpace);
-    }
-  }
-  else {
-    if (nfields == 1) {
-      stk::mesh::field_fill(alpha, *fields[0], selector);
-    }
-    else {
-      std::vector<const stk::mesh::FieldBase*> fieldsVec(fields, fields+nfields);
-      stk::mesh::field_fill(alpha, fieldsVec, selector);
-    }
-  }
-
-  for (int i=0; i < nfields; ++i)
-  {
-    mark_field_modified(*fields[i], execSpace, isDeviceExecSpaceUserOverride);
-  }
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_fill",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         auto xValues = xData.bucket_values(bucketIndex);
+                         const unsigned numEntities = xValues.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numEntities),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx);
+                                                const auto scalarIdx = mesh::ScalarIdx(component);
+                                                xValues(entityIdx, scalarIdx) = alpha;
+                                              });
+                       });
 }
 
-template <class Scalar, class NGP_FIELD_TYPE>
-class FieldAMax
+template<typename NgpSpace, typename Scalar>
+void field_fill_impl(const Scalar alpha,
+                     const stk::mesh::FieldBase & xField,
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
 {
- public:
-  FieldAMax(const NGP_FIELD_TYPE& ngpXfield) : ngpX(ngpXfield), resultDevice("deviceResult", 1) {}
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto xData = xField.data<Scalar, mesh::OverwriteAll, NgpSpace>(execSpace);
 
-  KOKKOS_INLINE_FUNCTION Scalar abs(const Scalar& x) const { return x > 0 ? x : -x; }
-
-  Scalar get_amax_val() const
-  {
-    auto resultHost = Kokkos::create_mirror_view(resultDevice);
-    Kokkos::deep_copy(resultHost, resultDevice);
-    return resultHost(0);
-  }
-
-  KOKKOS_FUNCTION
-  void operator()(const stk::mesh::FastMeshIndex& entityIndex) const
-  {
-    const unsigned numComponents = ngpX.get_num_components_per_entity(entityIndex);
-    for (unsigned d = 0; d < numComponents; ++d) {
-      Scalar fieldVal = ngpX(entityIndex, d);
-      Scalar absFieldVal = abs(fieldVal);
-      Kokkos::atomic_max(&resultDevice(0), absFieldVal);
-    }
-  }
-
-  NGP_FIELD_TYPE ngpX;
-  Kokkos::View<Scalar*, stk::ngp::ExecSpace> resultDevice;
-};
-
-template <class Scalar, class EXEC_SPACE>
-Scalar field_amax_no_mark_t(
-    const stk::mesh::FieldBase& xField, const stk::mesh::Selector& selector, const EXEC_SPACE& /*execSpace*/)
-{
-  Scalar amaxOut = 0;
-
-  if constexpr (operate_on_ngp_mesh<EXEC_SPACE>()) {
-    xField.sync_to_device();
-    stk::mesh::NgpField<Scalar>& ngpX = stk::mesh::get_updated_ngp_field<Scalar>(xField);
-    auto ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
-    FieldAMax<Scalar, stk::mesh::NgpField<Scalar>> fieldAMax(ngpX);
-    stk::mesh::for_each_entity_run(ngpMesh, xField.entity_rank(), selector, fieldAMax);
-
-    Scalar localAmax = fieldAMax.get_amax_val();
-    auto comm = xField.get_mesh().parallel();
-    stk::all_reduce_max(comm, &localAmax, &amaxOut, 1u);
-  } else {
-    xField.sync_to_host();
-    double tmpAmax = 0.0;
-    stk::mesh::field_amax(tmpAmax, xField, selector);
-    amaxOut = tmpAmax;
-  }
-
-  return amaxOut;
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_fill",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         auto xValues = xData.bucket_values(bucketIndex);
+                         const unsigned numValues = xValues.num_entities() * xValues.num_scalars();
+                         const unsigned numEntities = xValues.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                xValues(entityIdx, scalarIdx) = alpha;
+                                              });
+                       });
 }
 
-template <class Scalar, class EXEC_SPACE>
-void field_amax_no_mark_mod(Scalar& amaxOut,
-    const stk::mesh::FieldBase& xField,
-    const stk::mesh::Selector& selector,
-    const EXEC_SPACE& execSpace)
+template<typename NgpSpace, typename Scalar>
+void field_fill_impl(const Scalar alpha,
+                     const std::vector<const stk::mesh::FieldBase*> & fields,
+                     int component,
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
 {
-  const stk::mesh::DataTraits& dataTraits = xField.data_traits();
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(fields.front()->get_mesh());
+  using FieldDataType = decltype(fields.front()->template data<Scalar, mesh::ReadWrite, NgpSpace>(execSpace));
 
-  if (dataTraits.type_info == typeid(double)) {
-    amaxOut = field_amax_no_mark_t<double>(xField, selector, execSpace);
-  } else if (dataTraits.type_info == typeid(float)) {
-    amaxOut = field_amax_no_mark_t<float>(xField, selector, execSpace);
-  } else if (dataTraits.type_info == typeid(int)) {
-    amaxOut = field_amax_no_mark_t<int>(xField, selector, execSpace);
-  } else if (dataTraits.type_info == typeid(unsigned)) {
-    amaxOut = field_amax_no_mark_t<unsigned>(xField, selector, execSpace);
-  } else {
-    STK_ThrowErrorMsg("field_amax doesn't yet support fields of type " << dataTraits.type_info.name());
-  }
+  const stk::topology::rank_t rank = fields.front()->entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  auto fieldFill = FieldFillComponent<Scalar, FieldDataType, NgpSpace>(fields, bucketIds, alpha, component, execSpace);
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  Kokkos::parallel_for("field_fill",
+                       TeamPolicyType(execSpace, numBuckets * fields.size(), Kokkos::AUTO),
+                       fieldFill);
 }
 
-template <class Scalar, class EXEC_SPACE>
+template<typename NgpSpace, typename Scalar>
+void field_fill_impl(const Scalar alpha,
+                     const std::vector<const stk::mesh::FieldBase*> & fields,
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
+{
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(fields.front()->get_mesh());
+  using FieldDataType = decltype(fields.front()->template data<Scalar, mesh::OverwriteAll, NgpSpace>(execSpace));
+
+  const stk::topology::rank_t rank = fields.front()->entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  auto fieldFill = FieldFill<Scalar, FieldDataType, NgpSpace>(fields, bucketIds, alpha, execSpace);
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  Kokkos::parallel_for("field_fill",
+                       TeamPolicyType(execSpace, numBuckets * fields.size(), Kokkos::AUTO),
+                       fieldFill);
+}
+
+template <typename NgpSpace, typename Scalar>
 void field_amax_impl(Scalar& amaxOut,
-    const stk::mesh::FieldBase& xField,
-    const stk::mesh::Selector* selectorPtr,
-    const EXEC_SPACE& execSpace,
-    bool /*isDeviceExecSpaceUserOverride*/)
+                     const stk::mesh::FieldBase& xField,
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
 {
-  std::unique_ptr<stk::mesh::Selector> fieldSelector;
-  if (selectorPtr == nullptr) {
-    fieldSelector = std::make_unique<stk::mesh::Selector>(stk::mesh::Selector(xField));
-  }
-  const stk::mesh::Selector& selector = selectorPtr != nullptr ? *selectorPtr : *(fieldSelector.get());
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto fieldData = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
 
-  field_amax_no_mark_mod(amaxOut, xField, selector, execSpace);
+  auto result = Kokkos::View<Scalar, typename NgpSpace::mem_space>("result");
+  auto maxer = Kokkos::Max<Scalar, typename NgpSpace::exec_space>(result);
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  const unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_reduce("field_amax",
+                          TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                          KOKKOS_LAMBDA(const TeamHandleType& team, Scalar& teamReduction) {
+                            const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                            auto fieldValues = fieldData.bucket_values(bucketIndex);
+                            const unsigned numValues = fieldValues.num_entities() * fieldValues.num_scalars();
+                            const unsigned numEntities = fieldValues.num_entities();
+
+                            Scalar localReduction;
+                            auto threadMaxer = Kokkos::Max<Scalar, typename NgpSpace::exec_space>(localReduction);
+                            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                                    [&](const unsigned idx, Scalar& threadReduction) {
+                                                      const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                      const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                      Scalar fieldValue = fieldValues(entityIdx, scalarIdx);
+                                                      Scalar absValue = fieldValue > 0 ? fieldValue : -fieldValue;
+                                                      threadReduction = Kokkos::max(threadReduction, absValue);
+                                                    },
+                                                    threadMaxer);
+                            Kokkos::single(Kokkos::PerTeam(team),
+                                           [&]() {
+                                             teamReduction = Kokkos::max(teamReduction, localReduction);
+                                           });
+
+                          },
+                          maxer);
+  Kokkos::deep_copy(execSpace, amaxOut, result);
+  execSpace.fence();
+
+  Scalar localAmax = amaxOut;
+  stk::all_reduce_max(xField.get_mesh().parallel(), &localAmax, &amaxOut, 1u);
 }
 
-template<class NGP_FIELD_TYPE>
-class FieldCopy {
-public:
-  FieldCopy(const NGP_FIELD_TYPE& ngpXfield, const NGP_FIELD_TYPE& ngpYfield)
-  : ngpX(ngpXfield), ngpY(ngpYfield)
-  {}
-
-  KOKKOS_FUNCTION
-  void operator()(const stk::mesh::FastMeshIndex& entityIndex) const
-  {
-    const unsigned numComponents = ngpX.get_num_components_per_entity(entityIndex);
-    STK_NGP_ThrowAssert(numComponents == ngpY.get_num_components_per_entity(entityIndex));
-    for(unsigned d=0; d<numComponents; ++d) {
-      ngpY(entityIndex, d) = ngpX(entityIndex, d);
-    }
-  }
-
-  NGP_FIELD_TYPE ngpX;
-  NGP_FIELD_TYPE ngpY;
-};
-
-template<class Scalar, class EXEC_SPACE>
-void field_copy_no_mark_t(const stk::mesh::FieldBase& xField,
-                          const stk::mesh::FieldBase& yField,
-                          const stk::mesh::Selector& selector,
-                          const EXEC_SPACE& /*execSpace*/)
+template<typename NgpSpace, typename Scalar>
+void field_copy_on_device(const stk::mesh::FieldBase & xField,
+                            const stk::mesh::FieldBase & yField,
+                            const stk::mesh::Selector & selector,
+                            const typename NgpSpace::exec_space & execSpace)
 {
-  if constexpr (operate_on_ngp_mesh<EXEC_SPACE>()) {
-    xField.sync_to_device();
-    stk::mesh::NgpField<Scalar>& ngpX = stk::mesh::get_updated_ngp_field<Scalar>(xField);
-    stk::mesh::NgpField<Scalar>& ngpY = stk::mesh::get_updated_ngp_field<Scalar>(yField);
-    auto ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
-    FieldCopy<stk::mesh::NgpField<Scalar>> fieldCopy(ngpX, ngpY);
-    stk::mesh::for_each_entity_run(ngpMesh, xField.entity_rank(), selector, fieldCopy);
-  }
-  else {
-    xField.sync_to_host();
-    stk::mesh::field_copy(xField, yField, selector);
-  }
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto fieldDataX = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+  auto fieldDataY = yField.data<Scalar, mesh::OverwriteAll, NgpSpace>(execSpace);
+
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_product",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         const auto fieldValuesX = fieldDataX.bucket_values(bucketIndex);
+                         auto fieldValuesY = fieldDataY.bucket_values(bucketIndex);
+                         const unsigned numValues = fieldValuesX.num_entities() * fieldValuesX.num_scalars();
+                         const unsigned numEntities = fieldValuesX.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                fieldValuesY(entityIdx, scalarIdx) = fieldValuesX(entityIdx, scalarIdx);
+                                              });
+                       });
 }
 
-template<class EXEC_SPACE>
-void field_copy_no_mark_mod(const stk::mesh::FieldBase& xField,
-                            const stk::mesh::FieldBase& yField,
-                            const stk::mesh::Selector& selector,
-                            const EXEC_SPACE& execSpace)
+template<typename NgpSpace>
+void field_copy_impl(const stk::mesh::FieldBase & xField,
+                     const stk::mesh::FieldBase & yField,
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
 {
-  const stk::mesh::DataTraits& dataTraits = xField.data_traits();
-
-  if (dataTraits.type_info == typeid(double)) {
-    field_copy_no_mark_t<double>(xField, yField, selector, execSpace);
-  }
-  else if (dataTraits.type_info == typeid(float)) {
-    field_copy_no_mark_t<float>(xField, yField, selector, execSpace);
-  }
-  else if (dataTraits.type_info == typeid(int)) {
-    field_copy_no_mark_t<int>(xField, yField, selector, execSpace);
-  }
-  else if (dataTraits.type_info == typeid(unsigned)) {
-    field_copy_no_mark_t<unsigned>(xField, yField, selector, execSpace);
-  }
-  else {
-    STK_ThrowErrorMsg("field_copy doesn't yet support fields of type "<<dataTraits.type_info.name());
-  }
+  field_datatype_execute(xField,
+    [&]<typename T>(const stk::mesh::FieldBase&) {
+      field_copy_on_device<NgpSpace, T>(xField, yField, selector, execSpace);
+    }
+  );
 }
 
-template<class EXEC_SPACE>
-void field_copy_impl(const stk::mesh::FieldBase& xField,
-                     const stk::mesh::FieldBase& yField,
-                     const stk::mesh::Selector* selectorPtr,
-                     const EXEC_SPACE& execSpace,
-                     bool isDeviceExecSpaceUserOverride)
+template<typename NgpSpace, typename Scalar>
+inline void field_axpy_impl(const Scalar alpha,
+                            const stk::mesh::FieldBase & xField,
+                            const stk::mesh::FieldBase & yField,
+                            const stk::mesh::Selector & selector,
+                            const typename NgpSpace::exec_space& execSpace)
 {
-  std::unique_ptr<stk::mesh::Selector> fieldSelector;
-  if (selectorPtr == nullptr) {
-    fieldSelector = std::make_unique<stk::mesh::Selector>(stk::mesh::Selector(xField) & stk::mesh::Selector(yField));
-  }
-  const stk::mesh::Selector& selector = selectorPtr != nullptr ? *selectorPtr : *(fieldSelector.get());
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto x = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+  auto y = yField.data<Scalar, mesh::ReadWrite, NgpSpace>(execSpace);
 
-  field_copy_no_mark_mod(xField, yField, selector, execSpace);
-
-  mark_field_modified(yField, execSpace, isDeviceExecSpaceUserOverride);
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_axpy",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         const auto xValues = x.bucket_values(bucketIndex);
+                         auto yValues = y.bucket_values(bucketIndex);
+                         const unsigned numValues = xValues.num_entities() * xValues.num_scalars();
+                         const unsigned numEntities = xValues.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                yValues(entityIdx, scalarIdx) += alpha * xValues(entityIdx, scalarIdx);
+                                              });
+                       });
 }
 
-template <typename Functor>
-void apply_functor_on_field(const stk::mesh::BulkData& mesh,
-    const stk::mesh::FieldBase & zField,
-    const stk::mesh::FieldBase & xField,
-    const stk::mesh::FieldBase & yField,
-    typename Functor::value_type alpha,
-    typename Functor::value_type beta,
-    const stk::mesh::Selector & select)
+template<typename NgpSpace, typename Scalar>
+inline void field_axpby_impl(const Scalar alpha,
+                             const stk::mesh::FieldBase & xField,
+                             const Scalar beta,
+                             const stk::mesh::FieldBase & yField,
+                             const stk::mesh::Selector & selector,
+                             const typename NgpSpace::exec_space& execSpace)
 {
-  using DataType = typename Functor::value_type;
-  const stk::mesh::Selector selector = select & stk::mesh::selectField(zField) &
-      stk::mesh::selectField(xField) & stk::mesh::selectField(yField);
-  stk::mesh::EntityRank entityRank = zField.entity_rank();
-  xField.sync_to_device();
-  yField.sync_to_device();
-  zField.sync_to_device();
-  stk::mesh::NgpMesh & ngpMesh = stk::mesh::get_updated_ngp_mesh(mesh);
-  auto& ngpXField = stk::mesh::get_updated_ngp_field<DataType>(xField);
-  auto& ngpYField = stk::mesh::get_updated_ngp_field<DataType>(yField);
-  auto& ngpFieldResult = stk::mesh::get_updated_ngp_field<DataType>(zField);
-  Functor f(ngpMesh, ngpFieldResult, ngpXField, ngpYField, alpha, beta);
-  stk::mesh::for_each_entity_run(ngpMesh, entityRank, selector, f);
-  zField.modify_on_device();
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto x = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+  auto y = yField.data<Scalar, mesh::ReadWrite, NgpSpace>(execSpace);
+
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_axpby",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         const auto xValues = x.bucket_values(bucketIndex);
+                         auto yValues = y.bucket_values(bucketIndex);
+                         const unsigned numValues = xValues.num_entities() * xValues.num_scalars();
+                         const unsigned numEntities = xValues.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                yValues(entityIdx, scalarIdx) = alpha * xValues(entityIdx, scalarIdx) + beta * yValues(entityIdx, scalarIdx);
+                                              });
+                       });
 }
 
-template <typename Scalar>
-struct FieldAXPBYZFunctor
+template<typename NgpSpace, typename Scalar>
+inline void field_axpbyz_impl(const Scalar alpha,
+                              const stk::mesh::FieldBase & xField,
+                              const Scalar beta,
+                              const stk::mesh::FieldBase & yField,
+                              const stk::mesh::FieldBase & zField,
+                              const stk::mesh::Selector & selector,
+                              const typename NgpSpace::exec_space& execSpace)
 {
-  using value_type = Scalar;
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto output = zField.data<Scalar, mesh::OverwriteAll, NgpSpace>(execSpace);
+  auto x = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+  auto y = yField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
 
-  FieldAXPBYZFunctor(stk::mesh::NgpMesh & my_ngp_mesh,
-      stk::mesh::NgpField<Scalar> & output_field,
-      stk::mesh::NgpField<Scalar> & input_x,
-      stk::mesh::NgpField<Scalar> & input_y,
-      const Scalar & alpha,
-      const Scalar & beta)
-      : my_mesh(my_ngp_mesh), output(output_field), x(input_x), y(input_y), a(alpha), b(beta)
-  {
-  }
-  stk::mesh::NgpMesh my_mesh;
-  stk::mesh::NgpField<Scalar> output;
-  stk::mesh::NgpField<Scalar> x;
-  stk::mesh::NgpField<Scalar> y;
-  const Scalar a;
-  const Scalar b;
-  KOKKOS_FUNCTION
-  void operator()(stk::mesh::FastMeshIndex f) const
-  {
-    unsigned num_components = output.get_num_components_per_entity(f);
-    unsigned other = x.get_num_components_per_entity(f);
-    num_components = (other < num_components) ? other : num_components;
-    other = y.get_num_components_per_entity(f);
-    num_components = (other < num_components) ? other : num_components;
-    for (unsigned i = 0; i < num_components; ++i)
-    {
-      output.get(f, i) = a * x.get(f, i) + b * y.get(f, i);
-    }
-  }
-};
-
-template <typename Scalar>
-struct FieldProductFunctor
-{
-  using value_type = Scalar;
-
-  FieldProductFunctor(stk::mesh::NgpMesh & my_ngp_mesh,
-      stk::mesh::NgpField<Scalar> & output_field,
-      stk::mesh::NgpField<Scalar> & input_x,
-      stk::mesh::NgpField<Scalar> & input_y,
-      const Scalar /*a*/,
-      const Scalar /*b*/)
-      : my_mesh(my_ngp_mesh),
-        output(output_field),
-        x(input_x), y(input_y)
-  {
-  }
-  stk::mesh::NgpMesh my_mesh;
-  stk::mesh::NgpField<Scalar> output;
-  stk::mesh::NgpField<Scalar> x;
-  stk::mesh::NgpField<Scalar> y;
-
-  KOKKOS_FUNCTION
-  void operator()(stk::mesh::FastMeshIndex f) const
-  {
-    unsigned num_components = output.get_num_components_per_entity(f);
-    unsigned other = x.get_num_components_per_entity(f);
-    num_components = (other < num_components) ? other : num_components;
-    other = y.get_num_components_per_entity(f);
-    num_components = (other < num_components) ? other : num_components;
-    for (unsigned i = 0; i < num_components; ++i)
-    {
-      output.get(f, i) = x.get(f, i) * y.get(f, i);
-    }
-  }
-};
-
-template <typename Scalar>
-struct FieldScaleFunctor
-{
-  using value_type = Scalar;
-
-  FieldScaleFunctor(stk::mesh::NgpMesh & my_ngp_mesh,
-      stk::mesh::NgpField<Scalar> & output_field,
-      stk::mesh::NgpField<Scalar> & unused_field1,
-      stk::mesh::NgpField<Scalar> & unused_field2,
-      const Scalar a,
-      const Scalar b)
-      : my_mesh(my_ngp_mesh),
-        output(output_field),
-        alpha(a),
-        m_unused_field1(unused_field1), m_unused_field2(unused_field2),
-        m_beta(b)
-
-  {
-  }
-  stk::mesh::NgpMesh my_mesh;
-  stk::mesh::NgpField<Scalar> output;
-  Scalar alpha;
-
-  KOKKOS_FUNCTION
-  void operator()(stk::mesh::FastMeshIndex f) const
-  {
-    unsigned num_components = output.get_num_components_per_entity(f);
-    for (unsigned i = 0; i < num_components; ++i)
-    {
-      output.get(f, i) = alpha * output.get(f, i);
-    }
-  }
-
-private:
-  stk::mesh::NgpField<Scalar> m_unused_field1;
-  stk::mesh::NgpField<Scalar> m_unused_field2;
-  Scalar m_beta;
-};
-
-template <typename Scalar>
-struct FieldSwapFunctor
-{
-  using value_type = Scalar;
-
-  FieldSwapFunctor(stk::mesh::NgpMesh & my_ngp_mesh,
-      stk::mesh::NgpField<Scalar> & xFieldInput,
-      stk::mesh::NgpField<Scalar> & yFieldInput,
-      stk::mesh::NgpField<Scalar> & unused_field2,
-      const Scalar a,
-      const Scalar b)
-      : my_mesh(my_ngp_mesh),
-        xField(xFieldInput),
-        yField(yFieldInput),
-        m_unused_field2(unused_field2),
-        m_alpha(a),
-        m_beta(b)
-
-  {
-  }
-
-  stk::mesh::NgpMesh my_mesh;
-  stk::mesh::NgpField<Scalar> xField;
-  stk::mesh::NgpField<Scalar> yField;
-
-  KOKKOS_FUNCTION
-  void operator()(stk::mesh::FastMeshIndex f) const
-  {
-    unsigned num_components = xField.get_num_components_per_entity(f);
-    unsigned other = yField.get_num_components_per_entity(f);
-    num_components = (other < num_components) ? other : num_components;
-    for (unsigned i = 0; i < num_components; ++i)
-    {
-      Scalar tmp = xField.get(f, i);
-      xField.get(f, i) = yField.get(f, i);
-      yField.get(f, i) = tmp;
-    }
-  }
-
-private:
-  stk::mesh::NgpField<Scalar> m_unused_field2;
-  Scalar m_alpha;
-  Scalar m_beta;
-};
-
-template<class DataType, typename EXEC_SPACE>
-inline void field_axpbyz_impl(const stk::mesh::BulkData& mesh,
-    const DataType alpha,
-    const stk::mesh::FieldBase & xField,
-    const DataType beta,
-    const stk::mesh::FieldBase & yField,
-    const stk::mesh::FieldBase & zField,
-    const stk::mesh::Selector* selectorPtr,
-    const EXEC_SPACE& execSpace,
-    bool isDeviceExecSpaceUserOverride)
-{
-  const stk::mesh::DataTraits& dataTraits = xField.data_traits();
-  STK_ThrowRequireMsg(dataTraits == yField.data_traits(), "xField and yField must have same datatype");
-  STK_ThrowRequireMsg(dataTraits == zField.data_traits(), "xField and zField must have same datatype");
-
-  std::unique_ptr<stk::mesh::Selector> fieldSelector;
-  if (selectorPtr == nullptr) {
-    fieldSelector = std::make_unique<stk::mesh::Selector>(stk::mesh::Selector(xField) & stk::mesh::Selector(yField));
-  }
-  const stk::mesh::Selector& selector = selectorPtr != nullptr ? *selectorPtr : *(fieldSelector.get());
-
-  if constexpr (ngp_field_blas::impl::operate_on_ngp_mesh<EXEC_SPACE>()) {
-    if (dataTraits.type_info == typeid(double)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldAXPBYZFunctor<double>>(
-        mesh, zField, xField, yField, alpha, beta, selector);
-    } else if (dataTraits.type_info == typeid(float)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldAXPBYZFunctor<float>>(
-        mesh, zField, xField, yField, alpha, beta, selector);
-    } else if (dataTraits.type_info == typeid(int)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldAXPBYZFunctor<int>>(
-        mesh, zField, xField, yField, alpha, beta, selector);
-    } else if (dataTraits.type_info == typeid(unsigned)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldAXPBYZFunctor<unsigned>>(
-        mesh, zField, xField, yField, alpha, beta, selector);
-    } else
-    {
-      STK_ThrowErrorMsg("axpbyz doesn't yet support fields of type "<<dataTraits.type_info.name());
-    }
-  }
-  else {
-    xField.sync_to_host();
-    yField.sync_to_host();
-    stk::mesh::field_copy(yField, zField, selector);
-    stk::mesh::field_axpby(alpha, xField, beta, zField, selector);
-  }
-
-  mark_field_modified(zField, execSpace, isDeviceExecSpaceUserOverride);
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_axpbyz",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         auto outputValues = output.bucket_values(bucketIndex);
+                         const auto xValues = x.bucket_values(bucketIndex);
+                         const auto yValues = y.bucket_values(bucketIndex);
+                         const unsigned numValues = xValues.num_entities() * xValues.num_scalars();
+                         const unsigned numEntities = xValues.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                outputValues(entityIdx, scalarIdx) = alpha * xValues(entityIdx, scalarIdx) + beta * yValues(entityIdx, scalarIdx);
+                                              });
+                       });
 }
 
-template<typename EXEC_SPACE>
-inline void field_product_impl(const stk::mesh::BulkData& mesh,
-    const stk::mesh::FieldBase & xField,
-    const stk::mesh::FieldBase & yField,
-    const stk::mesh::FieldBase & zField,
-    const stk::mesh::Selector* selectorPtr,
-    const EXEC_SPACE& execSpace,
-    bool isDeviceExecSpaceUserOverride)
+template <typename NgpSpace, typename Scalar>
+void apply_product_on_field(const mesh::FieldBase & xField,
+                            const mesh::FieldBase & yField,
+                            const mesh::FieldBase & zField,
+                            const stk::mesh::Selector & selector,
+                            const typename NgpSpace::exec_space & execSpace)
 {
-  const stk::mesh::DataTraits& dataTraits = xField.data_traits();
-  STK_ThrowRequireMsg(dataTraits == yField.data_traits(), "xField and yField must have same datatype");
-  STK_ThrowRequireMsg(dataTraits == zField.data_traits(), "xField and zField must have same datatype");
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto output = zField.data<Scalar, mesh::OverwriteAll, NgpSpace>(execSpace);
+  auto x = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+  auto y = yField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
 
-  stk::mesh::Selector fieldSelector;
-  if (selectorPtr == nullptr) {
-    fieldSelector = stk::mesh::Selector(xField) & stk::mesh::Selector(yField);
-  } else
-  {
-    fieldSelector = *selectorPtr;
-  }
-
-  if constexpr (ngp_field_blas::impl::operate_on_ngp_mesh<EXEC_SPACE>()) {
-    if (dataTraits.type_info == typeid(double)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldProductFunctor<double>>(
-        mesh, zField, xField, yField, 1, 1, fieldSelector);
-    } else if (dataTraits.type_info == typeid(float)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldProductFunctor<float>>(
-        mesh, zField, xField, yField, 1, 1, fieldSelector);
-    } else if (dataTraits.type_info == typeid(int)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldProductFunctor<int>>(
-        mesh, zField, xField, yField, 1, 1, fieldSelector);
-    } else if (dataTraits.type_info == typeid(unsigned)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldProductFunctor<unsigned>>(
-        mesh, zField, xField, yField, 1, 1, fieldSelector);
-    } else
-    {
-      STK_ThrowErrorMsg("field_product doesn't yet support fields of type "<<dataTraits.type_info.name());
-    }
-  }
-  else {
-    xField.sync_to_host();
-    yField.sync_to_host();
-    stk::mesh::field_product(xField, yField, zField, fieldSelector);
-  }
-
-  mark_field_modified(zField, execSpace, isDeviceExecSpaceUserOverride);
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_product",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         auto outputValues = output.bucket_values(bucketIndex);
+                         const auto xValues = x.bucket_values(bucketIndex);
+                         const auto yValues = y.bucket_values(bucketIndex);
+                         const unsigned numValues = xValues.num_entities() * xValues.num_scalars();
+                         const unsigned numEntities = xValues.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                outputValues(entityIdx, scalarIdx) = xValues(entityIdx, scalarIdx) * yValues(entityIdx, scalarIdx);
+                                              });
+                       });
 }
 
-template<typename Scalar, typename EXEC_SPACE>
-inline void field_scale_impl(const stk::mesh::BulkData& mesh,
-    const Scalar alpha,
-    const stk::mesh::FieldBase & xField,
-    const stk::mesh::Selector* selectorPtr,
-    const EXEC_SPACE& execSpace,
-    bool isDeviceExecSpaceUserOverride)
+template<typename NgpSpace>
+inline void field_product_impl(const stk::mesh::FieldBase & xField,
+                               const stk::mesh::FieldBase & yField,
+                               const stk::mesh::FieldBase & zField,
+                               const stk::mesh::Selector & selector,
+                               const typename NgpSpace::exec_space & execSpace)
 {
-  const stk::mesh::DataTraits& dataTraits = xField.data_traits();
-
-  stk::mesh::Selector fieldSelector;
-  if (selectorPtr == nullptr) {
-    fieldSelector = stk::mesh::Selector(xField);
-  } else
-  {
-    fieldSelector = *selectorPtr;
-  }
-
-  if constexpr (ngp_field_blas::impl::operate_on_ngp_mesh<EXEC_SPACE>()) {
-    if (dataTraits.type_info == typeid(double)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldScaleFunctor<double>>(
-        mesh, xField, xField, xField, alpha, alpha, fieldSelector);
-    } else if (dataTraits.type_info == typeid(float)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldScaleFunctor<float>>(
-        mesh, xField, xField, xField, alpha, alpha, fieldSelector);
-    } else if (dataTraits.type_info == typeid(int)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldScaleFunctor<int>>(
-        mesh, xField, xField, xField, alpha, alpha, fieldSelector);
-    } else if (dataTraits.type_info == typeid(unsigned)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldScaleFunctor<unsigned>>(
-        mesh, xField, xField, xField, alpha, alpha, fieldSelector);
-    } else
-    {
-      STK_ThrowErrorMsg("field_product doesn't yet support fields of type "<<dataTraits.type_info.name());
+  field_datatype_execute(xField,
+    [&]<typename T>(const stk::mesh::FieldBase&) {
+      apply_product_on_field<NgpSpace, T>(xField, yField, zField, selector, execSpace);
     }
-  }
-  else {
-    xField.sync_to_host();
-    stk::mesh::field_scale(alpha, xField, fieldSelector);
-  }
-
-  mark_field_modified(xField, execSpace, isDeviceExecSpaceUserOverride);
+  );
 }
 
-template<typename EXEC_SPACE>
-inline void field_swap_impl(const stk::mesh::BulkData& mesh,
-    const stk::mesh::FieldBase & xField,
-    const stk::mesh::FieldBase & yField,
-    const stk::mesh::Selector* selectorPtr,
-    const EXEC_SPACE& execSpace,
-    bool isDeviceExecSpaceUserOverride)
+template<typename NgpSpace, typename Scalar>
+inline void field_scale_impl(const Scalar alpha,
+                             const stk::mesh::FieldBase & xField,
+                             const stk::mesh::Selector & selector,
+                             const typename NgpSpace::exec_space & execSpace)
 {
-  const stk::mesh::DataTraits& dataTraits = xField.data_traits();
-  STK_ThrowRequireMsg(dataTraits == yField.data_traits(), "xField and yField must have same datatype");
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto fieldData = xField.data<Scalar, mesh::ReadWrite, NgpSpace>(execSpace);
 
-  stk::mesh::Selector fieldSelector;
-  if (selectorPtr == nullptr) {
-    fieldSelector = stk::mesh::Selector(xField);
-  } else
-  {
-    fieldSelector = *selectorPtr;
-  }
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_scale",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         auto fieldValues = fieldData.bucket_values(bucketIndex);
+                         const unsigned numValues = fieldValues.num_entities() * fieldValues.num_scalars();
+                         const unsigned numEntities = fieldValues.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                fieldValues(entityIdx, scalarIdx) *= alpha;
+                                              });
+                       });
+}
 
-  if constexpr (ngp_field_blas::impl::operate_on_ngp_mesh<EXEC_SPACE>()) {
-    if (dataTraits.type_info == typeid(double)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldSwapFunctor<double>>(
-        mesh, xField, yField, xField, 0, 0, fieldSelector);
-    } else if (dataTraits.type_info == typeid(float)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldSwapFunctor<float>>(
-        mesh, xField, xField, xField, 0, 0, fieldSelector);
-    } else if (dataTraits.type_info == typeid(int)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldSwapFunctor<int>>(
-        mesh, xField, xField, xField, 0, 0, fieldSelector);
-    } else if (dataTraits.type_info == typeid(unsigned)) {
-      ngp_field_blas::impl::apply_functor_on_field<FieldSwapFunctor<unsigned>>(
-        mesh, xField, yField, xField, 0, 0, fieldSelector);
-    } else
-    {
-      STK_ThrowErrorMsg("field_product doesn't yet support fields of type "<<dataTraits.type_info.name());
+template <typename NgpSpace, typename Scalar>
+void apply_swap_on_field(const mesh::FieldBase & xField,
+                         const mesh::FieldBase & yField,
+                         const stk::mesh::Selector & selector,
+                         const typename NgpSpace::exec_space & execSpace)
+{
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto xFieldData = xField.data<Scalar, mesh::ReadWrite, NgpSpace>(execSpace);
+  auto yFieldData = yField.data<Scalar, mesh::ReadWrite, NgpSpace>(execSpace);
+
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_for("field_swap",
+                       TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                       KOKKOS_LAMBDA(const TeamHandleType& team) {
+                         const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                         auto xValues = xFieldData.bucket_values(bucketIndex);
+                         auto yValues = yFieldData.bucket_values(bucketIndex);
+                         const unsigned numValues = xValues.num_entities() * xValues.num_scalars();
+                         const unsigned numEntities = xValues.num_entities();
+                         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                              [&](const unsigned idx) {
+                                                const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                Scalar tmp = xValues(entityIdx, scalarIdx);
+                                                xValues(entityIdx, scalarIdx) = yValues(entityIdx, scalarIdx);
+                                                yValues(entityIdx, scalarIdx) = tmp;
+                                              });
+                       });
+}
+
+template<typename NgpSpace>
+inline void field_swap_impl(const stk::mesh::FieldBase & xField,
+                            const stk::mesh::FieldBase & yField,
+                            const stk::mesh::Selector & selector,
+                            const typename NgpSpace::exec_space & execSpace)
+{
+  field_datatype_execute(xField,
+    [&]<typename T>(const stk::mesh::FieldBase&) {
+      apply_swap_on_field<NgpSpace, T>(xField, yField, selector, execSpace);
     }
-  }
-  else {
-    xField.sync_to_host();
-    yField.sync_to_host();
-    stk::mesh::field_swap(xField, yField, fieldSelector);
-  }
+  );
+}
 
-  mark_field_modified(xField, execSpace, isDeviceExecSpaceUserOverride);
-  mark_field_modified(yField, execSpace, isDeviceExecSpaceUserOverride);
+template<typename NgpSpace, typename Scalar>
+inline void field_dot_impl(Scalar& returnVal,
+                           const stk::mesh::FieldBase & xField,
+                           const stk::mesh::FieldBase & yField,
+                           const stk::mesh::Selector & selector,
+                           const typename NgpSpace::exec_space& execSpace)
+{
+  stk::mesh::NgpMesh & ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto xFieldData = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+  auto yFieldData = yField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
 
+  auto result = Kokkos::View<Scalar, typename NgpSpace::mem_space>("result");
+  auto summer = Kokkos::Sum<Scalar, typename NgpSpace::exec_space>(result);
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  const unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_reduce("field_dot",
+                          TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                          KOKKOS_LAMBDA(const TeamHandleType& team, Scalar& teamReduction) {
+                            const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                            auto xValues = xFieldData.bucket_values(bucketIndex);
+                            auto yValues = yFieldData.bucket_values(bucketIndex);
+                            const unsigned numValues = xValues.num_entities() * xValues.num_scalars();
+                            const unsigned numEntities = xValues.num_entities();
+
+                            Scalar localReduction;
+                            auto threadSummer = Kokkos::Sum<Scalar, typename NgpSpace::exec_space>(localReduction);
+                            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                                    [&](const unsigned idx, Scalar& threadReduction) {
+                                                      const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                      const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                      threadReduction += xValues(entityIdx, scalarIdx) * yValues(entityIdx, scalarIdx);
+                                                    },
+                                                    threadSummer);
+                            Kokkos::single(Kokkos::PerTeam(team),
+                                           [&]() {
+                                             teamReduction += localReduction;
+                                           });
+
+                          },
+                          summer);
+  Kokkos::deep_copy(execSpace, returnVal, result);
+  execSpace.fence();
+
+  Scalar globalReturnVal = returnVal;
+  stk::all_reduce_sum(xField.get_mesh().parallel(), &returnVal, &globalReturnVal, 1u);
+  returnVal = globalReturnVal;
+}
+
+template <typename NgpSpace, typename Scalar>
+void field_amin_impl(Scalar& aminOut,
+                     const stk::mesh::FieldBase & xField,
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
+{
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto fieldData = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+
+  auto result = Kokkos::View<Scalar, typename NgpSpace::mem_space>("result");
+  auto minner = Kokkos::Min<Scalar, typename NgpSpace::exec_space>(result);
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  const unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_reduce("field_amin",
+                          TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                          KOKKOS_LAMBDA(const TeamHandleType& team, Scalar& teamReduction) {
+                            const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                            auto fieldValues = fieldData.bucket_values(bucketIndex);
+                            const unsigned numValues = fieldValues.num_entities() * fieldValues.num_scalars();
+                            const unsigned numEntities = fieldValues.num_entities();
+
+                            Scalar localReduction;
+                            auto threadMinner = Kokkos::Min<Scalar, typename NgpSpace::exec_space>(localReduction);
+                            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                                    [&](const unsigned idx, Scalar& threadReduction) {
+                                                      const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                      const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                      Scalar fieldValue = fieldValues(entityIdx, scalarIdx);
+                                                      Scalar absValue = fieldValue > 0 ? fieldValue : -fieldValue;
+                                                      threadReduction = Kokkos::min(threadReduction, absValue);
+                                                    },
+                                                    threadMinner);
+                            Kokkos::single(Kokkos::PerTeam(team),
+                                           [&]() {
+                                             teamReduction = Kokkos::min(teamReduction, localReduction);
+                                           });
+
+                          },
+                          minner);
+  Kokkos::deep_copy(execSpace, aminOut, result);
+  execSpace.fence();
+
+  Scalar localAmin = aminOut;
+  stk::all_reduce_min(xField.get_mesh().parallel(), &localAmin, &aminOut, 1u);
+}
+
+template <typename NgpSpace, typename Scalar>
+void field_asum_impl(Scalar & asumOut,
+                     const stk::mesh::FieldBase & xField,
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
+{
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto fieldData = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+
+  auto result = Kokkos::View<Scalar, typename NgpSpace::mem_space>("result");
+  auto summer = Kokkos::Sum<Scalar, typename NgpSpace::exec_space>(result);
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  const unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_reduce("field_asum",
+                          TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                          KOKKOS_LAMBDA(const TeamHandleType& team, Scalar& teamReduction) {
+                            const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                            auto fieldValues = fieldData.bucket_values(bucketIndex);
+                            const unsigned numValues = fieldValues.num_entities() * fieldValues.num_scalars();
+                            const unsigned numEntities = fieldValues.num_entities();
+
+                            Scalar localReduction;
+                            auto threadSummer = Kokkos::Sum<Scalar, typename NgpSpace::exec_space>(localReduction);
+                            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                                    [&](const unsigned idx, Scalar& threadReduction) {
+                                                      const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                      const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                      Scalar fieldValue = fieldValues(entityIdx, scalarIdx);
+                                                      Scalar absValue = fieldValue > 0 ? fieldValue : -fieldValue;
+                                                      threadReduction += absValue;
+                                                    },
+                                                    threadSummer);
+                            Kokkos::single(Kokkos::PerTeam(team),
+                                           [&]() {
+                                             teamReduction += localReduction;
+                                           });
+
+                          },
+                          summer);
+  Kokkos::deep_copy(execSpace, asumOut, result);
+  execSpace.fence();
+
+  Scalar localAsum = asumOut;
+  stk::all_reduce_sum(xField.get_mesh().parallel(), &localAsum, &asumOut, 1u);
+}
+
+template <typename NgpSpace, typename Scalar>
+void field_nrm2_impl(Scalar & nrm2Out,
+                     const stk::mesh::FieldBase & xField,
+                     const stk::mesh::Selector & selector,
+                     const typename NgpSpace::exec_space & execSpace)
+{
+  auto& ngpMesh = stk::mesh::get_updated_ngp_mesh(xField.get_mesh());
+  auto fieldData = xField.data<Scalar, mesh::ReadOnly, NgpSpace>(execSpace);
+
+  auto result = Kokkos::View<Scalar, typename NgpSpace::mem_space>("result");
+  auto summer = Kokkos::Sum<Scalar, typename NgpSpace::exec_space>(result);
+  const stk::topology::rank_t rank = xField.entity_rank();
+  const auto& bucketIds = ngpMesh.get_bucket_ids(rank, selector);
+  const unsigned numBuckets = bucketIds.size();
+  using TeamPolicyType = stk::ngp::TeamPolicy<typename NgpSpace::exec_space>;
+  using TeamHandleType = typename TeamPolicyType::member_type;
+  Kokkos::parallel_reduce("field_nrm2",
+                          TeamPolicyType(execSpace, numBuckets, Kokkos::AUTO),
+                          KOKKOS_LAMBDA(const TeamHandleType& team, Scalar& teamReduction) {
+                            const int bucketIndex = bucketIds.get<typename NgpSpace::exec_space>(team.league_rank());
+                            auto fieldValues = fieldData.bucket_values(bucketIndex);
+                            const unsigned numValues = fieldValues.num_entities() * fieldValues.num_scalars();
+                            const unsigned numEntities = fieldValues.num_entities();
+
+                            Scalar localReduction;
+                            auto threadSummer = Kokkos::Sum<Scalar, typename NgpSpace::exec_space>(localReduction);
+                            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, 0u, numValues),
+                                                    [&](const unsigned idx, Scalar& threadReduction) {
+                                                      const auto entityIdx = mesh::EntityIdx(idx % numEntities);
+                                                      const auto scalarIdx = mesh::ScalarIdx(idx / numEntities);
+                                                      Scalar fieldValue = fieldValues(entityIdx, scalarIdx);
+                                                      threadReduction += fieldValue * fieldValue;
+                                                    },
+                                                    threadSummer);
+                            Kokkos::single(Kokkos::PerTeam(team),
+                                           [&]() {
+                                             teamReduction += localReduction;
+                                           });
+
+                          },
+                          summer);
+  Kokkos::deep_copy(execSpace, nrm2Out, result);
+  execSpace.fence();
+
+  Scalar localNrm2 = nrm2Out;
+  auto comm = xField.get_mesh().parallel();
+  stk::all_reduce_sum(comm, &localNrm2, &nrm2Out, 1u);
+  nrm2Out = std::sqrt(nrm2Out);
 }
 
 //************ end of implementation detail *********************************
 
-} // namespace impl
-} // ngp_field_blas
-} // stk
+} // namespace stk::ngp_field_blas::impl
 
 #endif // STK_MESH_BASEIMPL_NGPFIELDBLASIMPL_HPP
-

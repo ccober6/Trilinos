@@ -30,6 +30,51 @@
 #define BELOS_KOKKOS_ADAPTER_HPP
 namespace Belos {
 
+template<class SerialDenseMatrixType, class KokkosViewMatrixType >
+void copySerialDenseMatrix(const SerialDenseMatrixType& B, const KokkosViewMatrixType& KMat, const bool& KMat_to_B) {
+  using ScalarType = typename KokkosViewMatrixType::value_type;
+  using UMHostViewMatrixType =
+        Kokkos::View<ScalarType**,Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+  using UMHostViewMatrixType2 =
+        Kokkos::View<ScalarType**,Kokkos::LayoutStride, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+  if (B.numRows() == B.stride()) {
+    UMHostViewMatrixType umB_h(B.values(), KMat.extent(0), KMat.extent(1));
+    if (KMat_to_B) {
+      Kokkos::deep_copy(umB_h, KMat);
+    }
+    else {
+      Kokkos::deep_copy(KMat, umB_h);
+    }
+  }
+  else {
+    Kokkos::LayoutStride layout(KMat.extent(0), 1, KMat.extent(1), B.stride());
+    UMHostViewMatrixType2 umB_h(B.values(), layout);   
+    constexpr bool KokkosExecCanAccessB = Kokkos::SpaceAccessibility<typename KokkosViewMatrixType::device_type::execution_space,
+                                                                     typename UMHostViewMatrixType2::device_type::memory_space>::accessible;
+    constexpr bool BExecCanAccessKokkos = Kokkos::SpaceAccessibility<typename UMHostViewMatrixType2::device_type::execution_space,
+                                                                     typename KokkosViewMatrixType::device_type::memory_space>::accessible;
+    if (!KokkosExecCanAccessB && !BExecCanAccessKokkos) {
+      Kokkos::View<ScalarType**,Kokkos::LayoutLeft, Kokkos::HostSpace> tmp_h(Kokkos::view_alloc(Kokkos::WithoutInitializing,"tmp_h"), KMat.extent(0), KMat.extent(1));
+      if (KMat_to_B) {
+        Kokkos::deep_copy(tmp_h, KMat);
+        Kokkos::deep_copy(umB_h, tmp_h);
+      }
+      else {
+        Kokkos::deep_copy(tmp_h, umB_h);
+        Kokkos::deep_copy(KMat, tmp_h);
+      }
+    }
+    else {
+      if (KMat_to_B) {
+        Kokkos::deep_copy(umB_h, KMat);
+      }
+      else {
+        Kokkos::deep_copy(KMat, umB_h);
+      }
+    }
+  }
+}
+
 //Forward class declaration of KokkosCrsOperator:
 template<class ScalarType, class OrdinalType, class Device>
 class KokkosCrsOperator;
@@ -46,7 +91,7 @@ class KokkosCrsOperator;
 /// multivector operations in Belos solver algorithms.  This class
 /// implements Belos::MultiVec using Kokkos::View.
 template<class ScalarType, class Device = Kokkos::DefaultExecutionSpace >
-class KokkosMultiVec : public MultiVec<ScalarType> {
+class KokkosMultiVec : public MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int, ScalarType>> {
 
 public:
 
@@ -60,10 +105,6 @@ public:
         Kokkos::View<ScalarType*,Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
   using UMHostConstViewVectorType =
         Kokkos::View<const ScalarType*,Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
-  using UMHostViewMatrixType =
-        Kokkos::View<ScalarType**,Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
-  using UMHostConstViewMatrixType =
-        Kokkos::View<const ScalarType**,Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
 
 protected:
   ViewMatrixType myView;
@@ -225,7 +266,7 @@ public:
   ///
   /// \param numvecs [in] The number of columns in the output
   ///   multivector.  Must be positive.
-  MultiVec<ScalarType> * Clone ( const int numvecs ) const{
+  MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> * Clone ( const int numvecs ) const{
     KokkosMultiVec<ScalarType, Device> * ptr = new KokkosMultiVec<ScalarType, Device>(myView.extent(0),numvecs, false);
     return ptr;
   }
@@ -237,7 +278,7 @@ public:
   /// All of this vector's entries are
   /// copied and a new stand-alone multivector is created.  (deep
   /// copy).
-  MultiVec<ScalarType> * CloneCopy () const{
+  MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> * CloneCopy () const{
     KokkosMultiVec<ScalarType, Device> * ptr = new KokkosMultiVec<ScalarType, Device>(myView.extent(0),myView.extent(1), false);
     Kokkos::deep_copy(ptr->GetInternalViewNonConst(),myView);
     return ptr;
@@ -253,7 +294,7 @@ public:
   /// indicate copying the first, 4th, and 6th columns of the original multivector.
   /// Indices need not be contiguous or ordered.
   /// Result is `output[:,i] = (*this)[:,index[i]]`.
-  MultiVec<ScalarType> * CloneCopy ( const std::vector<int>& index ) const{
+  MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> * CloneCopy ( const std::vector<int>& index ) const{
     // JAL- If debug options needed, could add validity checks of index.
     // See debug code in belos/src/tpetra/BelosMultiVecTraits_Tpetra.hpp.
     int numvecs = index.size();
@@ -295,7 +336,7 @@ public:
   /// \warning At this time, the Kokkos-Belos adapter only supports
   /// viewing column indices that form a contiguous subset in memory.
   /// Thus, the values in `index` must be contiguous and ascending (e.g. 0,1,2,3).
-  const MultiVec<ScalarType> * CloneView ( const std::vector<int>& index ) const { //TODO This isn't const!!
+  const MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> * CloneView ( const std::vector<int>& index ) const { //TODO This isn't const!!
     bool isContigAscending = true;
     //Check whether the given indices are contiguous and ascending.
     for(unsigned int i=0; i< (index.size()-1); i++){
@@ -325,7 +366,7 @@ public:
   /// \warning At this time, the Kokkos-Belos adapter only supports
   /// viewing column indices that form a contiguous subset in memory.
   /// Thus, the values in `index` must be contiguous and ascending (e.g. 0,1,2,3).
-  MultiVec<ScalarType> * CloneViewNonConst ( const std::vector<int>& index ){
+  MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> * CloneViewNonConst ( const std::vector<int>& index ){
     bool isContigAscending = true;
     //Check whether the given indices are contiguous and ascending.
     for(unsigned int i=0; i< (index.size()-1); i++){
@@ -350,8 +391,8 @@ public:
   /// Result is (*this)[:,index[i]] = A[:,i].
   /// Column indexing is zero-based.
   ///
-  void SetBlock ( const MultiVec<ScalarType>& A, const std::vector<int>& index ){
-    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType> &>(A));
+  void SetBlock ( const MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>>& A, const std::vector<int>& index ){
+    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> &>(A));
 
     if( index.size() > myView.extent(1) ){
       throw std::runtime_error("Error in KokkosMultiVec::SetBlock. A cannot have more vectors than (*this).");
@@ -400,19 +441,18 @@ public:
   ///
   /// where alpha and beta are scalars and the dimensions of `A*B` match
   /// the dimensions of `(*this)`.
-  void MvTimesMatAddMv ( const ScalarType alpha, const MultiVec<ScalarType>& A,
+  void MvTimesMatAddMv ( const ScalarType alpha, const MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>>& A,
                          const Teuchos::SerialDenseMatrix<int,ScalarType>& B, const ScalarType beta ){
-    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType> &>(A));
+    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> &>(A));
     if( myView.extent(1) == 1 && A_vec->GetInternalViewConst().extent(1) == 1){ //B is a scalar.
       ScalarType scal1 = alpha*B(0,0);
       ViewVectorType mysub = Kokkos::subview(myView, Kokkos::ALL, 0);
       ConstViewVectorType Asub = Kokkos::subview(A_vec->GetInternalViewConst(), Kokkos::ALL, 0);
       KokkosBlas::axpby(scal1, Asub, beta, mysub);
     }
-    else{
-      UMHostConstViewMatrixType mat_h(B.values(), A_vec->GetInternalViewConst().extent(1), myView.extent(1));
+    else {
       ViewMatrixType mat_d(Kokkos::view_alloc(Kokkos::WithoutInitializing,"mat"), A_vec->GetInternalViewConst().extent(1), myView.extent(1));
-      Kokkos::deep_copy(mat_d, mat_h);
+      copySerialDenseMatrix(B, mat_d, false);
       if( myView.extent(1) == 1 ){ // B has only 1 col
           ConstViewVectorType Bsub = Kokkos::subview(mat_d, Kokkos::ALL, 0);
           ViewVectorType mysub = Kokkos::subview(myView, Kokkos::ALL, 0);
@@ -427,10 +467,10 @@ public:
   //! `*this <- alpha * A + beta * B`
   ///
   /// Scale and add two vectors.  Store the result in `*this`.
-  void MvAddMv ( const ScalarType alpha, const MultiVec<ScalarType>& A, const ScalarType beta,
-                 const MultiVec<ScalarType>& B){
-    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType> &>(A));
-    KokkosMultiVec<ScalarType, Device> *B_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType> &>(B));
+  void MvAddMv ( const ScalarType alpha, const MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>>& A, const ScalarType beta,
+                const MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>>& B){
+    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> &>(A));
+    KokkosMultiVec<ScalarType, Device> *B_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> &>(B));
 
     KokkosBlas::update(alpha, A_vec->GetInternalViewConst(), beta, B_vec->GetInternalViewConst(), (ScalarType) 0.0, myView);
   }
@@ -459,8 +499,8 @@ public:
   ///
   /// Computes matrix product with transpose.  Result is a dense matrix.
   /// Conjugate transpose is used as appropriate.
-  void MvTransMv ( const ScalarType alpha, const MultiVec<ScalarType>& A, Teuchos::SerialDenseMatrix<int,ScalarType>& B ) const{
-    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType> &>(A));
+  void MvTransMv ( const ScalarType alpha, const MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>>& A, Teuchos::SerialDenseMatrix<int,ScalarType>& B ) const{
+    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> &>(A));
     if(A_vec->myView.extent(1) == 1 && myView.extent(1) == 1){
       ConstViewVectorType Asub = Kokkos::subview(A_vec->GetInternalViewConst(), Kokkos::ALL, 0);
       ViewVectorType mysub = Kokkos::subview(myView, Kokkos::ALL, 0);
@@ -480,11 +520,10 @@ public:
    //     B(i,0) = soln(i);
    //   }
    // }
-    else{
-      UMHostViewMatrixType soln_h(B.values(), A_vec->GetInternalViewConst().extent(1), myView.extent(1));
+    else {
       ViewMatrixType soln_d(Kokkos::view_alloc(Kokkos::WithoutInitializing,"mat"), A_vec->GetInternalViewConst().extent(1), myView.extent(1));
       KokkosBlas::gemm("C", "N", alpha, A_vec->GetInternalViewConst(), myView, ScalarType(0.0), soln_d);
-      Kokkos::deep_copy(soln_h, soln_d);
+      copySerialDenseMatrix(B, soln_d, true);
     }
   }
 
@@ -494,12 +533,12 @@ public:
   /// Performs a dot product between A and (*this).
   /// Uses conjugate transpose when appropriate.
   /// Output is a vector.
-  void MvDot ( const MultiVec<ScalarType>& A, std::vector<ScalarType>& b ) const{
+  void MvDot ( const MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>>& A, std::vector<ScalarType>& b ) const{
     //Put output vector in unmanaged Kokkos view:
     UMHostViewVectorType dotView_h(b.data(),myView.extent(1));
     ViewVectorType dotView_d(Kokkos::view_alloc(Kokkos::WithoutInitializing,"Dot"),myView.extent(1));
 
-    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType> &>(A));
+    KokkosMultiVec<ScalarType, Device> *A_vec = dynamic_cast<KokkosMultiVec *>(&const_cast<MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> &>(A));
 
     KokkosBlas::dot(dotView_d, A_vec->GetInternalViewConst(), myView);
     Kokkos::deep_copy(dotView_h, dotView_d);
@@ -575,7 +614,7 @@ public:
 /// \class KokkosCrsOperator
 /// \brief Implementation of Belos::Operator using KokkosSparse::CrsMatrix.
 template<class ScalarType, class OrdinalType=int, class Device=Kokkos::DefaultExecutionSpace>
-class KokkosCrsOperator : public Operator<ScalarType> {
+class KokkosCrsOperator : public Operator<ScalarType, Teuchos::SerialDenseMatrix<int, ScalarType>> {
 
 private:
   // Shallow copy of the CrsMatrix used for SpMV.
@@ -611,7 +650,7 @@ public:
   ///   transpose (Belos::TRANS), or its Hermitian transpose (Belos::CONJTRANS).
   ///   The default is Belos::NOTRANS. (Defined in BelosTypes.hpp.)
   ///
-  void Apply (const MultiVec<ScalarType>& x,  MultiVec<ScalarType>& y,  ETrans trans=NOTRANS) const{
+  void Apply (const MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>>& x,  MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>>& y,  ETrans trans=NOTRANS) const{
 
     // Determine transpose mode:
     char mode[] = "X";
@@ -632,7 +671,7 @@ public:
 
     //Use dynamic_cast to tell the compiler these are Kokkos Multivecs.
     KokkosMultiVec<ScalarType, Device> *x_vec =
-            dynamic_cast<KokkosMultiVec<ScalarType, Device> *>(&const_cast<MultiVec<ScalarType> &>(x));
+      dynamic_cast<KokkosMultiVec<ScalarType, Device> *>(&const_cast<MultiVec<ScalarType, Teuchos::SerialDenseMatrix<int,ScalarType>> &>(x));
     KokkosMultiVec<ScalarType, Device> *y_vec = dynamic_cast<KokkosMultiVec<ScalarType, Device> *>(&y);
 
     //KokkosSparse::spmv computes y = beta*y + alpha*Op(A)*x

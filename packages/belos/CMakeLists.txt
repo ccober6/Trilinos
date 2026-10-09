@@ -90,6 +90,12 @@ TRIBITS_ADD_OPTION_AND_DEFINE(
   "Enable experimental Belos solvers and features."
   NO )
 
+TRIBITS_ADD_OPTION_AND_DEFINE(
+  ${PACKAGE_NAME}_ENABLE_DenseMatrixKokkosDefault
+  HAVE_BELOS_DENSEMATRIXKOKKOSDEFAULT
+  "Use Kokkos::DualView as the default for dense matrices."
+  NO )
+
 # See above discussion of "experimental" Belos headers and source
 # files.  belos/src/CMakeLists.txt may append to these lists.
 SET(${PACKAGE_NAME}_EXPERIMENTAL_HEADERS "")
@@ -104,17 +110,12 @@ ADD_SUBDIRECTORY(src)
 
 TRIBITS_ADD_TEST_DIRECTORIES(test)
 
-IF (Belos_ENABLE_Epetra)
-  ADD_SUBDIRECTORY(epetra)
-ENDIF()
 
 IF (Belos_ENABLE_Tpetra)
   ADD_SUBDIRECTORY(tpetra)
 ENDIF()
 
-IF (Belos_ENABLE_KokkosKernels)
-  ADD_SUBDIRECTORY(kokkos)
-ENDIF()
+ADD_SUBDIRECTORY(kokkos)
 
 IF (Belos_ENABLE_Xpetra)
   ADD_SUBDIRECTORY(xpetra)

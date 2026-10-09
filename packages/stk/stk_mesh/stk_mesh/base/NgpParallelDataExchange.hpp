@@ -34,174 +34,424 @@
 #ifndef STK_MESH_NGP_PARALLEL_DATA_EXCHANGE_HPP
 #define STK_MESH_NGP_PARALLEL_DATA_EXCHANGE_HPP
 
-#include <stk_util/parallel/Parallel.hpp>
-#include <stk_util/parallel/MPI.hpp>
-#include <stk_util/ngp/NgpSpaces.hpp>
 #include <stk_util/util/SortAndUnique.hpp>
-#include <stk_mesh/base/NgpField.hpp>
-#include <stk_mesh/base/Ngp.hpp>
-#include <stk_mesh/base/FieldParallel.hpp>
 #include <Kokkos_Core.hpp>
+#include "stk_mesh/base/BulkData.hpp"
 
-namespace stk {
-namespace mesh {
+namespace stk::mesh::impl {
 
-namespace impl {
-
-template<typename NgpFieldType>
-void fill_field_ranks(const std::vector<NgpFieldType*>& fields,
-                      std::vector<stk::mesh::EntityRank>& fieldRanks)
+inline
+std::vector<EntityRank> assemble_rank_list(const std::vector<const FieldBase*>& fields)
 {
-  fieldRanks.clear();
+  auto fieldRanks = std::vector<EntityRank>{};
   fieldRanks.reserve(fields.size());
-  for(const NgpFieldType* f : fields) {
-    fieldRanks.push_back(f->get_rank());
+  for(const FieldBase* f : fields) {
+    fieldRanks.push_back(f->entity_rank());
   }
   stk::util::sort_and_unique(fieldRanks);
+  return fieldRanks;
 }
 
-} // namespace impl
-
-template <typename NgpFieldType>
-struct NgpFieldInfo
+inline
+std::vector<unsigned> group_fields_by_rank(const std::vector<const FieldBase*>& fields,
+                                           const std::vector<EntityRank>& fieldRanks)
 {
-  NgpFieldInfo(NgpFieldType& fld)
-    : m_field(fld) {}
+  std::vector<unsigned> rankFieldOffsets;
+  rankFieldOffsets.reserve(fieldRanks.size()+1);
 
-  KOKKOS_DEFAULTED_FUNCTION
-  NgpFieldInfo() = default;
+  unsigned fieldRankOffset = 0;
 
-  KOKKOS_DEFAULTED_FUNCTION
-  NgpFieldInfo(const NgpFieldInfo&) = default;
-
-  KOKKOS_DEFAULTED_FUNCTION
-  ~NgpFieldInfo() = default;
-
-  KOKKOS_FUNCTION
-  operator const NgpFieldType&() const { return m_field; }
-
-  NgpFieldType m_field;
-};
-
-template <typename T, typename MEMSPACE>
-using FieldDataViewType = Kokkos::View<T*, MEMSPACE>;
-
-template <typename NgpFieldType, typename MEMSPACE>
-using FieldView = Kokkos::View<NgpFieldInfo<NgpFieldType>*, MEMSPACE>;
-
-template <typename T, typename MEMSPACE>
-using BufferViewType = Kokkos::View<T*, MEMSPACE>;
-
-template <typename NgpMeshType, typename NgpFieldType>
-class ParallelSumDataExchangeSymPackUnpackHandler
-{
-public:
-  using T = typename NgpFieldType::value_type;
-  using mem_space = typename NgpMeshType::ngp_mem_space;
-  using mesh_type = NgpMeshType;
-  using field_type = NgpFieldType;
-
-  ParallelSumDataExchangeSymPackUnpackHandler(const NgpMeshType& mesh, const std::vector<NgpFieldType *> & ngpFields)
-    : m_ngpMesh(const_cast<NgpMeshType&>(mesh)),
-      m_fieldRanks(),
-      m_ngpFields(ngpFields),
-      m_ngpFieldsOnDevice(FieldView<NgpFieldType,mem_space>("ngpFieldsOnDevice", ngpFields.size())),
-      m_deviceSendData(BufferViewType<T,mem_space>("deviceSendData", 1)),
-      m_deviceRecvData(BufferViewType<T,mem_space>("deviceRecvData", 1))
-  {
-    impl::fill_field_ranks(ngpFields, m_fieldRanks);
-    typename FieldView<NgpFieldType,mem_space>::host_mirror_type ngpFieldsHostMirror = Kokkos::create_mirror_view(m_ngpFieldsOnDevice);
-    for (size_t fieldIdx = 0; fieldIdx < m_ngpFields.size(); fieldIdx++)
-    {
-      ngpFieldsHostMirror(fieldIdx) = NgpFieldInfo<NgpFieldType>(*m_ngpFields[fieldIdx]);
-    }
-    Kokkos::deep_copy(m_ngpFieldsOnDevice, ngpFieldsHostMirror);
-  }
-
-  ParallelSumDataExchangeSymPackUnpackHandler(const ParallelSumDataExchangeSymPackUnpackHandler & rhs) = default;
-
-  void hostSizeMessages(int proc, size_t & numValues, bool includeGhosts=false) const
-  {
-    numValues = 0;
-    for(stk::mesh::EntityRank fieldRank : m_fieldRanks) {
-      stk::mesh::HostCommMapIndices<stk::ngp::MemSpace> commMapIndices =
-        m_ngpMesh.get_bulk_on_host().template volatile_fast_shared_comm_map<stk::ngp::MemSpace>(fieldRank, proc, includeGhosts);
-
-      for (size_t i = 0; i < commMapIndices.extent(0); ++i) {
-        const unsigned bucketId = commMapIndices(i).bucket_id;
-
-        for (NgpFieldType* field : m_ngpFields) {
-          if (field->get_rank() == fieldRank) {
-            stk::mesh::FieldBase* stkField = m_ngpMesh.get_bulk_on_host().mesh_meta_data().get_fields()[field->get_ordinal()];
-            const unsigned numScalarsPerEntity = stk::mesh::field_scalars_per_entity(*stkField, bucketId);
-            numValues += numScalarsPerEntity;
-          }
-        }
+  for(EntityRank rank : fieldRanks) {
+    rankFieldOffsets.push_back(fieldRankOffset);
+    for(const FieldBase* field : fields) {
+      if (field->entity_rank() == rank) {
+        ++fieldRankOffset;
       }
     }
   }
 
-  NgpMeshType& get_ngp_mesh() const {
-    return m_ngpMesh;
-  }
+  rankFieldOffsets.push_back(fieldRankOffset);
 
-  const std::vector<stk::mesh::EntityRank>& get_field_ranks() const {
-    return m_fieldRanks;
-  }
+  return rankFieldOffsets;
+}
 
-  std::vector<NgpFieldType*> const& get_ngp_fields() const {
-    return m_ngpFields;
+template <typename NgpSpace>
+EntityRankViewType<typename NgpSpace::mem_space> assemble_rank_per_field(const std::vector<const FieldBase*>& fields)
+{
+  auto rankPerField = EntityRankViewType<typename NgpSpace::mem_space>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "fieldRanksOnDevice"), fields.size());
+  auto rankPerFieldHost = Kokkos::create_mirror_view(rankPerField);
+  for(size_t fieldIdx = 0; fieldIdx < fields.size(); ++fieldIdx) {
+    rankPerFieldHost(fieldIdx) = fields[fieldIdx]->entity_rank();
   }
+  Kokkos::deep_copy(rankPerField, rankPerFieldHost);
+  return rankPerField;
+}
 
-  KOKKOS_FUNCTION
-  const FieldView<NgpFieldType,mem_space>& get_ngp_fields_on_device() const
-  {
-    return m_ngpFieldsOnDevice;
-  }
-
-  BufferViewType<T,mem_space>& get_device_send_data() {
-    return m_deviceSendData;
-  }
-
-  BufferViewType<T,mem_space>& get_device_recv_data() {
-    return m_deviceRecvData;
-  }
-
-  typename UnsignedViewType<stk::ngp::MemSpace>::host_mirror_type& get_host_buffer_offsets()
-  {
-    return m_ngpMesh.get_ngp_parallel_sum_host_buffer_offsets();
-  }
-
-  typename UnsignedViewType<stk::ngp::MemSpace>::host_mirror_type& get_host_mesh_indices_offsets()
-  {
-    return m_ngpMesh.get_ngp_parallel_sum_host_mesh_indices_offsets();
-  }
-
-  auto& get_device_mesh_indices_offsets()
-  {
-    return m_ngpMesh.get_ngp_parallel_sum_device_mesh_indices_offsets();
-  }
-
-  void resize_device_mpi_buffers(size_t size) {
-    if (m_deviceSendData.size() < size) {
-      Kokkos::resize(Kokkos::WithoutInitializing, m_deviceSendData, size);
-    }
-    if (m_deviceRecvData.size() < size) {
-      Kokkos::resize(Kokkos::WithoutInitializing, m_deviceRecvData, size);
+template <typename Scalar, typename NgpSpace, Layout LayoutValue>
+auto assemble_field_data_on_device(const std::vector<const FieldBase*>& fields,
+                                   const std::vector<EntityRank>& fieldRanks)
+{
+  using FieldDataType = decltype(fields.front()->template data<Scalar, ReadWrite, NgpSpace, LayoutValue>());
+  using FieldDataView = Kokkos::View<FieldDataType*, typename NgpSpace::mem_space>;
+  auto fieldDataOnDevice = FieldDataView("fieldDataOnDevice", fields.size());
+  auto fieldDataOnDeviceHost = Kokkos::create_mirror_view(stk::ngp::HostPinnedSpace{}, fieldDataOnDevice);
+  unsigned offset = 0;
+  for(EntityRank rank : fieldRanks) {
+    for (size_t fieldIdx = 0; fieldIdx < fields.size(); ++fieldIdx) {
+      const auto& field = *fields[fieldIdx];
+      if (field.entity_rank() == rank) {
+        STK_ThrowRequireMsg(field.type_is<Scalar>(),
+                            "Cannot mix Fields with different datatypes.  Field '" <<
+                            field.name() <<
+                            "' is of type " <<
+                            field.data_traits().type_info.name() <<
+                            " when the entire set of Fields must be of type " <<
+                            fields[0]->data_traits().type_info.name());
+        fieldDataOnDeviceHost(offset++) = field.template data<Scalar,ReadWrite,NgpSpace,LayoutValue>();
+      }
     }
   }
 
-private:
-  NgpMeshType& m_ngpMesh;
-  std::vector<stk::mesh::EntityRank> m_fieldRanks;
-  const std::vector<NgpFieldType *>& m_ngpFields;
-  FieldView<NgpFieldType,mem_space> m_ngpFieldsOnDevice;
-
-  BufferViewType<T,mem_space> m_deviceSendData;
-  BufferViewType<T,mem_space> m_deviceRecvData;
-};
-
+  auto execSpace = typename NgpSpace::exec_space{};
+  Kokkos::Experimental::copy(execSpace, fieldDataOnDeviceHost, fieldDataOnDevice);
+  return fieldDataOnDevice;
 }
+
+inline
+std::vector<int> assemble_comm_procs_list(const BulkData& mesh, const std::vector<EntityRank>& fieldRanks, bool includeGhosts)
+{
+  std::vector<int> comm_procs;
+  for (int proc = 0; proc < mesh.parallel_size(); ++proc) {
+    for (EntityRank fieldRank : fieldRanks) {
+      auto sharedCommMapSize = mesh.template volatile_fast_shared_comm_map_size<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, proc, includeGhosts);
+      if (sharedCommMapSize > 0) {
+        comm_procs.push_back(proc);
+        break;
+      }
+    }
+  }
+  stk::util::sort_and_unique(comm_procs);
+  return comm_procs;
 }
+
+inline
+size_t compute_total_mesh_indices_offsets(const BulkData& mesh, const std::vector<EntityRank>& fieldRanks, const std::vector<int>& commProcs, bool includeGhosts)
+{
+  size_t totalMeshIndicesOffsets = 0;
+  for (int proc : commProcs) {
+    for (EntityRank fieldRank : fieldRanks) {
+      auto sharedCommMapSize = mesh.template volatile_fast_shared_comm_map_size<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, proc, includeGhosts);
+      if (sharedCommMapSize > 0) {
+        totalMeshIndicesOffsets += sharedCommMapSize;
+      }
+    }
+  }
+  return totalMeshIndicesOffsets;
+}
+
+template <typename BufferType, typename OffsetsType>
+void fill_host_buffer_offsets(const BufferType& hostBufferOffsets,
+                              const OffsetsType& hostMeshIndicesOffsets,
+                              const BulkData& mesh,
+                              const std::vector<const FieldBase*>& fields,
+                              const std::vector<int>& comm_procs,
+                              const std::vector<EntityRank>& fieldRanks,
+                              bool includeGhosts)
+{
+  hostBufferOffsets(0) = 0;
+  auto num_comm_procs = comm_procs.size();
+  size_t hostMeshIndicesIdx = num_comm_procs;
+  for (size_t proc = 0; proc < num_comm_procs; ++proc) {
+    hostMeshIndicesOffsets(proc) = hostMeshIndicesIdx;
+    unsigned baseProcOffset = hostMeshIndicesIdx;
+
+    unsigned hostMeshIndicesCounter = 0;
+    unsigned hostMeshIndicesOffsetsCounter = 0;
+
+    for (EntityRank fieldRank : fieldRanks) {
+      auto sharedCommMap = mesh.template volatile_fast_shared_comm_map<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, comm_procs[proc], includeGhosts);
+      hostMeshIndicesIdx += sharedCommMap.extent(0);
+
+      unsigned prevBucketId = InvalidOrdinal;
+      unsigned prevNumBytes = 0;
+      for (size_t i = 0; i < sharedCommMap.extent(0); ++i) {
+        hostMeshIndicesOffsets(baseProcOffset + hostMeshIndicesCounter + i) = hostMeshIndicesOffsetsCounter;
+        unsigned bucketId = sharedCommMap(i).bucket_id;
+
+        if (bucketId != prevBucketId) {
+          prevBucketId = bucketId;
+          prevNumBytes = 0;
+          for (const FieldBase* field : fields) {
+            if (field->entity_rank() == fieldRank) {
+              prevNumBytes += field_scalars_per_entity(*field, bucketId);
+            }
+          }
+        }
+
+        hostMeshIndicesOffsetsCounter += prevNumBytes;
+      }
+      hostMeshIndicesCounter += sharedCommMap.extent(0);
+    }
+
+    hostBufferOffsets(proc+1) = hostBufferOffsets(proc) + hostMeshIndicesOffsetsCounter;
+  }
+}
+
+template <typename NgpSpace, typename SendDataType, typename FieldDataType, typename OffsetsType, typename NgpMeshType>
+requires ngp::is_host_space<NgpSpace>
+void fill_device_send_data(const SendDataType& deviceSendData,
+                           const FieldDataType& fieldDataOnDevice,
+                           const OffsetsType& deviceMeshIndicesOffsets,
+                           const NgpMeshType&,
+                           const BulkData& mesh,
+                           const std::vector<EntityRank>& fieldRanks,
+                           const std::vector<unsigned>& rankFieldOffsets,
+                           int iproc,
+                           int dataBegin,
+                           int baseProcOffset,
+                           bool includeGhosts)
+{
+  size_t meshIndicesCounter = 0;
+  for (unsigned i=0; i<fieldRanks.size(); ++i) {
+    EntityRank fieldRank = fieldRanks[i];
+    auto fieldRange = Kokkos::pair{rankFieldOffsets[i], rankFieldOffsets[i+1]};
+
+    auto hostSharedCommMap = mesh.template volatile_fast_shared_comm_map<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, iproc, includeGhosts);
+    unsigned hostSharedCommMapSize = hostSharedCommMap.extent(0);
+    if (hostSharedCommMapSize == 0) { continue; }   // nothing to pack for this rank; avoids reading past the end of the offsets view
+
+    const int sendBufferStartIdx = deviceMeshIndicesOffsets(baseProcOffset + meshIndicesCounter);
+    typename SendDataType::value_type* deviceSendDataPtr = deviceSendData.data()+dataBegin+sendBufferStartIdx;
+    for(size_t idx=0; idx<hostSharedCommMapSize; ++idx) {
+      for (unsigned fieldIdx = fieldRange.first; fieldIdx < fieldRange.second; ++fieldIdx) {
+        auto entityValues = fieldDataOnDevice(fieldIdx).entity_values(hostSharedCommMap(idx));
+        const int numScalars = entityValues.num_scalars();
+        for (ScalarIdx scalar(0); scalar<numScalars; ++scalar) {
+          deviceSendDataPtr[scalar] = entityValues(scalar);
+        }
+        deviceSendDataPtr += numScalars;
+      }
+    }
+    meshIndicesCounter += hostSharedCommMapSize;
+  }
+}
+
+template <typename NgpSpace, typename SendDataType, typename FieldDataType, typename OffsetsType, typename NgpMeshType>
+void fill_device_send_data(const SendDataType& deviceSendData,
+                           const FieldDataType& fieldDataOnDevice,
+                           const OffsetsType& deviceMeshIndicesOffsets,
+                           const NgpMeshType& ngpMesh,
+                           const BulkData& mesh,
+                           const std::vector<EntityRank>& fieldRanks,
+                           const std::vector<unsigned>& rankFieldOffsets,
+                           int iproc,
+                           int dataBegin,
+                           int baseProcOffset,
+                           bool includeGhosts)
+{
+  size_t meshIndicesCounter = 0;
+  for (unsigned i=0; i<fieldRanks.size(); ++i) {
+    EntityRank fieldRank = fieldRanks[i];
+    auto fieldRange = Kokkos::pair{rankFieldOffsets[i], rankFieldOffsets[i+1]};
+
+    auto hostSharedCommMap = mesh.template volatile_fast_shared_comm_map<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, iproc, includeGhosts);
+    unsigned hostSharedCommMapSize = hostSharedCommMap.extent(0);
+
+    Kokkos::parallel_for("fill_device_send_data", stk::ngp::RangePolicy<typename NgpSpace::exec_space>(0, hostSharedCommMapSize),
+      KOKKOS_LAMBDA(size_t idx) {
+          auto deviceSharedCommMap = ngpMesh.volatile_fast_shared_comm_map(fieldRank, iproc, includeGhosts);
+          if (idx >= deviceSharedCommMap.extent(0)) {
+            return;
+          }
+          const int sendBufferStartIdx = deviceMeshIndicesOffsets(baseProcOffset + meshIndicesCounter + idx);
+          typename SendDataType::value_type* deviceSendDataPtr = deviceSendData.data()+dataBegin+sendBufferStartIdx;
+          for (unsigned fieldIdx = fieldRange.first; fieldIdx < fieldRange.second; ++fieldIdx) {
+            auto entityValues = fieldDataOnDevice(fieldIdx).entity_values(deviceSharedCommMap(idx));
+            const int numScalars = entityValues.num_scalars();
+            for (ScalarIdx scalar(0); scalar<numScalars; ++scalar) {
+              deviceSendDataPtr[scalar] = entityValues(scalar);
+            }
+            deviceSendDataPtr += numScalars;
+          }
+      }
+    );
+    Kokkos::fence();
+    meshIndicesCounter += hostSharedCommMapSize;
+  }
+}
+
+template <typename NgpSpace, typename FieldDataType, typename RecvDataType, typename OffsetsType, typename NgpMeshType, typename OP>
+requires ngp::is_host_space<NgpSpace>
+void zero_field_data(const FieldDataType& fieldDataOnDevice,
+                             const RecvDataType& selfSendData,
+                             const OffsetsType& deviceMeshIndicesOffsets,
+                             const NgpMeshType&,
+                             const BulkData& mesh,
+                             const std::vector<EntityRank>& fieldRanks,
+                             const std::vector<unsigned>& rankFieldOffsets,
+                             int iproc,
+                             int dataBegin,
+                             int baseProcOffset,
+                             const OP& doOperation,
+                             bool includeGhosts)
+{
+  size_t meshIndicesCounter = 0;
+  for (unsigned i=0; i<fieldRanks.size(); ++i) {
+    EntityRank fieldRank = fieldRanks[i];
+    auto fieldRange = Kokkos::pair{rankFieldOffsets[i], rankFieldOffsets[i+1]};
+
+    auto hostSharedCommMap = mesh.template volatile_fast_shared_comm_map<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, iproc, includeGhosts);
+    unsigned hostSharedCommMapSize = hostSharedCommMap.extent(0);
+
+    Kokkos::parallel_for("zero_field_data", stk::ngp::RangePolicy<typename NgpSpace::exec_space>(0, hostSharedCommMapSize),
+      [&](size_t index) {
+        const int selfSendStartIdx = deviceMeshIndicesOffsets(baseProcOffset + meshIndicesCounter + index);
+        typename RecvDataType::value_type* selfSendDataPtr = selfSendData.data()+dataBegin+selfSendStartIdx;
+        for (unsigned fieldIdx = fieldRange.first; fieldIdx < fieldRange.second; ++fieldIdx) {
+          auto entityValues = fieldDataOnDevice(fieldIdx).entity_values(hostSharedCommMap(index));
+          for (ScalarIdx scalar : entityValues.scalars()) {
+            selfSendDataPtr[scalar] = entityValues(scalar);
+            entityValues(scalar) = doOperation.initial_value();
+          }
+          selfSendDataPtr += entityValues.num_scalars();
+        }
+      }
+    );
+    Kokkos::fence();
+    meshIndicesCounter += hostSharedCommMapSize;
+  }
+}
+
+template <typename NgpSpace, typename FieldDataType, typename RecvDataType, typename OffsetsType, typename NgpMeshType, typename OP>
+void zero_field_data(const FieldDataType& fieldDataOnDevice,
+                             const RecvDataType& selfSendData,
+                             const OffsetsType& deviceMeshIndicesOffsets,
+                             const NgpMeshType& ngpMesh,
+                             const BulkData& mesh,
+                             const std::vector<EntityRank>& fieldRanks,
+                             const std::vector<unsigned>& rankFieldOffsets,
+                             int iproc,
+                             int dataBegin,
+                             int baseProcOffset,
+                             const OP& doOperation,
+                             bool includeGhosts)
+{
+  size_t meshIndicesCounter = 0;
+  for (unsigned i=0; i<fieldRanks.size(); ++i) {
+    EntityRank fieldRank = fieldRanks[i];
+    auto fieldRange = Kokkos::pair{rankFieldOffsets[i], rankFieldOffsets[i+1]};
+
+    auto hostSharedCommMap = mesh.template volatile_fast_shared_comm_map<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, iproc, includeGhosts);
+    unsigned hostSharedCommMapSize = hostSharedCommMap.extent(0);
+
+    Kokkos::parallel_for("zero_field_data", stk::ngp::RangePolicy<typename NgpSpace::exec_space>(0, hostSharedCommMapSize),
+      KOKKOS_LAMBDA(size_t index) {
+        auto deviceSharedCommMap = ngpMesh.volatile_fast_shared_comm_map(fieldRank, iproc, includeGhosts);
+        if (index >= deviceSharedCommMap.extent(0)) {
+          return;
+        }
+        const int selfSendStartIdx = deviceMeshIndicesOffsets(baseProcOffset + meshIndicesCounter + index);
+        typename RecvDataType::value_type* selfSendDataPtr = selfSendData.data()+dataBegin+selfSendStartIdx;
+        for (unsigned fieldIdx = fieldRange.first; fieldIdx < fieldRange.second; ++fieldIdx) {
+          auto entityValues = fieldDataOnDevice(fieldIdx).entity_values(deviceSharedCommMap(index));
+          for (ScalarIdx scalar : entityValues.scalars()) {
+            selfSendDataPtr[scalar] = entityValues(scalar);
+            entityValues(scalar) = doOperation.initial_value();
+          }
+          selfSendDataPtr += entityValues.num_scalars();
+        }
+      }
+    );
+    Kokkos::fence();
+    meshIndicesCounter += hostSharedCommMapSize;
+  }
+}
+
+template <typename NgpSpace, typename FieldDataType, typename RecvDataType, typename OffsetsType, typename NgpMeshType, typename OP>
+requires ngp::is_host_space<NgpSpace>
+void unpack_device_recv_data(const FieldDataType& fieldDataOnDevice,
+                             const RecvDataType& deviceRecvData,
+                             const OffsetsType& deviceMeshIndicesOffsets,
+                             const NgpMeshType&,
+                             const BulkData& mesh,
+                             const std::vector<EntityRank>& fieldRanks,
+                             const std::vector<unsigned>& rankFieldOffsets,
+                             int iproc,
+                             int dataBegin,
+                             int baseProcOffset,
+                             const OP& doOperation,
+                             bool includeGhosts)
+{
+  size_t meshIndicesCounter = 0;
+  for (unsigned i=0; i<fieldRanks.size(); ++i) {
+    EntityRank fieldRank = fieldRanks[i];
+    auto fieldRange = Kokkos::pair{rankFieldOffsets[i], rankFieldOffsets[i+1]};
+
+    auto hostSharedCommMap = mesh.template volatile_fast_shared_comm_map<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, iproc, includeGhosts);
+    unsigned hostSharedCommMapSize = hostSharedCommMap.extent(0);
+
+    Kokkos::parallel_for("unpack_device_recv_data", stk::ngp::RangePolicy<typename NgpSpace::exec_space>(0, hostSharedCommMapSize),
+      [&](size_t index) {
+        const int recvBufferStartIdx = deviceMeshIndicesOffsets(baseProcOffset + meshIndicesCounter + index);
+        typename RecvDataType::value_type* deviceRecvDataPtr = deviceRecvData.data()+dataBegin+recvBufferStartIdx;
+        for (unsigned fieldIdx = fieldRange.first; fieldIdx < fieldRange.second; ++fieldIdx) {
+          auto entityValues = fieldDataOnDevice(fieldIdx).entity_values(hostSharedCommMap(index));
+          for (ScalarIdx scalar : entityValues.scalars()) {
+            entityValues(scalar) = doOperation(entityValues(scalar), deviceRecvDataPtr[scalar]);
+          }
+          deviceRecvDataPtr += entityValues.num_scalars();
+        }
+      }
+    );
+    Kokkos::fence();
+    meshIndicesCounter += hostSharedCommMapSize;
+  }
+}
+
+template <typename NgpSpace, typename FieldDataType, typename RecvDataType, typename OffsetsType, typename NgpMeshType, typename OP>
+void unpack_device_recv_data(const FieldDataType& fieldDataOnDevice,
+                             const RecvDataType& deviceRecvData,
+                             const OffsetsType& deviceMeshIndicesOffsets,
+                             const NgpMeshType& ngpMesh,
+                             const BulkData& mesh,
+                             const std::vector<EntityRank>& fieldRanks,
+                             const std::vector<unsigned>& rankFieldOffsets,
+                             int iproc,
+                             int dataBegin,
+                             int baseProcOffset,
+                             const OP& doOperation,
+                             bool includeGhosts)
+{
+  size_t meshIndicesCounter = 0;
+  for (unsigned i=0; i<fieldRanks.size(); ++i) {
+    EntityRank fieldRank = fieldRanks[i];
+    auto fieldRange = Kokkos::pair{rankFieldOffsets[i], rankFieldOffsets[i+1]};
+
+    auto hostSharedCommMap = mesh.template volatile_fast_shared_comm_map<typename stk::ngp::DeviceSpace::mem_space>(fieldRank, iproc, includeGhosts);
+    unsigned hostSharedCommMapSize = hostSharedCommMap.extent(0);
+
+    Kokkos::parallel_for("unpack_device_recv_data", stk::ngp::RangePolicy<typename NgpSpace::exec_space>(0, hostSharedCommMapSize),
+      KOKKOS_LAMBDA(size_t index) {
+        auto deviceSharedCommMap = ngpMesh.volatile_fast_shared_comm_map(fieldRank, iproc, includeGhosts);
+        if (index >= deviceSharedCommMap.extent(0)) {
+          return;
+        }
+        const int recvBufferStartIdx = deviceMeshIndicesOffsets(baseProcOffset + meshIndicesCounter + index);
+        typename RecvDataType::value_type* deviceRecvDataPtr = deviceRecvData.data()+dataBegin+recvBufferStartIdx;
+        for (unsigned fieldIdx = fieldRange.first; fieldIdx < fieldRange.second; ++fieldIdx) {
+          auto entityValues = fieldDataOnDevice(fieldIdx).entity_values(deviceSharedCommMap(index));
+          for (ScalarIdx scalar : entityValues.scalars()) {
+            entityValues(scalar) = doOperation(entityValues(scalar), deviceRecvDataPtr[scalar]);
+          }
+          deviceRecvDataPtr += entityValues.num_scalars();
+        }
+      }
+    );
+    Kokkos::fence();
+    meshIndicesCounter += hostSharedCommMapSize;
+  }
+}
+
+} // namespace stk::mesh::impl
 
 #endif

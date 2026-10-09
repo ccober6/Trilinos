@@ -1,10 +1,12 @@
 tribits_include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
-#tribits_add_executable(
-#  UnitTests
-#  SOURCES
-#    Compadre_UnitTests.cpp
-#  ) # end tribits_add_executable
+if (TPL_ENABLE_gtest)
+  tribits_add_executable(
+    UnitTests
+    SOURCES
+      Compadre_UnitTests.cpp
+    ) # end tribits_add_executable
+endif()
 
 tribits_add_executable(
   GMLS_Host_Test
@@ -84,25 +86,27 @@ tribits_add_executable(
     NeighborSearchTest.cpp
   ) # end tribits_add_executable
 
-#set(testName Compadre_Unit_Tests)
-#tribits_add_test(
-#  UnitTests
-#  NAME
-#    ${testName}
-#  COMM serial mpi
-#  NUM_MPI_PROCS 1
-#  ADDED_TESTS_NAMES_OUT ${testName}_CREATED
-#  ) # end tribits_add_test
-#if (${testName}_CREATED)
-#  set_tests_properties(
-#    ${${testName}_CREATED}
-#    PROPERTIES
-#      LABELS
-#        "UnitTest;unittest;Unit;unit"
-#      TIMEOUT
-#        60
-#    ) # end set_tests_properties
-#endif() # test created
+if (TPL_ENABLE_gtest)
+  set(testName Unit_Tests)
+  tribits_add_test(
+    UnitTests
+    NAME
+      ${testName}
+    COMM serial mpi
+    NUM_MPI_PROCS 1
+    ADDED_TESTS_NAMES_OUT ${testName}_CREATED
+    ) # end tribits_add_test
+  if (${testName}_CREATED)
+    set_tests_properties(
+      ${${testName}_CREATED}
+      PROPERTIES
+        LABELS
+          "UnitTest;unittest;Unit;unit"
+        TIMEOUT
+          60
+      ) # end set_tests_properties
+  endif() # test created
+endif()
 
 # Host views tests for GMLS
 set(testName GMLS_Host_Dim3_QR)
@@ -113,7 +117,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 3 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 3 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -135,7 +139,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 2 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 2 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -157,7 +161,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 1 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 1 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -180,7 +184,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 3 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 3 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -202,7 +206,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 2 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 2 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -224,7 +228,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 1 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 1 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -247,7 +251,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 3 --solver LU --kokkos-threads=2"
+    "--p 4 --nt 200 --d 3 --solver LU --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -270,7 +274,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 3 --nt 200 --d 3 --solver LU --constraint NEUMANN_GRAD_SCALAR --kokkos-threads=2"
+    "--p 3 --nt 200 --d 3 --solver LU --constraint NEUMANN_GRAD_SCALAR --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -293,7 +297,7 @@ endif() # test created
 #  COMM serial mpi
 #  NUM_MPI_PROCS 1
 #  ARGS
-#    "3 200 3 0 0 1 --kokkos-threads=2"
+#    "3 200 3 0 0 1 --kokkos-num-threads=2"
 #  ADDED_TESTS_NAMES_OUT ${testName}_CREATED
 #  ) # end tribits_add_test
 #if (${testName}_CREATED)
@@ -316,7 +320,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 3 --nt 20 --d 3 --kokkos-threads=2"
+    "--p 3 --nt 20 --d 3 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -338,7 +342,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 3 --nt 20 --d 2 --kokkos-threads=2"
+    "--p 3 --nt 20 --d 2 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -360,7 +364,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 3 --nt 20 --d 1 --kokkos-threads=2"
+    "--p 3 --nt 20 --d 1 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -383,7 +387,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 3 --nt 200 --d 3 --solver LU --kokkos-threads=2"
+    "--p 3 --nt 200 --d 3 --solver LU --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -407,7 +411,7 @@ tribits_add_test(
   NUM_MPI_PROCS 1
   COMM serial mpi
   ARGS
-    "--p 4 --nt 200 --d 2 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 2 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -429,7 +433,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 1 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 1 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -452,7 +456,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 4 --nt 200 --d 3 --kokkos-threads=2"
+    "--p 4 --nt 200 --d 3 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -476,7 +480,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 3 --nt 100 --d 3 --kokkos-threads=4"
+    "--p 3 --nt 100 --d 3 --kokkos-num-threads=4"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -500,7 +504,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "--p 3 --nt 200 --d 2 --kokkos-threads=2"
+    "--p 3 --nt 200 --d 2 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -557,7 +561,7 @@ if (NOT(Compadre_DEBUG OR Compadre_EXTREME_DEBUG))
       ${testName}
     NUM_MPI_PROCS 1
     ARGS
-      "--p 3 --nt 200 --d 3 --kokkos-threads=2"
+      "--p 3 --nt 200 --d 3 --kokkos-num-threads=2"
     ADDED_TESTS_NAMES_OUT ${testName}_CREATED
     ) # end tribits_add_test
   if (${testName}_CREATED)
@@ -577,7 +581,7 @@ if (NOT(Compadre_DEBUG OR Compadre_EXTREME_DEBUG))
   #    ${testName}
   #  NUM_MPI_PROCS 1
   #  ARGS
-  #    "2 200 3 0 0 0 --kokkos-threads=2"
+  #    "2 200 3 0 0 0 --kokkos-num-threads=2"
   #  ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   #  ) # end tribits_add_test
   #if (${testName}_CREATED)
@@ -599,7 +603,7 @@ if (NOT(Compadre_DEBUG OR Compadre_EXTREME_DEBUG))
       ${testName}
     NUM_MPI_PROCS 1
     ARGS
-      "--p 3 --nt 200 --d 2 --kokkos-threads=2"
+      "--p 3 --nt 200 --d 2 --kokkos-num-threads=2"
     ADDED_TESTS_NAMES_OUT ${testName}_CREATED
     ) # end tribits_add_test
   if (${testName}_CREATED)
@@ -619,7 +623,7 @@ if (NOT(Compadre_DEBUG OR Compadre_EXTREME_DEBUG))
   #    ${testName}
   #  NUM_MPI_PROCS 1
   #  ARGS
-  #    "2 200 2 0 0 0 --kokkos-threads=2"
+  #    "2 200 2 0 0 0 --kokkos-num-threads=2"
   #  ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   #  ) # end tribits_add_test
   #if (${testName}_CREATED)
@@ -726,7 +730,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "200 --kokkos-threads=2"
+    "200 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -749,7 +753,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "2 200 6.5 0 --kokkos-threads=2"
+    "2 200 6.5 0 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -771,7 +775,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "2 300 4.5 0 --kokkos-threads=2"
+    "2 300 4.5 0 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -793,7 +797,7 @@ endif() # test created
 #  COMM serial mpi
 #  NUM_MPI_PROCS 1
 #  ARGS
-#    "2 400 1.8 --kokkos-threads=2"
+#    "2 400 1.8 --kokkos-num-threads=2"
 #  ADDED_TESTS_NAMES_OUT ${testName}_CREATED
 #  ) # end tribits_add_test
 #if (${testName}_CREATED)
@@ -816,7 +820,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "3 100 4.5 0 --kokkos-threads=2"
+    "3 100 4.5 0 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -838,7 +842,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "3 150 3.5 0 --kokkos-threads=2"
+    "3 150 3.5 0 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -860,7 +864,7 @@ endif() # test created
 #  COMM serial mpi
 #  NUM_MPI_PROCS 1
 #  ARGS
-#    "3 160 1.8 --kokkos-threads=2"
+#    "3 160 1.8 --kokkos-num-threads=2"
 #  ADDED_TESTS_NAMES_OUT ${testName}_CREATED
 #  ) # end tribits_add_test
 #if (${testName}_CREATED)
@@ -883,7 +887,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "2 200 6.5 1 --kokkos-threads=2"
+    "2 200 6.5 1 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -905,7 +909,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "2 300 4.5 1 --kokkos-threads=2"
+    "2 300 4.5 1 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -927,7 +931,7 @@ endif() # test created
 #  COMM serial mpi
 #  NUM_MPI_PROCS 1
 #  ARGS
-#    "2 400 1.8 --kokkos-threads=2"
+#    "2 400 1.8 --kokkos-num-threads=2"
 #  ADDED_TESTS_NAMES_OUT ${testName}_CREATED
 #  ) # end tribits_add_test
 #if (${testName}_CREATED)
@@ -950,7 +954,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "3 100 4.5 1 --kokkos-threads=2"
+    "3 100 4.5 1 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -972,7 +976,7 @@ tribits_add_test(
   COMM serial mpi
   NUM_MPI_PROCS 1
   ARGS
-    "3 150 3.5 1 --kokkos-threads=2"
+    "3 150 3.5 1 --kokkos-num-threads=2"
   ADDED_TESTS_NAMES_OUT ${testName}_CREATED
   ) # end tribits_add_test
 if (${testName}_CREATED)
@@ -994,7 +998,7 @@ endif() # test created
 #  COMM serial mpi
 #  NUM_MPI_PROCS 1
 #  ARGS
-#    "3 160 1.8 1 --kokkos-threads=2"
+#    "3 160 1.8 1 --kokkos-num-threads=2"
 #  ADDED_TESTS_NAMES_OUT ${testName}_CREATED
 #  ) # end tribits_add_test
 #if (${testName}_CREATED)

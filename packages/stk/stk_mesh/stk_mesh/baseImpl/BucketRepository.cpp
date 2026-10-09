@@ -6,15 +6,15 @@
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
-// 
+//
 //     * Redistributions of source code must retain the above copyright
 //       notice, this list of conditions and the following disclaimer.
-// 
+//
 //     * Redistributions in binary form must reproduce the above
 //       copyright notice, this list of conditions and the following
 //       disclaimer in the documentation and/or other materials provided
 //       with the distribution.
-// 
+//
 //     * Neither the name of NTESS nor the names of its contributors
 //       may be used to endorse or promote products derived from this
 //       software without specific prior written permission.
@@ -30,7 +30,7 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-// 
+//
 
 #include <stk_mesh/baseImpl/BucketRepository.hpp>
 #include <algorithm>                    // for copy, remove_if
@@ -98,6 +98,25 @@ BucketRepository::~BucketRepository()
     m_buckets.clear();
 
   } catch(...) {}
+}
+
+const BucketVector & BucketRepository::buckets( EntityRank rank ) const
+{
+  static const BucketVector emptyBucketVector;
+
+  if( rank < static_cast<EntityRank>(m_buckets.size()) )
+  {
+    if (m_need_sync_from_partitions[rank])
+    {
+      const_cast<BucketRepository *>(this)->sync_from_partitions(rank);
+    }
+
+    return m_buckets[ rank ];
+  }
+  else
+  {
+    return emptyBucketVector;
+  }
 }
 
 void BucketRepository::set_needs_to_be_sorted(stk::mesh::Bucket &bucket, bool needsSorting)
@@ -178,6 +197,13 @@ Partition *BucketRepository::get_partition(const EntityRank arg_entity_rank, con
   return get_partition(arg_entity_rank, parts, ik);
 }
 
+Partition* BucketRepository::get_partition(const EntityRank arg_entity_rank, unsigned ordinal)
+{
+  ensure_data_structures_sized();
+  return m_partitions[arg_entity_rank][ordinal];
+}
+
+
 Partition *BucketRepository::get_partition(
   const EntityRank arg_entity_rank ,
   const OrdinalVector &parts,
@@ -210,7 +236,13 @@ Partition* BucketRepository::create_partition(
   STK_ThrowRequire(partition != nullptr);
 
   m_need_sync_from_partitions[arg_entity_rank] = true;
-  m_partitions[arg_entity_rank].insert( ik , partition );
+  if (ik == m_partitions[arg_entity_rank].end() || *ik != nullptr)
+  {
+    m_partitions[arg_entity_rank].insert( ik , partition );
+  } else
+  {
+    *ik = partition;
+  }
 
   return partition;
 }
@@ -271,20 +303,6 @@ namespace {
 
 inline bool is_null(stk::mesh::impl::Partition *p) { return (p ? false : true);}
 
-struct bucket_less_by_first_entity_identifier
-{
-    bool operator()(const Bucket* first, const Bucket* second) const
-    {
-        bool result = false;
-        if ((first->size() > 0) && (second->size() > 0))
-        {
-            const stk::mesh::BulkData& mesh = first->mesh();
-            result = EntityLess(mesh)((*first)[0], (*second)[0]);
-        }
-        return (first->size() == 0) || result;
-    }
-};
-
 }
 
 void BucketRepository::sync_from_partitions(EntityRank rank)
@@ -313,8 +331,7 @@ void BucketRepository::sync_from_partitions(EntityRank rank)
 
         if (partition.empty())
         {
-          delete partitions[p_i];
-          partitions[p_i] = 0;
+          deallocate_partition(rank, p_i);
           has_hole = true;
           continue;
         }
@@ -330,22 +347,10 @@ void BucketRepository::sync_from_partitions(EntityRank rank)
         size_t new_size = new_end - partitions.begin();  // OK because has_hole is true.
         partitions.resize(new_size);
       }
-  }
 
-  if(m_mesh.should_sort_buckets_by_first_entity_identifier())
-  {
-    std::sort(m_buckets[rank].begin(), m_buckets[rank].end(), bucket_less_by_first_entity_identifier());
-    for(Partition* partition : m_partitions[rank]) {
-      std::sort(partition->begin(), partition->end(), bucket_less_by_first_entity_identifier());
-    }
-  }
-
-  if (m_need_sync_from_partitions[rank] == true || m_mesh.should_sort_buckets_by_first_entity_identifier())
-  {
       sync_bucket_ids(rank);
+      m_need_sync_from_partitions[rank] = false;
   }
-
-  m_need_sync_from_partitions[rank] = false;
 }
 
 Bucket *BucketRepository::allocate_bucket(EntityRank entityRank,
@@ -380,6 +385,16 @@ void BucketRepository::deallocate_bucket(Bucket *b)
   m_need_sync_from_partitions[bucket_rank] = true;
   delete b;
 }
+
+void BucketRepository::deallocate_partition(EntityRank entityRank, unsigned ordinal)
+{
+  STK_ThrowAssertMsg(ordinal < m_partitions[entityRank].size(), "out of bound Partition ordinal");
+  STK_ThrowAssertMsg(m_partitions[entityRank][ordinal], "cannot delete already-deleted Partition");
+
+  delete m_partitions[entityRank][ordinal];
+  m_partitions[entityRank][ordinal] = nullptr;
+}
+
 
 void BucketRepository::sync_bucket_ids(EntityRank entity_rank)
 {

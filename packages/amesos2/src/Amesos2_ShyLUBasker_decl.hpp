@@ -128,6 +128,14 @@ private:
                  const Teuchos::Ptr<const MultiVecAdapter<Vector> > B) const;
 
 
+  /** 
+   * \brief Prints the status information about the current solver with some level
+   * of verbosity
+   */
+  void describe_impl(Teuchos::FancyOStream &out,
+                     const Teuchos::EVerbosityLevel verbLevel) const;
+
+
   /**
    * \brief Determines whether the shape of the matrix is OK for this solver.
    */
@@ -160,6 +168,11 @@ private:
 
   // Members
   int num_threads;
+  // Partial factorization
+  size_t schur_size;
+  host_ordinal_type_array schur_part;
+  host_value_type_array   schur_out;
+  scalar_type* schur_out_ptr;
 
   // The following Kokkos::View's are persisting storage for A's CCS arrays
   /// Stores the values of the nonzero entries for Umfpack

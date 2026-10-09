@@ -41,6 +41,7 @@
 #include <stk_mesh/base/BulkData.hpp>
 #include <stk_util/parallel/Parallel.hpp>  // for ParallelMachine
 #include <stk_util/parallel/ParallelComm.hpp>
+#include <stk_mesh/base/NgpParallelComm.hpp>
 #include <stk_util/util/ReportHandler.hpp>  // for ThrowRequireMsg
 
 #include <stddef.h>                     // for size_t
@@ -48,8 +49,7 @@
 
 namespace stk { namespace mesh { class Ghosting; } }
 
-namespace stk {
-namespace mesh {
+namespace stk::mesh {
 
 /**
  * This file contains some helper functions that are part of the Field API.
@@ -83,11 +83,119 @@ void parallel_max(const BulkData& mesh, const std::vector<const FieldBase*>& fie
 void parallel_min(const BulkData& mesh, const std::vector<const FieldBase*>& fields);
 
 void parallel_sum_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool deterministic = true);
-void parallel_max_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool deterministic = true);
-void parallel_min_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool deterministic = true);
+void parallel_max_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields);
+void parallel_min_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields);
 
-} // namespace mesh
-} // namespace stk
+#ifndef STK_HIDE_DEPRECATED_CODE  // Delete after March 2027
+STK_DEPRECATED_MSG("parallel_max/parallel_min ignore the 'deterministic' argument (min/max are order-independent for ordinary values); this overload will be removed after March 2027.")
+void parallel_max_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool deterministic);
+STK_DEPRECATED_MSG("parallel_max/parallel_min ignore the 'deterministic' argument (min/max are order-independent for ordinary values); this overload will be removed after March 2027.")
+void parallel_min_including_ghosts(const BulkData & mesh, const std::vector<const FieldBase *> & fields, bool deterministic);
+#endif
+
+namespace impl {
+
+template <typename NgpSpace, Operation OP, bool includeGhosts>
+void ngp_parallel_op(const BulkData & bulk,
+                     const std::vector<const FieldBase*> & fields,
+                     bool deterministic)
+{
+  if (bulk.parallel_size() == 1 || fields.empty()) return;
+
+  field_datatype_execute(*fields[0],
+    [&]<typename T>(const stk::mesh::FieldBase&) {
+      ngp_parallel_data_exchange_sym_pack_unpack<T, OP, NgpSpace>(bulk, fields, includeGhosts, deterministic);
+    }
+  );
+}
+
+} // namespace impl
+
+template <typename NgpSpace>
+void parallel_sum(const BulkData & bulk,
+                  const std::vector<const FieldBase*> & fields,
+                  bool deterministic = true)
+{
+  constexpr bool includeGhosts = false;
+  impl::ngp_parallel_op<NgpSpace, Operation::SUM, includeGhosts>(bulk, fields, deterministic);
+}
+
+template <typename NgpSpace>
+void parallel_sum_including_ghosts(const BulkData & bulk,
+                                   const std::vector<const FieldBase*> & fields,
+                                   bool deterministic = true)
+{
+  constexpr bool includeGhosts = true;
+  impl::ngp_parallel_op<NgpSpace, Operation::SUM, includeGhosts>(bulk, fields, deterministic);
+}
+
+template <typename NgpSpace>
+void parallel_min(const BulkData & bulk, const std::vector<const FieldBase*> & fields)
+{
+  constexpr bool includeGhosts = false;
+  impl::ngp_parallel_op<NgpSpace, Operation::MIN, includeGhosts>(bulk, fields, false);
+}
+
+template <typename NgpSpace>
+void parallel_min_including_ghosts(const BulkData & bulk,
+                                   const std::vector<const FieldBase*> & fields)
+{
+  constexpr bool includeGhosts = true;
+  impl::ngp_parallel_op<NgpSpace, Operation::MIN, includeGhosts>(bulk, fields, false);
+}
+
+template <typename NgpSpace>
+void parallel_max(const BulkData & bulk,
+                  const std::vector<const FieldBase*> & fields)
+{
+  constexpr bool includeGhosts = false;
+  impl::ngp_parallel_op<NgpSpace, Operation::MAX, includeGhosts>(bulk, fields, false);
+}
+
+template <typename NgpSpace>
+void parallel_max_including_ghosts(const BulkData & bulk,
+                                   const std::vector<const FieldBase*> & fields)
+{
+  constexpr bool includeGhosts = true;
+  impl::ngp_parallel_op<NgpSpace, Operation::MAX, includeGhosts>(bulk, fields, false);
+}
+
+#ifndef STK_HIDE_DEPRECATED_CODE  // Delete after March 2027
+template <typename NgpSpace>
+STK_DEPRECATED_MSG("parallel_max/parallel_min ignore the 'deterministic' argument (min/max are order-independent for ordinary values); this overload will be removed after March 2027.")
+void parallel_min(const BulkData & bulk, const std::vector<const FieldBase*> & fields, bool /*deterministic*/)
+{
+  parallel_min<NgpSpace>(bulk, fields);
+}
+
+template <typename NgpSpace>
+STK_DEPRECATED_MSG("parallel_max/parallel_min ignore the 'deterministic' argument (min/max are order-independent for ordinary values); this overload will be removed after March 2027.")
+void parallel_min_including_ghosts(const BulkData & bulk,
+                                   const std::vector<const FieldBase*> & fields,
+                                   bool /*deterministic*/)
+{
+  parallel_min_including_ghosts<NgpSpace>(bulk, fields);
+}
+
+template <typename NgpSpace>
+STK_DEPRECATED_MSG("parallel_max/parallel_min ignore the 'deterministic' argument (min/max are order-independent for ordinary values); this overload will be removed after March 2027.")
+void parallel_max(const BulkData & bulk,
+                  const std::vector<const FieldBase*> & fields,
+                  bool /*deterministic*/)
+{
+  parallel_max<NgpSpace>(bulk, fields);
+}
+
+template <typename NgpSpace>
+STK_DEPRECATED_MSG("parallel_max/parallel_min ignore the 'deterministic' argument (min/max are order-independent for ordinary values); this overload will be removed after March 2027.")
+void parallel_max_including_ghosts(const BulkData & bulk,
+                                   const std::vector<const FieldBase*> & fields,
+                                   bool /*deterministic*/)
+{
+  parallel_max_including_ghosts<NgpSpace>(bulk, fields);
+}
+#endif
+} // namespace stk::mesh
 
 #endif
 

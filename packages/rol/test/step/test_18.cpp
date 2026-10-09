@@ -14,8 +14,7 @@
 #include "ROL_GetTestProblems.hpp"
 #include "ROL_OptimizationSolver.hpp"
 #include "ROL_Stream.hpp"
-#include "Teuchos_GlobalMPISession.hpp"
-#include "Teuchos_XMLParameterListHelpers.hpp"
+#include "ROL_GlobalMPISession.hpp"
 
 #include <iostream>
 
@@ -23,7 +22,7 @@ typedef double RealT;
 
 int main(int argc, char *argv[]) {
 
-  Teuchos::GlobalMPISession mpiSession(&argc, &argv);
+  ROL::GlobalMPISession mpiSession(&argc, &argv);
 
   // This little trick lets us print to std::cout only if a (dummy) command-line argument is provided.
   int iprint     = argc - 1;
@@ -63,10 +62,10 @@ int main(int argc, char *argv[]) {
       ROL::Ptr<ROL::Vector<RealT>> e = x0->clone();
       e->zero();
       RealT err(0);
-      for (int i = 0; i < static_cast<int>(z.size()); ++i) {
+      for (int li = 0; li < static_cast<int>(z.size()); ++li) {
         e->set(*x0);
-        e->axpy(-1.0,*z[i]);
-        if (i == 0) {
+        e->axpy(-1.0,*z[li]);
+        if (li == 0) {
           err = e->norm();
         }
         else {

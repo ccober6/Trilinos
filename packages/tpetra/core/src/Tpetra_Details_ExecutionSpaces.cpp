@@ -18,7 +18,9 @@ namespace Spaces {
 
 #if defined(KOKKOS_ENABLE_CUDA)
 // cuda has default stream priority 0
-CudaInfo::CudaInfo() : initialized_(false), mediumPrio_(0) {}
+CudaInfo::CudaInfo()
+  : initialized_(false)
+  , mediumPrio_(0) {}
 #endif
 
 void lazy_init() {
@@ -66,9 +68,9 @@ void lazy_init() {
 /*extern*/ InstanceLifetimeManager<Kokkos::HIP> HIPSpaces;
 #endif
 #ifdef KOKKOS_ENABLE_SYCL
-/*extern*/ InstanceLifetimeManager<Kokkos::Experimental::SYCL> SYCLSpaces;
+/*extern*/ InstanceLifetimeManager<Kokkos::SYCL> SYCLSpaces;
 #endif
 
-} // namespace Spaces
-} // namespace Details
-} // namespace Tpetra
+}  // namespace Spaces
+}  // namespace Details
+}  // namespace Tpetra

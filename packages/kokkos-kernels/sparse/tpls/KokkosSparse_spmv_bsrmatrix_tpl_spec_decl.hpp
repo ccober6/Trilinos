@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSSPARSE_SPMV_BSRMATRIX_TPL_SPEC_DECL_HPP
 #define KOKKOSSPARSE_SPMV_BSRMATRIX_TPL_SPEC_DECL_HPP
@@ -177,7 +164,7 @@ inline void spmv_mv_bsr_mkl(Handle* handle, sparse_operation_t op, Scalar alpha,
                                                                                                                          \
     static void spmv_bsrmatrix(const EXECSPACE&, Handle* handle, const char mode[], const coefficient_type& alpha,       \
                                const AMatrix& A, const XVector& X, const coefficient_type& beta, const YVector& Y) {     \
-      std::string label = "KokkosSparse::spmv[TPL_MKL,BSRMATRIX," + Kokkos::ArithTraits<SCALAR>::name() + "]";           \
+      std::string label = "KokkosSparse::spmv[TPL_MKL,BSRMATRIX," + KokkosKernels::ArithTraits<SCALAR>::name() + "]";    \
       Kokkos::Profiling::pushRegion(label);                                                                              \
       spmv_bsr_mkl(handle, mode_kk_to_mkl(mode[0]), alpha, beta, A.numRows(), A.numCols(), A.blockDim(),                 \
                    A.graph.row_map.data(), A.graph.entries.data(), A.values.data(), X.data(), Y.data());                 \
@@ -225,7 +212,8 @@ KOKKOSSPARSE_SPMV_MKL(Kokkos::complex<double>, Kokkos::OpenMP)
     static void spmv_mv_bsrmatrix(const EXECSPACE&, Handle* handle, const char mode[], const coefficient_type& alpha,    \
                                   const AMatrix& A, const XVector& X, const coefficient_type& beta,                      \
                                   const YVector& Y) {                                                                    \
-      std::string label = "KokkosSparse::spmv_mv[TPL_MKL,BSRMATRIX," + Kokkos::ArithTraits<SCALAR>::name() + "]";        \
+      std::string label =                                                                                                \
+          "KokkosSparse::spmv_mv[TPL_MKL,BSRMATRIX," + KokkosKernels::ArithTraits<SCALAR>::name() + "]";                 \
       Kokkos::Profiling::pushRegion(label);                                                                              \
       MKL_INT colx = static_cast<MKL_INT>(X.extent(1));                                                                  \
       MKL_INT ldx  = static_cast<MKL_INT>(X.stride(1));                                                                  \
@@ -269,12 +257,47 @@ KOKKOSSPARSE_SPMV_MV_MKL(Kokkos::complex<double>, Kokkos::OpenMP)
 // - Only CUSPARSE_OPERATION_NON_TRANSPOSE is supported
 // - Only CUSPARSE_MATRIX_TYPE_GENERAL is supported.
 //
-#if (9000 <= CUDA_VERSION)
 
 #include "KokkosSparse_Utils_cusparse.hpp"
 
 namespace KokkosSparse {
 namespace Impl {
+
+#if defined(CUSPARSE_VERSION) && (CUSPARSE_VERSION >= 12500)
+template <class AMatrix>
+void create_cusparse_bsr_descr(cusparseSpMatDescr_t* descr, const AMatrix& A) {
+  using offset_type = typename AMatrix::non_const_size_type;
+  using entry_type  = typename AMatrix::non_const_ordinal_type;
+  using value_type  = typename AMatrix::non_const_value_type;
+
+  static_assert(std::is_same_v<typename AMatrix::block_layout_type, Kokkos::LayoutRight>,
+                "KokkosSparse::BsrMatrix blocks must be layout-right for cuSPARSE");
+
+  void* rowOffsets = static_cast<void*>(const_cast<offset_type*>(A.graph.row_map.data()));
+  void* colIndices = static_cast<void*>(const_cast<entry_type*>(A.graph.entries.data()));
+  void* values     = static_cast<void*>(const_cast<value_type*>(A.values.data()));
+
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(
+      cusparseCreateBsr(descr, A.numRows(), A.numCols(), A.nnz(), A.blockDim(), A.blockDim(), rowOffsets, colIndices,
+                        values, cusparse_index_type_t_from<offset_type>(), cusparse_index_type_t_from<entry_type>(),
+                        CUSPARSE_INDEX_BASE_ZERO, cuda_data_type_from<value_type>(), CUSPARSE_ORDER_ROW));
+}
+
+template <class ViewType>
+cusparseDnMatDescr_t create_cusparse_layoutleft_dnmat(const ViewType& view) {
+  static_assert(ViewType::rank == 2, "cuSPARSE dense matrix descriptors require rank-2 views");
+  static_assert(std::is_same_v<typename ViewType::array_layout, Kokkos::LayoutLeft>,
+                "cuSPARSE BSR SpMM only instantiates LayoutLeft multivectors");
+
+  cusparseDnMatDescr_t descr;
+  void* values = static_cast<void*>(const_cast<typename ViewType::non_const_value_type*>(view.data()));
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(
+      cusparseCreateDnMat(&descr, static_cast<int64_t>(view.extent(0)), static_cast<int64_t>(view.extent(1)),
+                          static_cast<int64_t>(view.stride(1)), values,
+                          cuda_data_type_from<typename ViewType::non_const_value_type>(), CUSPARSE_ORDER_COL));
+  return descr;
+}
+#endif
 
 template <class Handle, class AMatrix, class XVector, class YVector>
 void spmv_bsr_cusparse(const Kokkos::Cuda& exec, Handle* handle, const char mode[],
@@ -299,6 +322,40 @@ void spmv_bsr_cusparse(const Kokkos::Cuda& exec, Handle* handle, const char mode
     }
   }
 
+#if defined(CUSPARSE_VERSION) && (CUSPARSE_VERSION >= 12700)
+  const cudaDataType valueType = cuda_data_type_from<value_type>();
+  cusparseDnVecDescr_t vecX, vecY;
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseCreateDnVec(&vecX, x.extent_int(0), (void*)x.data(), valueType));
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseCreateDnVec(&vecY, y.extent_int(0), (void*)y.data(), valueType));
+
+  cusparseSpMVAlg_t algo = CUSPARSE_SPMV_BSR_ALG1;
+  KokkosSparse::Impl::CuSparse10_SpMV_Data* subhandle;
+
+  if (handle->tpl_rank1) {
+    subhandle = dynamic_cast<KokkosSparse::Impl::CuSparse10_SpMV_Data*>(handle->tpl_rank1);
+    if (!subhandle) throw std::runtime_error("KokkosSparse::spmv: subhandle is not set up for generic cuSPARSE BSR");
+    subhandle->set_exec_space(exec);
+  } else {
+    subhandle         = new KokkosSparse::Impl::CuSparse10_SpMV_Data(exec);
+    handle->tpl_rank1 = subhandle;
+
+    create_cusparse_bsr_descr(&subhandle->mat, A);
+    KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSpMV_bufferSize(cusparseHandle, myCusparseOperation, &alpha,
+                                                                 subhandle->mat, vecX, &beta, vecY, valueType, algo,
+                                                                 &subhandle->bufferSize));
+#if (CUDA_VERSION >= 11020)
+    KOKKOS_IMPL_CUDA_SAFE_CALL(cudaMallocAsync(&subhandle->buffer, subhandle->bufferSize, exec.cuda_stream()));
+#else
+    KOKKOS_IMPL_CUDA_SAFE_CALL(cudaMalloc(&subhandle->buffer, subhandle->bufferSize));
+#endif
+  }
+
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSpMV(cusparseHandle, myCusparseOperation, &alpha, subhandle->mat, vecX,
+                                                    &beta, vecY, valueType, algo, subhandle->buffer));
+
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroyDnVec(vecX));
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroyDnVec(vecY));
+#else
   KokkosSparse::Impl::CuSparse9_SpMV_Data* subhandle;
 
   if (handle->tpl_rank1) {
@@ -350,6 +407,7 @@ void spmv_bsr_cusparse(const Kokkos::Cuda& exec, Handle* handle, const char mode
                   "Trying to call cusparse[*]bsrmv with a scalar type not "
                   "float/double, nor complex of either!");
   }
+#endif
 }
 
 // Reference
@@ -403,6 +461,40 @@ void spmv_mv_bsr_cusparse(const Kokkos::Cuda& exec, Handle* handle, const char m
                     std::is_same_v<typename YVector::array_layout, Kokkos::LayoutLeft>,
                 "cuSPARSE requires both X and Y to be LayoutLeft.");
 
+#if defined(CUSPARSE_VERSION) && (CUSPARSE_VERSION >= 12500)
+  const cudaDataType valueType = cuda_data_type_from<value_type>();
+  cusparseDnMatDescr_t vecX    = create_cusparse_layoutleft_dnmat(x);
+  cusparseDnMatDescr_t vecY    = create_cusparse_layoutleft_dnmat(y);
+
+  cusparseSpMMAlg_t algo = CUSPARSE_SPMM_BSR_ALG1;
+  KokkosSparse::Impl::CuSparse10_SpMV_Data* subhandle;
+
+  if (handle->tpl_rank2) {
+    subhandle = dynamic_cast<KokkosSparse::Impl::CuSparse10_SpMV_Data*>(handle->tpl_rank2);
+    if (!subhandle) throw std::runtime_error("KokkosSparse::spmv: subhandle is not set up for generic cuSPARSE BSR");
+    subhandle->set_exec_space(exec);
+  } else {
+    subhandle         = new KokkosSparse::Impl::CuSparse10_SpMV_Data(exec);
+    handle->tpl_rank2 = subhandle;
+
+    create_cusparse_bsr_descr(&subhandle->mat, A);
+    KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(
+        cusparseSpMM_bufferSize(cusparseHandle, myCusparseOperation, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+                                subhandle->mat, vecX, &beta, vecY, valueType, algo, &subhandle->bufferSize));
+#if (CUDA_VERSION >= 11020)
+    KOKKOS_IMPL_CUDA_SAFE_CALL(cudaMallocAsync(&subhandle->buffer, subhandle->bufferSize, exec.cuda_stream()));
+#else
+    KOKKOS_IMPL_CUDA_SAFE_CALL(cudaMalloc(&subhandle->buffer, subhandle->bufferSize));
+#endif
+  }
+
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSpMM(cusparseHandle, myCusparseOperation,
+                                                    CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, subhandle->mat, vecX,
+                                                    &beta, vecY, valueType, algo, subhandle->buffer));
+
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroyDnMat(vecX));
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroyDnMat(vecY));
+#else
   KokkosSparse::Impl::CuSparse9_SpMV_Data* subhandle;
 
   if (handle->tpl_rank2) {
@@ -456,37 +548,39 @@ void spmv_mv_bsr_cusparse(const Kokkos::Cuda& exec, Handle* handle, const char m
                   "Trying to call cusparse[*]bsrmm with a scalar type not "
                   "float/double, nor complex of either!");
   }
+#endif
 }
 
-#define KOKKOSSPARSE_SPMV_CUSPARSE(SCALAR, ORDINAL, OFFSET, LAYOUT, SPACE)                                          \
-  template <>                                                                                                       \
-  struct SPMV_BSRMATRIX<                                                                                            \
-      Kokkos::Cuda, KokkosSparse::Impl::SPMVHandleImpl<Kokkos::Cuda, SPACE, SCALAR, OFFSET, ORDINAL>,               \
-      ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, Kokkos::Device<Kokkos::Cuda, SPACE>,     \
-                                              Kokkos::MemoryTraits<Kokkos::Unmanaged>, OFFSET const>,               \
-      Kokkos::View<SCALAR const*, LAYOUT, Kokkos::Device<Kokkos::Cuda, SPACE>,                                      \
-                   Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>,                                 \
-      Kokkos::View<SCALAR*, LAYOUT, Kokkos::Device<Kokkos::Cuda, SPACE>, Kokkos::MemoryTraits<Kokkos::Unmanaged>>,  \
-      true> {                                                                                                       \
-    using device_type       = Kokkos::Device<Kokkos::Cuda, SPACE>;                                                  \
-    using memory_trait_type = Kokkos::MemoryTraits<Kokkos::Unmanaged>;                                              \
-    using Handle            = KokkosSparse::Impl::SPMVHandleImpl<Kokkos::Cuda, SPACE, SCALAR, OFFSET, ORDINAL>;     \
-    using AMatrix           = ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, device_type,     \
-                                                            memory_trait_type, OFFSET const>;             \
-    using XVector           = Kokkos::View<SCALAR const*, LAYOUT, device_type,                                      \
-                                 Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>;         \
-    using YVector           = Kokkos::View<SCALAR*, LAYOUT, device_type, memory_trait_type>;                        \
-                                                                                                                    \
-    using coefficient_type = typename YVector::non_const_value_type;                                                \
-                                                                                                                    \
-    static void spmv_bsrmatrix(const Kokkos::Cuda& exec, Handle* handle, const char mode[],                         \
-                               const coefficient_type& alpha, const AMatrix& A, const XVector& x,                   \
-                               const coefficient_type& beta, const YVector& y) {                                    \
-      std::string label = "KokkosSparse::spmv[TPL_CUSPARSE,BSRMATRIX," + Kokkos::ArithTraits<SCALAR>::name() + "]"; \
-      Kokkos::Profiling::pushRegion(label);                                                                         \
-      spmv_bsr_cusparse(exec, handle, mode, alpha, A, x, beta, y);                                                  \
-      Kokkos::Profiling::popRegion();                                                                               \
-    }                                                                                                               \
+#define KOKKOSSPARSE_SPMV_CUSPARSE(SCALAR, ORDINAL, OFFSET, LAYOUT, SPACE)                                         \
+  template <>                                                                                                      \
+  struct SPMV_BSRMATRIX<                                                                                           \
+      Kokkos::Cuda, KokkosSparse::Impl::SPMVHandleImpl<Kokkos::Cuda, SPACE, SCALAR, OFFSET, ORDINAL>,              \
+      ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, Kokkos::Device<Kokkos::Cuda, SPACE>,    \
+                                              Kokkos::MemoryTraits<Kokkos::Unmanaged>, OFFSET const>,              \
+      Kokkos::View<SCALAR const*, LAYOUT, Kokkos::Device<Kokkos::Cuda, SPACE>,                                     \
+                   Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>,                                \
+      Kokkos::View<SCALAR*, LAYOUT, Kokkos::Device<Kokkos::Cuda, SPACE>, Kokkos::MemoryTraits<Kokkos::Unmanaged>>, \
+      true> {                                                                                                      \
+    using device_type       = Kokkos::Device<Kokkos::Cuda, SPACE>;                                                 \
+    using memory_trait_type = Kokkos::MemoryTraits<Kokkos::Unmanaged>;                                             \
+    using Handle            = KokkosSparse::Impl::SPMVHandleImpl<Kokkos::Cuda, SPACE, SCALAR, OFFSET, ORDINAL>;    \
+    using AMatrix           = ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, device_type,    \
+                                                            memory_trait_type, OFFSET const>;            \
+    using XVector           = Kokkos::View<SCALAR const*, LAYOUT, device_type,                                     \
+                                 Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>;        \
+    using YVector           = Kokkos::View<SCALAR*, LAYOUT, device_type, memory_trait_type>;                       \
+                                                                                                                   \
+    using coefficient_type = typename YVector::non_const_value_type;                                               \
+                                                                                                                   \
+    static void spmv_bsrmatrix(const Kokkos::Cuda& exec, Handle* handle, const char mode[],                        \
+                               const coefficient_type& alpha, const AMatrix& A, const XVector& x,                  \
+                               const coefficient_type& beta, const YVector& y) {                                   \
+      std::string label =                                                                                          \
+          "KokkosSparse::spmv[TPL_CUSPARSE,BSRMATRIX," + KokkosKernels::ArithTraits<SCALAR>::name() + "]";         \
+      Kokkos::Profiling::pushRegion(label);                                                                        \
+      spmv_bsr_cusparse(exec, handle, mode, alpha, A, x, beta, y);                                                 \
+      Kokkos::Profiling::popRegion();                                                                              \
+    }                                                                                                              \
   };
 
 KOKKOSSPARSE_SPMV_CUSPARSE(double, int, int, Kokkos::LayoutLeft, Kokkos::CudaSpace)
@@ -510,36 +604,37 @@ KOKKOSSPARSE_SPMV_CUSPARSE(Kokkos::complex<float>, int, int, Kokkos::LayoutRight
 
 // cuSparse TPL does not support LayoutRight for this operation
 // only specialize for LayoutLeft
-#define KOKKOSSPARSE_SPMV_MV_CUSPARSE(SCALAR, ORDINAL, OFFSET, SPACE, ETI_AVAIL)                                       \
-  template <>                                                                                                          \
-  struct SPMV_MV_BSRMATRIX<                                                                                            \
-      Kokkos::Cuda, KokkosSparse::Impl::SPMVHandleImpl<Kokkos::Cuda, SPACE, SCALAR, OFFSET, ORDINAL>,                  \
-      ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, Kokkos::Device<Kokkos::Cuda, SPACE>,        \
-                                              Kokkos::MemoryTraits<Kokkos::Unmanaged>, OFFSET const>,                  \
-      Kokkos::View<SCALAR const**, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::Cuda, SPACE>,                            \
-                   Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>,                                    \
-      Kokkos::View<SCALAR**, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::Cuda, SPACE>,                                  \
-                   Kokkos::MemoryTraits<Kokkos::Unmanaged>>,                                                           \
-      false, true, ETI_AVAIL> {                                                                                        \
-    using device_type       = Kokkos::Device<Kokkos::Cuda, SPACE>;                                                     \
-    using memory_trait_type = Kokkos::MemoryTraits<Kokkos::Unmanaged>;                                                 \
-    using Handle            = KokkosSparse::Impl::SPMVHandleImpl<Kokkos::Cuda, SPACE, SCALAR, OFFSET, ORDINAL>;        \
-    using AMatrix           = ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, device_type,        \
-                                                            memory_trait_type, OFFSET const>;                \
-    using XVector           = Kokkos::View<SCALAR const**, Kokkos::LayoutLeft, device_type,                            \
-                                 Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>;            \
-    using YVector           = Kokkos::View<SCALAR**, Kokkos::LayoutLeft, device_type, memory_trait_type>;              \
-                                                                                                                       \
-    using coefficient_type = typename YVector::non_const_value_type;                                                   \
-                                                                                                                       \
-    static void spmv_mv_bsrmatrix(const Kokkos::Cuda& exec, Handle* handle, const char mode[],                         \
-                                  const coefficient_type& alpha, const AMatrix& A, const XVector& x,                   \
-                                  const coefficient_type& beta, const YVector& y) {                                    \
-      std::string label = "KokkosSparse::spmv_mv[TPL_CUSPARSE,BSRMATRIX," + Kokkos::ArithTraits<SCALAR>::name() + "]"; \
-      Kokkos::Profiling::pushRegion(label);                                                                            \
-      spmv_mv_bsr_cusparse(exec, handle, mode, alpha, A, x, beta, y);                                                  \
-      Kokkos::Profiling::popRegion();                                                                                  \
-    }                                                                                                                  \
+#define KOKKOSSPARSE_SPMV_MV_CUSPARSE(SCALAR, ORDINAL, OFFSET, SPACE, ETI_AVAIL)                                \
+  template <>                                                                                                   \
+  struct SPMV_MV_BSRMATRIX<                                                                                     \
+      Kokkos::Cuda, KokkosSparse::Impl::SPMVHandleImpl<Kokkos::Cuda, SPACE, SCALAR, OFFSET, ORDINAL>,           \
+      ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, Kokkos::Device<Kokkos::Cuda, SPACE>, \
+                                              Kokkos::MemoryTraits<Kokkos::Unmanaged>, OFFSET const>,           \
+      Kokkos::View<SCALAR const**, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::Cuda, SPACE>,                     \
+                   Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>,                             \
+      Kokkos::View<SCALAR**, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::Cuda, SPACE>,                           \
+                   Kokkos::MemoryTraits<Kokkos::Unmanaged>>,                                                    \
+      false, true, ETI_AVAIL> {                                                                                 \
+    using device_type       = Kokkos::Device<Kokkos::Cuda, SPACE>;                                              \
+    using memory_trait_type = Kokkos::MemoryTraits<Kokkos::Unmanaged>;                                          \
+    using Handle            = KokkosSparse::Impl::SPMVHandleImpl<Kokkos::Cuda, SPACE, SCALAR, OFFSET, ORDINAL>; \
+    using AMatrix           = ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, device_type, \
+                                                            memory_trait_type, OFFSET const>;         \
+    using XVector           = Kokkos::View<SCALAR const**, Kokkos::LayoutLeft, device_type,                     \
+                                 Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>;     \
+    using YVector           = Kokkos::View<SCALAR**, Kokkos::LayoutLeft, device_type, memory_trait_type>;       \
+                                                                                                                \
+    using coefficient_type = typename YVector::non_const_value_type;                                            \
+                                                                                                                \
+    static void spmv_mv_bsrmatrix(const Kokkos::Cuda& exec, Handle* handle, const char mode[],                  \
+                                  const coefficient_type& alpha, const AMatrix& A, const XVector& x,            \
+                                  const coefficient_type& beta, const YVector& y) {                             \
+      std::string label =                                                                                       \
+          "KokkosSparse::spmv_mv[TPL_CUSPARSE,BSRMATRIX," + KokkosKernels::ArithTraits<SCALAR>::name() + "]";   \
+      Kokkos::Profiling::pushRegion(label);                                                                     \
+      spmv_mv_bsr_cusparse(exec, handle, mode, alpha, A, x, beta, y);                                           \
+      Kokkos::Profiling::popRegion();                                                                           \
+    }                                                                                                           \
   };
 
 KOKKOSSPARSE_SPMV_MV_CUSPARSE(double, int, int, Kokkos::CudaSpace, true)
@@ -563,7 +658,6 @@ KOKKOSSPARSE_SPMV_MV_CUSPARSE(Kokkos::complex<float>, int, int, Kokkos::CudaUVMS
 
 }  // namespace Impl
 }  // namespace KokkosSparse
-#endif  // (9000 <= CUDA_VERSION)
 
 #endif  // KOKKOSKERNELS_ENABLE_TPL_CUSPARSE
 
@@ -782,48 +876,47 @@ void spmv_bsr_rocsparse(const Kokkos::HIP& exec, Handle* handle, const char mode
 #endif
 }  // spmv_bsr_rocsparse
 
-#define KOKKOSSPARSE_SPMV_ROCSPARSE(SCALAR, ORDINAL, OFFSET, LAYOUT, SPACE)                                          \
-  template <>                                                                                                        \
-  struct SPMV_BSRMATRIX<                                                                                             \
-      Kokkos::HIP, KokkosSparse::Impl::SPMVHandleImpl<Kokkos::HIP, SPACE, SCALAR, OFFSET, ORDINAL>,                  \
-      ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, Kokkos::Device<Kokkos::HIP, SPACE>,       \
-                                              Kokkos::MemoryTraits<Kokkos::Unmanaged>, OFFSET const>,                \
-      Kokkos::View<SCALAR const*, LAYOUT, Kokkos::Device<Kokkos::HIP, SPACE>,                                        \
-                   Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>,                                  \
-      Kokkos::View<SCALAR*, LAYOUT, Kokkos::Device<Kokkos::HIP, SPACE>, Kokkos::MemoryTraits<Kokkos::Unmanaged>>,    \
-      true> {                                                                                                        \
-    using device_type       = Kokkos::Device<Kokkos::HIP, SPACE>;                                                    \
-    using memory_trait_type = Kokkos::MemoryTraits<Kokkos::Unmanaged>;                                               \
-    using Handle            = KokkosSparse::Impl::SPMVHandleImpl<Kokkos::HIP, SPACE, SCALAR, OFFSET, ORDINAL>;       \
-    using AMatrix           = ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, device_type,      \
-                                                            memory_trait_type, OFFSET const>;              \
-    using XVector           = Kokkos::View<SCALAR const*, LAYOUT, device_type,                                       \
-                                 Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>;          \
-    using YVector           = Kokkos::View<SCALAR*, LAYOUT, device_type, memory_trait_type>;                         \
-                                                                                                                     \
-    using coefficient_type = typename YVector::non_const_value_type;                                                 \
-                                                                                                                     \
-    static void spmv_bsrmatrix(const Kokkos::HIP& exec, Handle* handle, const char mode[],                           \
-                               const coefficient_type& alpha, const AMatrix& A, const XVector& x,                    \
-                               const coefficient_type& beta, const YVector& y) {                                     \
-      std::string label = "KokkosSparse::spmv[TPL_ROCSPARSE,BSRMATRIX," + Kokkos::ArithTraits<SCALAR>::name() + "]"; \
-      Kokkos::Profiling::pushRegion(label);                                                                          \
-      spmv_bsr_rocsparse(exec, handle, mode, alpha, A, x, beta, y);                                                  \
-      Kokkos::Profiling::popRegion();                                                                                \
-    }                                                                                                                \
+#define KOKKOSSPARSE_SPMV_ROCSPARSE(SCALAR, ORDINAL, OFFSET, LAYOUT, SPACE)                                       \
+  template <>                                                                                                     \
+  struct SPMV_BSRMATRIX<                                                                                          \
+      Kokkos::HIP, KokkosSparse::Impl::SPMVHandleImpl<Kokkos::HIP, SPACE, SCALAR, OFFSET, ORDINAL>,               \
+      ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, Kokkos::Device<Kokkos::HIP, SPACE>,    \
+                                              Kokkos::MemoryTraits<Kokkos::Unmanaged>, OFFSET const>,             \
+      Kokkos::View<SCALAR const*, LAYOUT, Kokkos::Device<Kokkos::HIP, SPACE>,                                     \
+                   Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>,                               \
+      Kokkos::View<SCALAR*, LAYOUT, Kokkos::Device<Kokkos::HIP, SPACE>, Kokkos::MemoryTraits<Kokkos::Unmanaged>>, \
+      true> {                                                                                                     \
+    using device_type       = Kokkos::Device<Kokkos::HIP, SPACE>;                                                 \
+    using memory_trait_type = Kokkos::MemoryTraits<Kokkos::Unmanaged>;                                            \
+    using Handle            = KokkosSparse::Impl::SPMVHandleImpl<Kokkos::HIP, SPACE, SCALAR, OFFSET, ORDINAL>;    \
+    using AMatrix           = ::KokkosSparse::Experimental::BsrMatrix<SCALAR const, ORDINAL const, device_type,   \
+                                                            memory_trait_type, OFFSET const>;           \
+    using XVector           = Kokkos::View<SCALAR const*, LAYOUT, device_type,                                    \
+                                 Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::RandomAccess>>;       \
+    using YVector           = Kokkos::View<SCALAR*, LAYOUT, device_type, memory_trait_type>;                      \
+                                                                                                                  \
+    using coefficient_type = typename YVector::non_const_value_type;                                              \
+                                                                                                                  \
+    static void spmv_bsrmatrix(const Kokkos::HIP& exec, Handle* handle, const char mode[],                        \
+                               const coefficient_type& alpha, const AMatrix& A, const XVector& x,                 \
+                               const coefficient_type& beta, const YVector& y) {                                  \
+      std::string label =                                                                                         \
+          "KokkosSparse::spmv[TPL_ROCSPARSE,BSRMATRIX," + KokkosKernels::ArithTraits<SCALAR>::name() + "]";       \
+      Kokkos::Profiling::pushRegion(label);                                                                       \
+      spmv_bsr_rocsparse(exec, handle, mode, alpha, A, x, beta, y);                                               \
+      Kokkos::Profiling::popRegion();                                                                             \
+    }                                                                                                             \
   };
 
-KOKKOSSPARSE_SPMV_ROCSPARSE(float, rocsparse_int, rocsparse_int, Kokkos::LayoutLeft, Kokkos::HIPSpace);
-KOKKOSSPARSE_SPMV_ROCSPARSE(float, rocsparse_int, rocsparse_int, Kokkos::LayoutRight, Kokkos::HIPSpace);
-KOKKOSSPARSE_SPMV_ROCSPARSE(double, rocsparse_int, rocsparse_int, Kokkos::LayoutLeft, Kokkos::HIPSpace);
-KOKKOSSPARSE_SPMV_ROCSPARSE(double, rocsparse_int, rocsparse_int, Kokkos::LayoutRight, Kokkos::HIPSpace);
-KOKKOSSPARSE_SPMV_ROCSPARSE(Kokkos::complex<float>, rocsparse_int, rocsparse_int, Kokkos::LayoutLeft, Kokkos::HIPSpace);
-KOKKOSSPARSE_SPMV_ROCSPARSE(Kokkos::complex<float>, rocsparse_int, rocsparse_int, Kokkos::LayoutRight,
-                            Kokkos::HIPSpace);
-KOKKOSSPARSE_SPMV_ROCSPARSE(Kokkos::complex<double>, rocsparse_int, rocsparse_int, Kokkos::LayoutLeft,
-                            Kokkos::HIPSpace);
+KOKKOSSPARSE_SPMV_ROCSPARSE(float, rocsparse_int, rocsparse_int, Kokkos::LayoutLeft, Kokkos::HIPSpace)
+KOKKOSSPARSE_SPMV_ROCSPARSE(float, rocsparse_int, rocsparse_int, Kokkos::LayoutRight, Kokkos::HIPSpace)
+KOKKOSSPARSE_SPMV_ROCSPARSE(double, rocsparse_int, rocsparse_int, Kokkos::LayoutLeft, Kokkos::HIPSpace)
+KOKKOSSPARSE_SPMV_ROCSPARSE(double, rocsparse_int, rocsparse_int, Kokkos::LayoutRight, Kokkos::HIPSpace)
+KOKKOSSPARSE_SPMV_ROCSPARSE(Kokkos::complex<float>, rocsparse_int, rocsparse_int, Kokkos::LayoutLeft, Kokkos::HIPSpace)
+KOKKOSSPARSE_SPMV_ROCSPARSE(Kokkos::complex<float>, rocsparse_int, rocsparse_int, Kokkos::LayoutRight, Kokkos::HIPSpace)
+KOKKOSSPARSE_SPMV_ROCSPARSE(Kokkos::complex<double>, rocsparse_int, rocsparse_int, Kokkos::LayoutLeft, Kokkos::HIPSpace)
 KOKKOSSPARSE_SPMV_ROCSPARSE(Kokkos::complex<double>, rocsparse_int, rocsparse_int, Kokkos::LayoutRight,
-                            Kokkos::HIPSpace);
+                            Kokkos::HIPSpace)
 
 #undef KOKKOSSPARSE_SPMV_ROCSPARSE
 

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSBATCHED_SYR_HPP_
 #define KOKKOSBATCHED_SYR_HPP_
 
@@ -36,9 +23,9 @@ namespace KokkosBatched {
 /// \tparam XViewType: Input type for the vector x, needs to be a 1D view
 /// \tparam AViewType: Input/output type for the matrix A, needs to be a 2D view
 ///
-/// \param alpha [in]: alpha is a scalar
-/// \param x [in]: x is a length n vector, a rank 1 view
-/// \param A [inout]: A is a n by n matrix, a rank 2 view
+/// \param[in] alpha: alpha is a scalar
+/// \param[in] x: x is a length n vector, a rank 1 view
+/// \param[inout] A: A is a n by n matrix, a rank 2 view
 ///
 /// No nested parallel_for is used inside of the function.
 ///

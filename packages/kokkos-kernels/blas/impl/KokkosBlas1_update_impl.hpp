@@ -1,24 +1,11 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSBLAS1_UPDATE_IMPL_HPP_
 #define KOKKOSBLAS1_UPDATE_IMPL_HPP_
 
 #include "KokkosKernels_config.h"
 #include "Kokkos_Core.hpp"
-#include "Kokkos_InnerProductSpaceTraits.hpp"
+#include "KokkosKernels_InnerProductSpaceTraits.hpp"
 
 namespace KokkosBlas {
 namespace Impl {
@@ -44,7 +31,7 @@ template <class XMV, class YMV, class ZMV, int scalar_x, int scalar_y, int scala
           class SizeType = typename ZMV::size_type>
 struct MV_Update_Functor {
   typedef SizeType size_type;
-  typedef Kokkos::ArithTraits<typename ZMV::non_const_value_type> ATS;
+  typedef KokkosKernels::ArithTraits<typename ZMV::non_const_value_type> ATS;
 
   const size_type numCols;
   const typename XMV::non_const_value_type alpha_;
@@ -202,7 +189,7 @@ template <class XV, class YV, class ZV, int scalar_x, int scalar_y, int scalar_z
           class SizeType = typename ZV::size_type>
 struct V_Update_Functor {
   typedef SizeType size_type;
-  typedef Kokkos::ArithTraits<typename ZV::non_const_value_type> ATS;
+  typedef KokkosKernels::ArithTraits<typename ZV::non_const_value_type> ATS;
 
   const size_type numCols;
   const typename XV::non_const_value_type alpha_;
@@ -215,7 +202,7 @@ struct V_Update_Functor {
   V_Update_Functor(const typename XV::non_const_value_type& alpha, const XV& X,
                    const typename YV::non_const_value_type& beta, const YV& Y,
                    const typename ZV::non_const_value_type& gamma, const ZV& Z)
-      : numCols(X.extent(1)), alpha_(alpha), X_(X), beta_(beta), Y_(Y), gamma_(gamma), Z_(Z) {
+      : numCols(1), alpha_(alpha), X_(X), beta_(beta), Y_(Y), gamma_(gamma), Z_(Z) {
     static_assert(Kokkos::is_view<XV>::value,
                   "KokkosBlas::Impl::"
                   "V_Update_Functor: X is not a Kokkos::View.");

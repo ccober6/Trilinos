@@ -335,21 +335,16 @@ class TpetraBlockCrsMatrix
   //! Get the underlying Tpetra matrix
   RCP<Tpetra::BlockCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > getTpetra_BlockCrsMatrixNonConst() const;
 
-#ifdef HAVE_XPETRA_TPETRA
-  // using local_matrix_type = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_type;
-  using local_matrix_type = typename CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_type;
+  using local_matrix_type        = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_type;
+  using local_matrix_device_type = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_device_type;
+  using local_matrix_host_type   = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_host_type;
 
   local_matrix_type getLocalMatrixDevice() const;
-#if KOKKOS_VERSION >= 40799
   typename local_matrix_type::host_mirror_type getLocalMatrixHost() const;
-#else
-  typename local_matrix_type::HostMirror getLocalMatrixHost() const;
-#endif
 
   void setAllValues(const typename local_matrix_type::row_map_type &ptr,
                     const typename local_matrix_type::StaticCrsGraphType::entries_type::non_const_type &ind,
                     const typename local_matrix_type::values_type &val);
-#endif  // HAVE_XPETRA_TPETRA
 
   //! Returns the block size of the storage mechanism
   LocalOrdinal GetStorageBlockSize() const { return mtx_->getBlockSize(); }

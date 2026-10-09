@@ -276,8 +276,7 @@ namespace FROSch {
         RCP<Map<LO,GO,NO> > mapJ = MapFactory<LO,GO,NO>::Build(k->getRowMap()->lib(),INVALID,indJ(),0,k->getRowMap()->getComm());
         RCP<Map<LO,GO,NO> > mapJLocal = MapFactory<LO,GO,NO>::Build(k->getRowMap()->lib(),INVALID,indJ.size(),0,k->getRowMap()->getComm());
         RCP<const Map<LO,GO,NO> > colMap = k->getColMap();
-#if defined(HAVE_XPETRA_TPETRA)
-        if (k->getRowMap()->lib() == UseTpetra) 
+        if (k->getRowMap()->lib() == UseTpetra)
         {
             using crsmat_type  = typename Matrix<SC,LO,GO,NO>::local_matrix_type;
             using graph_type   = typename crsmat_type::StaticCrsGraphType;
@@ -355,23 +354,19 @@ namespace FROSch {
                 nnzJJ);
 
             // make it into offsets
-#if KOKKOSKERNELS_VERSION >= 40199
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
-                (1+numRowsI, RowptrII);
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
-                (1+numRowsI, RowptrIJ);
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
-                (1+numRowsJ, RowptrJI);
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
-                (1+numRowsJ, RowptrJJ);
+#if KOKKOSKERNELS_VERSION >= 50299
+            KokkosKernels::inclusive_parallel_prefix_sum(execution_space(), RowptrII);
+            KokkosKernels::inclusive_parallel_prefix_sum(execution_space(), RowptrIJ);
+            KokkosKernels::inclusive_parallel_prefix_sum(execution_space(), RowptrJI);
+            KokkosKernels::inclusive_parallel_prefix_sum(execution_space(), RowptrJJ);
 #else
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<rowptr_type, execution_space>
+            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
                 (1+numRowsI, RowptrII);
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<rowptr_type, execution_space>
+            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
                 (1+numRowsI, RowptrIJ);
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<rowptr_type, execution_space>
+            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
                 (1+numRowsJ, RowptrJI);
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<rowptr_type, execution_space>
+            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
                 (1+numRowsJ, RowptrJJ);
 #endif
 
@@ -458,7 +453,6 @@ namespace FROSch {
             kJJ = MatrixFactory<SC,LO,GO,NO>::Build(LocalJJ, mapJLocal, mapJLocal, mapJLocal, mapJLocal,
                                                     params);
         } else
-#endif
         {
             kII = MatrixFactory<SC,LO,GO,NO>::Build(mapILocal,min((LO) k->getGlobalMaxNumRowEntries(),(LO) indI.size()));
             kIJ = MatrixFactory<SC,LO,GO,NO>::Build(mapILocal,min((LO) k->getGlobalMaxNumRowEntries(),(LO) indJ.size()));

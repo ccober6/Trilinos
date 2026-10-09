@@ -132,7 +132,6 @@ namespace Amesos2 {
   {
     if (msglvl_ > 0 && this->matrixA_->getComm()->getRank() == 0) {
       std::cout << " CssMKL::symbolicFactorization:\n" << std::endl;
-      for (int i=0; i < 64; i++) std::cout << " * IPARM[" << i << "] = " << iparm_[i] << std::endl;
     }
     int_t error = 0;
     {
@@ -140,6 +139,23 @@ namespace Amesos2 {
       Teuchos::TimeMonitor symbFactTimer( this->timers_.symFactTime_ );
 #endif
 
+      if (css_initialized_)
+      {
+        int_t phase = -1;         // release all internal solver memory
+        void *bdummy, *xdummy;
+        const MPI_Fint CssComm = CssComm_;
+        function_map::cluster_sparse_solver( pt_, const_cast<int_t*>(&maxfct_),
+                               const_cast<int_t*>(&mnum_), &mtype_, &phase, &n_,
+                               nzvals_view_.data(), rowptr_view_.data(),
+                               colind_view_.data(), perm_.getRawPtr(), &nrhs_, iparm_,
+                               const_cast<int_t*>(&msglvl_), &bdummy, &xdummy, &CssComm, &error );
+        css_initialized_ = false;
+        if (msglvl_ > 0 && error != 0 && this->matrixA_->getComm()->getRank() == 0) {
+          std::cout << " CssMKL::symbolicFactorization: clean-up failed with " << error << std::endl;
+        }
+      }
+
+      error = 0;
       int_t phase = 11; // Analysis
       void *bdummy, *xdummy;
       const MPI_Fint CssComm = CssComm_;
@@ -152,10 +168,14 @@ namespace Amesos2 {
     check_css_mkl_error(Amesos2::SYMBFACT, error);
     if (msglvl_ > 0 && this->matrixA_->getComm()->getRank() == 0) {
       std::cout << " CssMKL::symbolicFactorization done:" << std::endl;
+#ifdef HAVE_AMESOS2_TIMERS
       std::cout << " * Time : " << this->timers_.symFactTime_.totalElapsedTime() << std::endl;
+#else
+      std::cout << " * Time : not enabled" << std::endl;
+#endif
     }
 
-    // Pardiso only lets you retrieve the total number of factor
+    // CSS only lets you retrieve the total number of factor
     // non-zeros, not for each individually.  We should document how
     // such a situation is reported.
     this->setNnzLU(iparm_[17]);
@@ -190,7 +210,11 @@ namespace Amesos2 {
     check_css_mkl_error(Amesos2::NUMFACT, error);
     if (msglvl_ > 0 && this->matrixA_->getComm()->getRank() == 0) {
       std::cout << " CssMKL::numericFactorization done:" << std::endl;
-      std::cout << " Time : " << this->timers_.numFactTime_.totalElapsedTime() << std::endl;
+#ifdef HAVE_AMESOS2_TIMERS
+      std::cout << " * Time : " << this->timers_.numFactTime_.totalElapsedTime() << std::endl;
+#else
+      std::cout << " * Time : not enabled" << std::endl;
+#endif
     }
 
     return( 0 );
@@ -261,6 +285,15 @@ namespace Amesos2 {
         solver_scalar_type>::do_put(X, xvals_(),
           as<size_t>(ld_rhs),
           Teuchos::ptrInArg(*css_rowmap_));
+    }
+    if (msglvl_ > 0 && this->matrixA_->getComm()->getRank() == 0) {
+      std::cout << " CssMKL::solve done:" << std::endl;
+#ifdef HAVE_AMESOS2_TIMERS
+      std::cout << " * Time : " << this->timers_.vecRedistTime_.totalElapsedTime()
+                << " + " << this->timers_.solveTime_.totalElapsedTime() << std::endl;
+#else
+      std::cout << " * Time : not enabled" << std::endl;
+#endif
     }
 
     return( 0 );
@@ -338,11 +371,11 @@ namespace Amesos2 {
     }
 
     // Check input matrix is sorted
-    if( parameterList->isParameter("IPARM(28)") )
+    if( parameterList->isParameter("IPARM(27)") )
     {
-      RCP<const ParameterEntryValidator> report_validator = valid_params->getEntry("IPARM(28)").validator();
-      parameterList->getEntry("IPARM(28)").setValidator(report_validator);
-      iparm_[27] = getIntegralValue<int>(*parameterList, "IPARM(28)");
+      RCP<const ParameterEntryValidator> report_validator = valid_params->getEntry("IPARM(27)").validator();
+      parameterList->getEntry("IPARM(27)").setValidator(report_validator);
+      iparm_[26] = getIntegralValue<int>(*parameterList, "IPARM(27)");
     }
    
     if( parameterList->isParameter("IsContiguous") ){
@@ -545,16 +578,35 @@ CssMKL<Matrix,Vector>::loadA_impl(EPhase current_phase)
 
 template <class Matrix, class Vector>
 void
+CssMKL<Matrix,Vector>::describe_impl(Teuchos::FancyOStream &out,
+                                     const Teuchos::EVerbosityLevel verbLevel) const
+{
+  out << " CssMKL current parameters:" << std::endl;
+  out << "  > IPARM(2)  = " << iparm_[1]  << std::endl;
+  out << "  > IPARM(8)  = " << iparm_[7]  << std::endl;
+  out << "  > IPARM(10) = " << iparm_[9]  << std::endl;
+  out << "  > IPARM(12) = " << iparm_[11] << std::endl;
+  out << "  > IPARM(13) = " << iparm_[12] << std::endl;
+  out << "  > IPARM(18) = " << iparm_[17] << std::endl;
+  out << "  > IPARM(27) = " << iparm_[26] << std::endl;
+  out << "  > IsContiguous = " << (is_contiguous_ ? "YES" : "NO") << std::endl;
+  out << "  > verbose = " << msglvl_ << std::endl;
+  out << std::endl;
+}
+
+
+template <class Matrix, class Vector>
+void
 CssMKL<Matrix,Vector>::check_css_mkl_error(EPhase phase,
                                                    int_t error) const
 {
   int error_i = error;
   Teuchos::broadcast(*(this->getComm()), 0, &error_i); // We only care about root's value
 
-  if( error == 0 ) return;      // No error
+  if( error_i == 0 ) return;      // No error
 
   std::string errmsg = "Other error";
-  switch( error ){
+  switch( error_i ){
   case -1:
     errmsg = "CssMKL reported error: 'Input inconsistent'";
     break;
@@ -612,12 +664,12 @@ CssMKL<Matrix,Vector>::set_css_mkl_matrix_type(int_t mtype)
     case 11:
       TEUCHOS_TEST_FOR_EXCEPTION( complex_,
                           std::invalid_argument,
-                          "Cannot set a real Pardiso matrix type with scalar type complex" );
+                          "Cannot set a real CSS matrix type with scalar type complex" );
       mtype_ = 11; break;
     case 13:
       TEUCHOS_TEST_FOR_EXCEPTION( !complex_,
                           std::invalid_argument,
-                          "Cannot set a complex Pardiso matrix type with non-complex scalars" );
+                          "Cannot set a complex CSS matrix type with non-complex scalars" );
       mtype_ = 13; break;
     default:
       TEUCHOS_TEST_FOR_EXCEPTION( true,

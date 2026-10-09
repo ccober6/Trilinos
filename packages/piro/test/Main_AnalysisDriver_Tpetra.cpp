@@ -13,7 +13,6 @@
 #include "MockModelEval_A_Tpetra.hpp"
 #include "MockModelEval_B_Tpetra.hpp"
 #include "MockModelEval_B_Tpetra_2_parameters.hpp"
-//#include "ObserveSolution_Epetra.hpp"
 
 #include "Piro_SolverFactory.hpp"
 #include "Piro_ProviderHelpers.hpp"
@@ -118,10 +117,10 @@ int main(int argc, char *argv[]) {
 
         if (mockModel=="MockModelEval_A_Tpetra") {
           if(boundConstrained) {
-            RCP<Thyra::ModelEvaluator<double>> model_tmp = rcp(new MockModelEval_A_Tpetra(appComm,false,probParams,true));
+            RCP<Thyra::ModelEvaluator<double>> model_tmp = rcp(new MockModelEval_A_Tpetra(appComm,2,false,probParams,true));
             model = rcp(new Piro::ProductModelEvaluator<double>(model_tmp,p_indices));
             if(explicitAdjointME) {
-              RCP<Thyra::ModelEvaluator<double>> adjointModel_tmp = rcp(new MockModelEval_A_Tpetra(appComm,true));
+              RCP<Thyra::ModelEvaluator<double>> adjointModel_tmp = rcp(new MockModelEval_A_Tpetra(appComm,2,true));
               adjointModel = rcp(new Piro::ProductModelEvaluator<double>(adjointModel_tmp,p_indices));
             }
             modelName = "A";
@@ -189,13 +188,16 @@ int main(int argc, char *argv[]) {
             p_exact[0] = 1;
             p_exact[1] = 3;
           }
-          if (mockModel=="MockModelEval_B_Tpetra") {
+          else if (mockModel=="MockModelEval_B_Tpetra") {
             p_exact[0] = 6;
             p_exact[1] = 4;
           }
-          if (mockModel=="MockModelEval_B_Tpetra_2_parameters") {
+          else if (mockModel=="MockModelEval_B_Tpetra_2_parameters") {
             p_exact[0] = 4;
             p_exact[1] = 6;
+          }
+          else {
+            TEUCHOS_ASSERT(false);
           }
           double tol = 1e-5;
 

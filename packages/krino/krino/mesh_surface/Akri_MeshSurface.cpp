@@ -31,7 +31,7 @@ void Parallel_Facet_File_Reader::read(const std::string & read_description, cons
 
   if (0 == stk::EnvData::parallel_rank() )
   {
-    my_input.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+    my_input.exceptions(std::ifstream::badbit);
     try
     {
       read_function();
@@ -144,7 +144,7 @@ void FACSurface::read_file(const std::vector<BoundingBox> & proc_bboxes)
   my_reader.read("reading points", [this, &points](){read_points(points);});
 
   int num_facets = 0;
-  my_reader.read("reading number of facets", [&input, &num_facets](){input >> num_facets; STK_ThrowRequire(num_facets > 0);});
+  my_reader.read("reading number of facets", [&input, &num_facets](){ STK_ThrowRequire((input >> num_facets) && num_facets > 0); });
 
   int batch_size = 0;
   int num_batches = 0;
@@ -171,9 +171,8 @@ void FACSurface::read_points(std::vector<stk::math::Vector3d> & points)
   {
     int id;
     double X, Y, Z;
-    input >> id;
-    STK_ThrowRequire(id >= 0 && id < num_points);
-    input >> X >> Y >> Z;
+    STK_ThrowRequire((input >> id) && id >= 0 && id < num_points);
+    STK_ThrowRequire(input >> X >> Y >> Z);
     points.emplace_back(X*my_scale[0], Y*my_scale[1], Z*my_scale[2]);
   }
 }
@@ -186,9 +185,8 @@ void FACSurface::read_facets(const int batch_size, const int num_facets, const s
   {
     int id;
     int p1, p2, p3;
-    input >> id;
-    STK_ThrowRequire(id >= 0 && id < num_facets);
-    input >> p1 >> p2 >> p3;
+    STK_ThrowRequire((input >> id) && id >= 0 && id < num_facets);
+    STK_ThrowRequire(input >> p1 >> p2 >> p3);
 
     STK_ThrowRequire(p1 >= 0 && p1 < num_points);
     STK_ThrowRequire(p2 >= 0 && p2 < num_points);
@@ -281,23 +279,22 @@ void PLYSurface::read_header(int & num_points, int & num_facets)
 
   // Read in the file identifier
   std::string symbol;
-  input >> symbol;
-  STK_ThrowRequire(symbol.compare("ply") == 0);
+  STK_ThrowRequire((input >> symbol) && symbol.compare("ply") == 0);
 
   while (symbol.compare("end_header") != 0)
   {
     STK_ThrowErrorMsgIf(input.eof(), "Problem reading PLY file, reached end of file.");
-    input >> symbol;
+    STK_ThrowRequire(input >> symbol);
     if (symbol.compare("element") == 0)
     {
-      input >> symbol;
+      STK_ThrowRequire(input >> symbol);
       if (symbol.compare("vertex") == 0)
       {
         input >> num_points;
       }
       else if (symbol.compare("face") == 0)
       {
-        input >> num_facets;
+        STK_ThrowRequire(input >> num_facets);
       }
     }
   }
@@ -311,7 +308,7 @@ void PLYSurface::read_points(const int num_points, std::vector<stk::math::Vector
   for ( int i = 0; i < num_points; i++ )
   {
     double X, Y, Z;
-    input >> X >> Y >> Z;
+    STK_ThrowRequire(input >> X >> Y >> Z);
     points.emplace_back(X*my_scale[0], Y*my_scale[1], Z*my_scale[2]);
   }
   // Move to start of next line to prepare for reading facets
@@ -332,7 +329,7 @@ void PLYSurface::read_facets(const int batch_size, const std::vector<stk::math::
     std::stringstream linestream(line);
     linestream >> num_facet_nodes;
     STK_ThrowRequireMsg(num_facet_nodes == 3, "Failed to read face connectivity correctly.");
-    linestream >> p1 >> p2 >> p3;
+    STK_ThrowRequire(linestream >> p1 >> p2 >> p3);
     STK_ThrowRequire(p1 < num_points);
     STK_ThrowRequire(p2 < num_points);
     STK_ThrowRequire(p3 < num_points);
@@ -388,48 +385,83 @@ static bool is_finite_normal(const stk::math::Vector3d normal)
   return finiteFlag;
 }
 
-void read_ascii_facet(std::ifstream & input, const stk::math::Vector3d & scale, const int sign, std::array<stk::math::Vector3d,3> & facetPts, bool & isFacetValid)
+static std::string trim_whitespace(const std::string& s)
 {
-  std::string symbol, nx, ny, nz;
-  double X, Y, Z;
-
-  // Read in the facet normal
-  input >> symbol;
-  STK_ThrowRequire(symbol.compare("normal")  == 0);
-  input >> nx >> ny >> nz;
-  const stk::math::Vector3d normal(std::atof(nx.c_str()), std::atof(ny.c_str()), std::atof(nz.c_str()));
-
-  // Read in the "outer loop" line
-  input >> symbol;
-  STK_ThrowRequire(symbol.compare("outer") == 0);
-  input >> symbol;
-  STK_ThrowRequire(symbol.compare("loop") == 0);
-
-  // Read in the vertices
-  for (int i=0; i<3; i++) {
-    input >> symbol;
-    STK_ThrowRequire(symbol.compare("vertex") == 0);
-    input >> X >> Y >> Z;
-
-    facetPts[i] = stk::math::Vector3d(X*scale[0], Y*scale[1], Z*scale[2]);
+  size_t start = 0;
+  while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) {
+      ++start;
   }
 
-  // Read in the "endloop" and "endfacet" lines
-  input >> symbol;
-  STK_ThrowRequire(symbol.compare("endloop") == 0);
-  input >> symbol;
-  STK_ThrowRequire(symbol.compare("endfacet") == 0);
+  size_t end = s.size();
+  while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) {
+      --end;
+  }
 
-  isFacetValid = is_finite_normal(normal) && !Facet3d::is_degenerate(facetPts);
-  flip_facet_with_negative_sign(facetPts, sign);
+  return s.substr(start, end - start);
 }
 
-static bool read_start_of_next_ascii_facet(std::ifstream & input)
+static bool starts_with(const std::string& s, const std::string& prefix)
 {
-  // Read the next line
-  std::string symbol;
-  input >> symbol;
-  return symbol.compare("facet") == 0;
+  return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
+}
+
+static void parse_ascii_vector3d(const std::string& s, stk::math::Vector3d & v)
+{
+  std::istringstream iss(s);
+  if (!(iss >> v[0] >> v[1] >> v[2]))
+    throw std::runtime_error("Failed to parse 3D vector");
+}
+
+static void parse_ascii_prefix_and_vector3d(const std::string& line, const std::string & prefix, stk::math::Vector3d & v)
+{
+  if (!starts_with(line, prefix))
+    throw std::runtime_error("Expected '" + prefix + " x y z'");
+
+  parse_ascii_vector3d(line.substr(prefix.length()), v);
+}
+
+static void parse_ascii_prefix_and_vector3d(std::istream& in, const std::string & prefix, stk::math::Vector3d & v)
+{
+  std::string line;
+  if (!std::getline(in, line))
+    throw std::runtime_error("Unexpected EOF before '" + prefix + " x y z'");
+  line = trim_whitespace(line);
+  parse_ascii_prefix_and_vector3d(line, prefix, v);
+}
+
+static void parse_and_expect_token(std::istream& in, const std::string& expectedToken)
+{
+  std::string line;
+  if (!std::getline(in, line))
+    throw std::runtime_error("Unexpected EOF before " + expectedToken + "'");
+  line = trim_whitespace(line);
+  if (line != expectedToken)
+    throw std::runtime_error("Expected '" + expectedToken + "'");
+}
+
+static void parse_ascii_facet(std::istream& in, const std::string& firstLine, stk::math::Vector3d & facetNormal, std::array<stk::math::Vector3d,3> & facetPts)
+{
+  parse_ascii_prefix_and_vector3d(firstLine, "facet normal", facetNormal);
+
+  parse_and_expect_token(in, "outer loop");
+
+  for (int i = 0; i < 3; ++i)
+    parse_ascii_prefix_and_vector3d(in, "vertex", facetPts[i]);
+
+  parse_and_expect_token(in, "endloop");
+  parse_and_expect_token(in, "endfacet");
+}
+
+static void read_ascii_facet(std::istream& in, const std::string& firstLine, const stk::math::Vector3d & scale, const int sign, std::array<stk::math::Vector3d,3> & facetPts, bool & isFacetValid)
+{
+  stk::math::Vector3d facetNormal;
+  parse_ascii_facet(in, firstLine, facetNormal, facetPts);
+
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j)
+      facetPts[i][j] *= scale[j];
+  isFacetValid = is_finite_normal(facetNormal) && !Facet3d::is_degenerate(facetPts);
+  flip_facet_with_negative_sign(facetPts, sign);
 }
 
 static float read_binary_float(std::ifstream& input)
@@ -539,21 +571,11 @@ STLSurface::read_header()
 {
   std::ifstream & input = my_reader.input();
 
-  std::string symbol;
-  input >> symbol;
-  my_is_ascii = symbol.compare("solid") == 0;
+  std::string line;
+  std::getline(input, line);
+  my_is_ascii = starts_with(line, "solid");
 
-  if (my_is_ascii)
-  {
-    // Read in strings until you get to facet
-    while (symbol.compare("facet") != 0)
-    {
-      STK_ThrowErrorMsgIf(input.eof(), "Problem reading STL file, no facets found.");
-      input >> symbol;
-    }
-    krinolog << "Reading ASCII STL file." << stk::diag::dendl;
-  }
-  else
+  if (!my_is_ascii)
   {
     char header_info[80] = "";
     input.clear();
@@ -580,18 +602,28 @@ unsigned STLSurface::read_ascii_facets(const unsigned max_batch_size)
 
   bool isFacetValid = false;
   std::array<stk::math::Vector3d,3> facetPts;
+  std::string line;
 
   unsigned count = 0;
-  bool done = false;
-  while (!done)
+  while (count < max_batch_size && std::getline(input, line))
   {
-    read_ascii_facet(input, my_scale, my_dist_sign, facetPts, isFacetValid);
-    if (isFacetValid)
+    line = trim_whitespace(line);
+    if (starts_with(line, "facet"))
     {
-      emplace_back_3d(facetPts[0], facetPts[1], facetPts[2]);
-      ++count;
+      read_ascii_facet(input, line, my_scale, my_dist_sign, facetPts, isFacetValid);
+      if (isFacetValid)
+      {
+        emplace_back_3d(facetPts[0], facetPts[1], facetPts[2]);
+        ++count;
+      }
     }
-    done = (!read_start_of_next_ascii_facet(input) || count >= max_batch_size);
+    else
+    {
+      if (starts_with(line, "solid"))
+        krinolog << "STL file contains multiple solids which are being read together. This will not behave well if the surfaces intersect." << stk::diag::dendl;
+      else if (!line.empty() && !starts_with(line, "endsolid"))
+        throw std::runtime_error("Unexpected line '" + line + "'");
+    }
   }
   return count;
 }
@@ -628,19 +660,24 @@ BoundingBox STLSurface::get_ascii_facet_bounding_box()
 
   BoundingBox bbox;
 
-  bool done = false;
-  while (!done)
+  std::string line;
+  while (std::getline(input, line))
   {
-    read_ascii_facet(input, my_scale, my_dist_sign, facetPts, isFacetValid);
-    if (isFacetValid)
+    line = trim_whitespace(line);
+    if (starts_with(line, "facet"))
     {
-      const Facet3d facet(facetPts[0], facetPts[1], facetPts[2]);
-      facet.insert_into(bbox);
+      read_ascii_facet(input, line, my_scale, my_dist_sign, facetPts, isFacetValid);
+      if (isFacetValid)
+      {
+        const Facet3d facet(facetPts[0], facetPts[1], facetPts[2]);
+        facet.insert_into(bbox);
+      }
     }
-    done = !read_start_of_next_ascii_facet(input);
   }
   return bbox;
 }
+
+
 
 BoundingBox STLSurface::get_binary_facet_bounding_box(const unsigned numFacets)
 {
@@ -851,74 +888,118 @@ MeshSurface<FACET>::MeshSurface(const stk::mesh::MetaData & meta,
 {
 }
 
-template <class FACET>
-void MeshSurface<FACET>::build_local_facets(const BoundingBox & /*proc_bbox*/)
+static bool determine_polarity_for_side(const stk::mesh::BulkData & mesh, const stk::mesh::Selector & volumeSelector, const stk::mesh::Entity side)
 {
-  /* %TRACE[ON]% */ Trace trace__("krino::MeshSurface::build_local_facets()"); /* %TRACE% */
+  const stk::topology sideTopology = mesh.bucket(side).topology();
+  const unsigned numSideElems = mesh.num_elements(side);
+  const stk::mesh::Entity * sideElems = mesh.begin_elements(side);
+  const stk::mesh::Permutation * sideElemPermutatons = mesh.begin_permutations(side, stk::topology::ELEMENT_RANK);
+
+  for (unsigned iElem = 0; iElem < numSideElems; ++iElem)
+    if (volumeSelector(mesh.bucket(sideElems[iElem])))
+      return sideTopology.is_positive_polarity(sideElemPermutatons[iElem]);
+
+  // We can get here in parallel without aura.  Check for orientation wrt non-selected elements
+  for (unsigned iElem = 0; iElem < numSideElems; ++iElem)
+    if (!volumeSelector(mesh.bucket(sideElems[iElem])))
+      return !sideTopology.is_positive_polarity(sideElemPermutatons[iElem]);
+
+  STK_ThrowRequireMsg(false, "determine_polarity_for_negative_side_of_interface has no touching element.");
+  return false;
+}
+
+static bool should_side_be_flipped(const stk::mesh::BulkData& mesh, const stk::mesh::Selector & volumeSelector, const stk::mesh::Entity side, const int sign)
+{
+  if (volumeSelector.is_null() || determine_polarity_for_side(mesh, volumeSelector, side))
+    return sign < 0;
+  return sign >= 0;
+}
+
+template <class FACET>
+void MeshSurface<FACET>::add_side_facet(const stk::mesh::BulkData & mesh, const stk::mesh::Selector & volumeSelector, const stk::topology sideTopology, const stk::mesh::Entity side)
+{
+  const bool doFlip = should_side_be_flipped(mesh, volumeSelector, side, my_sign);
+  if (stk::topology::TRI_3 == sideTopology)
+  {
+    add_facet3d(mesh, side, doFlip, 0,1,2);
+  }
+  else if (stk::topology::QUAD_4 == sideTopology)
+  {
+    add_quad3d(mesh, side, doFlip, 0,1,2,3);
+  }
+  else if (stk::topology::TRI_6 == sideTopology)
+  {
+    add_facet3d(mesh, side, doFlip, 0,3,5);
+    add_facet3d(mesh, side, doFlip, 1,4,3);
+    add_facet3d(mesh, side, doFlip, 2,5,4);
+    add_facet3d(mesh, side, doFlip, 3,4,5);
+  }
+  else if (stk::topology::LINE_2 == sideTopology)
+  {
+    add_facet2d(mesh, side, doFlip, 0,1);
+  }
+  else if (stk::topology::LINE_3 == sideTopology)
+  {
+    add_facet2d(mesh, side, doFlip, 0,2);
+    add_facet2d(mesh, side, doFlip, 2,1);
+  }
+  else
+  {
+    ThrowRuntimeError("Elements with side topology " << sideTopology.name() << " not supported for mesh surface initialization.");
+  }
+}
+
+template <class FACET>
+void MeshSurface<FACET>::add_selected_side_facets(const stk::mesh::BulkData & mesh, const stk::mesh::Selector & volumeSelector, const stk::mesh::Selector & sideSelector)
+{
+  for (auto * bucket : mesh.get_buckets(my_mesh_meta.side_rank(), sideSelector))
+  {
+    const stk::topology sideTopology = bucket->topology();
+    for (auto side : *bucket)
+      add_side_facet(mesh, volumeSelector, sideTopology, side);
+  }
+}
+
+template <class FACET>
+void MeshSurface<FACET>::build_local_facets(const BoundingBox &)
+{
   const stk::mesh::BulkData & mesh = my_mesh_meta.mesh_bulk_data();
   stk::mesh::Selector active_locally_owned_selector =
       (NULL != my_mesh_meta.get_part("ACTIVE_CONTEXT_BIT")) ?
       (*my_mesh_meta.get_part("ACTIVE_CONTEXT_BIT") & my_mesh_meta.locally_owned_part()) :
       stk::mesh::Selector(my_mesh_meta.locally_owned_part());
 
-  stk::mesh::Selector active_locally_owned_part_selector = active_locally_owned_selector & my_surface_selector;
-
-  stk::mesh::BucketVector const& buckets = mesh.get_buckets( my_mesh_meta.side_rank(), active_locally_owned_part_selector);
-
   Faceted_Surface<FACET>::clear();
 
-  stk::mesh::BucketVector::const_iterator ib = buckets.begin();
-  stk::mesh::BucketVector::const_iterator ib_end = buckets.end();
-
-  for ( ; ib != ib_end ; ++ib )
+  if (my_surface_selector.is_all_unions())
   {
-    const stk::mesh::Bucket & b = **ib;
-    const unsigned length = b.size();
-
-    for ( unsigned iSide = 0; iSide < length; ++iSide )
+    stk::mesh::PartVector surfaceParts;
+    my_surface_selector.get_parts(surfaceParts);
+    for (auto * surfacePart : surfaceParts)
     {
-      stk::mesh::Entity side = b[iSide];
-
-      stk::topology side_topology = mesh.bucket(side).topology();
-      if (stk::topology::TRI_3 == side_topology)
-      {
-        add_facet3d(mesh,side,0,1,2);
-      }
-      else if (stk::topology::QUAD_4 == side_topology)
-      {
-        add_quad3d(mesh,side,0,1,2,3);
-      }
-      else if (stk::topology::TRI_6 == side_topology)
-      {
-        add_facet3d(mesh,side,0,3,5);
-        add_facet3d(mesh,side,1,4,3);
-        add_facet3d(mesh,side,2,5,4);
-        add_facet3d(mesh,side,3,4,5);
-      }
-      else if (stk::topology::LINE_2 == side_topology)
-      {
-        add_facet2d(mesh,side,0,1);
-      }
-      else if (stk::topology::LINE_3 == side_topology)
-      {
-        add_facet2d(mesh,side,0,2);
-        add_facet2d(mesh,side,2,1);
-      }
-      else
-      {
-        ThrowRuntimeError("Elements with side topology " << side_topology.name() << " not supported for mesh surface initialization.");
-      }
+      const stk::mesh::Selector activeOwnedSurfSelector = active_locally_owned_selector & *surfacePart;
+      const auto touchingVols = my_mesh_meta.get_blocks_touching_surface(surfacePart);
+      const stk::mesh::Selector volSelector = stk::mesh::selectUnion(touchingVols);
+      krinolog << "Building facets for " << surfacePart->name() << " oriented with respect to " << volSelector << stk::diag::dendl;
+      add_selected_side_facets(mesh, volSelector, activeOwnedSurfSelector);
     }
+  }
+  else
+  {
+    krinolog << "Not considering side part connectivity or polarity for mesh surface with non-union surface selector " << my_surface_selector << stk::diag::dendl;
+    const stk::mesh::Selector emptySelector;
+    const stk::mesh::Selector activeOwnedSurfSelector = active_locally_owned_selector & my_surface_selector;
+    add_selected_side_facets(mesh, emptySelector, activeOwnedSurfSelector);
   }
 }
 
 template <class FACET>
-void MeshSurface<FACET>::add_facet2d(const stk::mesh::BulkData& mesh, stk::mesh::Entity side, unsigned p0, unsigned p1)
+void MeshSurface<FACET>::add_facet2d(const stk::mesh::BulkData& mesh, const stk::mesh::Entity side, const bool doFlip, unsigned p0, unsigned p1)
 {
   STK_ThrowAssert(2 == my_mesh_meta.spatial_dimension());
   stk::math::Vector3d pt[2];
   
-  if (my_sign == -1)
+  if (doFlip)
   {
     // permute to flip normal direction
     const unsigned tmp = p0;
@@ -942,12 +1023,12 @@ void MeshSurface<FACET>::add_facet2d(const stk::mesh::BulkData& mesh, stk::mesh:
 }
 
 template <class FACET>
-void MeshSurface<FACET>::add_facet3d(const stk::mesh::BulkData& mesh, stk::mesh::Entity side, unsigned p0, unsigned p1, unsigned p2)
+void MeshSurface<FACET>::add_facet3d(const stk::mesh::BulkData& mesh, const stk::mesh::Entity side, const bool doFlip, unsigned p0, unsigned p1, unsigned p2)
 {
   STK_ThrowAssert(3 == my_mesh_meta.spatial_dimension());
   stk::math::Vector3d pt[3];
   
-  if (my_sign == -1)
+  if (doFlip)
   {
     // permute to flip normal direction
     const unsigned tmp = p1;
@@ -965,12 +1046,12 @@ void MeshSurface<FACET>::add_facet3d(const stk::mesh::BulkData& mesh, stk::mesh:
 }
 
 template <class FACET>
-void MeshSurface<FACET>::add_quad3d(const stk::mesh::BulkData& mesh, stk::mesh::Entity side, unsigned p0, unsigned p1, unsigned p2, unsigned p3)
+void MeshSurface<FACET>::add_quad3d(const stk::mesh::BulkData& mesh, const stk::mesh::Entity side, const bool doFlip, unsigned p0, unsigned p1, unsigned p2, unsigned p3)
 {
   STK_ThrowAssert(3 == my_mesh_meta.spatial_dimension());
   stk::math::Vector3d pt[5];
 
-  if (my_sign == -1)
+  if (doFlip)
   {
     // permute to flip normal direction
     const unsigned tmp = p1;
@@ -1009,14 +1090,14 @@ void MeshSurface<FACET>::add_quad3d(const stk::mesh::BulkData& mesh, stk::mesh::
 }
 
 template <class FACET>
-void MeshSurface<FACET>::add_facet2d(stk::math::Vector3d & p0, stk::math::Vector3d & p1)
+void MeshSurface<FACET>::add_facet2d(const stk::math::Vector3d & p0, const stk::math::Vector3d & p1)
 {
   STK_ThrowAssert(2 == my_mesh_meta.spatial_dimension());
   Faceted_Surface<FACET>::emplace_back_2d( p0, p1 );
 }
 
 template <class FACET>
-void MeshSurface<FACET>::add_facet3d(stk::math::Vector3d & p0, stk::math::Vector3d & p1, stk::math::Vector3d & p2)
+void MeshSurface<FACET>::add_facet3d(const stk::math::Vector3d & p0, const stk::math::Vector3d & p1, const stk::math::Vector3d & p2)
 {
   STK_ThrowAssert(3 == my_mesh_meta.spatial_dimension());
   Faceted_Surface<FACET>::emplace_back_3d( p0, p1, p2 );

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
@@ -29,7 +16,7 @@
 #include "KokkosSparse_LUPrec.hpp"
 #include "KokkosSparse_SortCrs.hpp"
 
-#include "Test_vector_fixtures.hpp"
+#include "KokkosKernels_TestMatrixUtils.hpp"
 
 #include <gtest/gtest.h>
 
@@ -64,8 +51,13 @@ void run_test_par_ilut() {
                                                        typename device::memory_space, typename device::memory_space>;
 
   // Simple test fixture A
+  // clang-format off
   std::vector<std::vector<scalar_t>> A = {
-      {1., 6., 4., 7.}, {2., -5., 0., 8.}, {0.5, -3., 6., 0.}, {0.2, -0.5, -9., 0.}};
+      { 1.,   6.,  4., 7.},
+      { 2.,  -5.,  0., 8.},
+      {0.5,  -3.,  6., 0.},
+      {0.2, -0.5, -9., 0.}};
+  // clang-format on
 
   // Allocate device CRS views for A
   RowMapType row_map("row_map", 0);
@@ -157,17 +149,24 @@ void run_test_par_ilut() {
   // expected_U_candidates);
 
   // Use these fixtures to test full numeric
+  // clang-format off
   std::vector<std::vector<scalar_t>> expected_L_candidates = {
-      {1., 0., 0., 0.}, {2., 1., 0., 0.}, {0.50, 0.35, 1., 0.}, {0., 0., -1.32, 1.}};
+      {1.,    0.,     0., 0.},
+      {2.,    1.,     0., 0.},
+      {0.50,  0.35,   1., 0.},
+      {0.,    0.,  -1.32, 1.}};
+  // clang-format on
 
   check_matrix("L numeric", L_row_map, L_entries, L_values, expected_L_candidates);
 
+  // clang-format off
   std::vector<std::vector<scalar_t>> expected_U_candidates = {
-      {1., 6., 4., 7.},
-      {0., -17., -8., -6.},
-      {0., 0., 6.82, 0.},
-      {0., 0., 0., 0.}  // [3] = 0 for full alg, -2.62 for post-threshold only
+      {1.,  6.,    4.,  7.},
+      {0., -17.,  -8., -6.},
+      {0.,   0., 6.82,  0.},
+      {0.,   0.,   0.,  0.}  // [3] = 0 for full alg, -2.62 for post-threshold only
   };
+  // clang-format on
 
   check_matrix("U numeric", U_row_map, U_entries, U_values, expected_U_candidates);
 
@@ -186,7 +185,7 @@ void run_test_par_ilut_precond() {
   using sp_matrix_type = KokkosSparse::CrsMatrix<scalar_t, lno_t, device, void, size_type>;
   using KernelHandle =
       KokkosKernels::Experimental::KokkosKernelsHandle<size_type, lno_t, scalar_t, exe_space, mem_space, mem_space>;
-  using float_t = typename Kokkos::ArithTraits<scalar_t>::mag_type;
+  using float_t = typename KokkosKernels::ArithTraits<scalar_t>::mag_type;
 
   // Create a diagonally dominant sparse matrix to test:
   //  par_ilut settings max_iters, res_delta_stop, fill_in_limit, and

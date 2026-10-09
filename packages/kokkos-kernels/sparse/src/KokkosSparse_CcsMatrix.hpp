@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 /// \file KokkosSparse_CcsMatrix.hpp
 /// \brief Local sparse matrix interface
@@ -31,7 +18,6 @@
 #include "KokkosSparse_findRelOffset.hpp"
 #include "KokkosSparse_StaticCcsGraph.hpp"
 #include "KokkosKernels_default_types.hpp"
-#include "KokkosKernels_Macros.hpp"
 
 namespace KokkosSparse {
 /// \class CcsMatrix
@@ -137,6 +123,11 @@ class CcsMatrix {
 
   //! The number of columns in the sparse matrix.
   KOKKOS_INLINE_FUNCTION ordinal_type numRows() const { return numRows_; }
+
+  /// \brief Modify the number of rows in the sparse matrix.
+  ///
+  /// This invalidates any algorithm handles which previously used this matrix.
+  void setNumRows(ordinal_type r) { numRows_ = r; }
 
   //! The number of "point" (non-block) rows in the matrix. Since Ccs is not
   //! blocked, this is just the number of regular rows.

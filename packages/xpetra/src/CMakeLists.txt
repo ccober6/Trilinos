@@ -84,26 +84,8 @@ SET(HEADERS "")
 
 APPEND_GLOB(SOURCES
   Utils/Xpetra_Utils.cpp
-  Utils/Xpetra_EpetraUtils.cpp
-  Utils/Xpetra_IteratorOps.cpp
   Platform/Xpetra_DefaultPlatform.cpp
   )
-IF (${PACKAGE_NAME}_ENABLE_Epetra)
-  APPEND_GLOB(SOURCES
-    Map/Xpetra_EpetraMap.cpp
-    Map/Xpetra_EpetraMapFactory.cpp
-    Import/Xpetra_EpetraImport.cpp
-    Export/Xpetra_EpetraExport.cpp
-    MultiVector/Xpetra_EpetraMultiVector.cpp
-    MultiVector/Xpetra_EpetraIntMultiVector.cpp
-    MultiVector/Xpetra_EpetraMultiVectorFactory.cpp
-    CrsGraph/Xpetra_EpetraCrsGraph.cpp
-    CrsMatrix/Xpetra_EpetraCrsMatrix.cpp
-    Vector/Xpetra_EpetraVector.cpp
-    Vector/Xpetra_EpetraIntVector.cpp
-    Vector/Xpetra_EpetraVectorFactory.cpp
-    )
-ENDIF()
 
 # Create the .hpp file in BUILD/packages/xpetra/src
 TRILINOS_CREATE_CLIENT_TEMPLATE_HEADERS(${CMAKE_CURRENT_SOURCE_DIR}/BlockedCrsMatrix   NOSIERRABJAM)
@@ -123,19 +105,6 @@ TRILINOS_CREATE_CLIENT_TEMPLATE_HEADERS(${CMAKE_CURRENT_SOURCE_DIR}/Import      
 
 
 #TRIBITS_SET_AND_INC_DIRS(DIR ${CMAKE_CURRENT_SOURCE_DIR})
-
-# mfh 18 Dec 2014: The "real" Kokkos(Classic) is now the TpetraClassic
-# subpackage of Tpetra.  Thus, we have to test whether Tpetra is
-# enabled, not whether Kokkos is enabled.  Furthermore, it wasn't
-# previously correct to test if Kokkos was enabled, since Kokkos could
-# have been enabled without the KokkosClassic subpackage having been
-# enabled.
-#
-#IF (NOT ${PROJECT_NAME}_ENABLE_Kokkos)
-IF (NOT ${PROJECT_NAME}_ENABLE_Tpetra)
-  TRIBITS_SET_AND_INC_DIRS(DIR ${CMAKE_CURRENT_SOURCE_DIR}/FakeKokkos)
-  APPEND_GLOB(HEADERS FakeKokkos/*.hpp)
-ENDIF()
 
 TRIBITS_SET_AND_INC_DIRS(DIR ${CMAKE_CURRENT_SOURCE_DIR}/CrsGraph)
 TRIBITS_SET_AND_INC_DIRS(DIR ${CMAKE_CURRENT_SOURCE_DIR}/CrsMatrix)

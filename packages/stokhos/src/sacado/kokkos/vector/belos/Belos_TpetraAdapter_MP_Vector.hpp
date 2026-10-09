@@ -14,6 +14,9 @@
 #include "Belos_Tpetra_MP_Vector.hpp"
 #include "Stokhos_Sacado_Kokkos_MP_Vector.hpp"
 #include "KokkosBlas.hpp"
+#include "BelosDenseMatTraits.hpp"
+#include "BelosTeuchosDenseAdapter.hpp"
+#include "BelosKokkosDenseAdapter.hpp"
 
 #ifdef HAVE_BELOS_TSQR
 #  include <Tpetra_TsqrAdaptor_MP_Vector.hpp>
@@ -37,10 +40,11 @@ namespace Belos {
   /// correspond exactly to the four template parameters of
   /// Tpetra::MultiVector.  See the Tpetra::MultiVector documentation
   /// for more information.
-  template<class Storage, class LO, class GO, class Node>
+  template<class Storage, class LO, class GO, class Node, class DM>
   class MultiVecTraits<typename Storage::value_type,
                        Tpetra::MultiVector< Sacado::MP::Vector<Storage>,
-                                            LO, GO, Node > > {
+                                            LO, GO, Node >,
+                       DM> {
   public:
     typedef typename Storage::ordinal_type s_ordinal;
     typedef typename Storage::value_type BaseScalar;
@@ -49,6 +53,7 @@ namespace Belos {
   public:
     typedef typename Tpetra::MultiVector<Scalar,LO,GO,Node>::dot_type dot_type;
     typedef typename Tpetra::MultiVector<Scalar,LO,GO,Node>::mag_type mag_type;
+    typedef DenseMatTraits<dot_type,DM> DMT;
 
     /// \brief Create a new MultiVector with \c numVecs columns.
     ///
@@ -327,7 +332,7 @@ namespace Belos {
     static void
     MvTimesMatAddMv (const dot_type& alpha,
                      const Tpetra::MultiVector<Scalar,LO,GO,Node>& A,
-                     const Teuchos::SerialDenseMatrix<int,dot_type>& B,
+                     const DM& B,
                      const dot_type& beta,
                      Tpetra::MultiVector<Scalar,LO,GO,Node>& C)
     {
@@ -335,11 +340,11 @@ namespace Belos {
       using Teuchos::rcp;
 
       // Check if numRowsB == numColsB == 1, in which case we can call update()
-      const int numRowsB = B.numRows ();
-      const int numColsB = B.numCols ();
-      const int strideB  = B.stride ();
+      const int numRowsB = DMT::GetNumRows (B);
+      const int numColsB = DMT::GetNumCols (B);
+      const int strideB  = DMT::GetStride (B);
       if (numRowsB == 1 && numColsB == 1) {
-        C.update (alpha*B(0,0), A, beta);
+        C.update (alpha*DMT::ValueConst(B,0,0), A, beta);
         return;
       }
 
@@ -356,12 +361,19 @@ namespace Belos {
       typedef Tpetra::MultiVector<dot_type,LO,GO,Node> FMV;
       typedef typename FMV::dual_view_type::t_dev flat_view_type;
       typedef typename flat_view_type::execution_space execution_space;
-      typename flat_view_type::const_type flat_A_view = Atmp->getLocalViewDevice(Tpetra::Access::ReadOnly);
-      flat_view_type flat_C_view = Ctmp->getLocalViewDevice(Tpetra::Access::OverwriteAll);
+      auto A_View= Atmp->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto C_View = Ctmp->getLocalViewDevice(Tpetra::Access::OverwriteAll);
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
+      typename flat_view_type::const_type flat_A_view = A_View;
+      flat_view_type flat_C_view = C_View;
+#else
+      auto flat_A_view = Stokhos::reinterpret_as_unmanaged_scalar_columnwise_flat_view(A_View);      
+      auto flat_C_view = Stokhos::reinterpret_as_unmanaged_scalar_columnwise_flat_view(C_View);
+#endif
 
       // Create a view for B on the host
-      typedef Kokkos::View<dot_type**, Kokkos::LayoutLeft, Kokkos::HostSpace> b_host_view_type;
-      b_host_view_type B_view_host_input( B.values(), strideB, numColsB);
+      typedef Kokkos::View<const dot_type**, Kokkos::LayoutLeft, Kokkos::HostSpace> b_host_view_type;
+      b_host_view_type B_view_host_input( DMT::GetConstRawHostPtr(B), strideB, numColsB);
       auto B_view_host = Kokkos::subview(B_view_host_input,
                                          Kokkos::pair<int,int>(0,numRowsB),
                                          Kokkos::pair<int,int>(0,numColsB));
@@ -440,7 +452,7 @@ namespace Belos {
     MvTransMv (dot_type alpha,
                const Tpetra::MultiVector<Scalar,LO,GO,Node>& A,
                const Tpetra::MultiVector<Scalar,LO,GO,Node>& B,
-               Teuchos::SerialDenseMatrix<int,dot_type>& C)
+               DM& C)
     {
       using Teuchos::Comm;
       using Teuchos::RCP;
@@ -449,18 +461,18 @@ namespace Belos {
       using Teuchos::reduceAll;
 
       // Check if numRowsC == numColsC == 1, in which case we can call dot()
-      const int numRowsC = C.numRows ();
-      const int numColsC = C.numCols ();
-      const int strideC  = C.stride ();
+      const int numRowsC = DMT::GetNumRows (C);
+      const int numColsC = DMT::GetNumCols (C);
+      const int strideC  = DMT::GetStride (C);
       if (numRowsC == 1 && numColsC == 1) {
         if (alpha == Teuchos::ScalarTraits<Scalar>::zero ()) {
           // Short-circuit, as required by BLAS semantics.
-          C(0,0) = alpha;
+          DMT::Value(C,0,0) = alpha;
           return;
         }
-        A.dot (B, Teuchos::ArrayView<dot_type> (C.values (), 1));
+        A.dot (B, Teuchos::ArrayView<dot_type> (DMT::GetRawHostPtr (C), 1));
         if (alpha != Teuchos::ScalarTraits<Scalar>::one ()) {
-          C(0,0) *= alpha;
+          DMT::Value(C,0,0) *= alpha;
         }
         return;
       }
@@ -477,12 +489,19 @@ namespace Belos {
       typedef Tpetra::MultiVector<dot_type,LO,GO,Node> FMV;
       typedef typename FMV::dual_view_type::t_dev flat_view_type;
       typedef typename flat_view_type::execution_space execution_space;
-      typename flat_view_type::const_type flat_A_view = Atmp->getLocalViewDevice(Tpetra::Access::ReadOnly);
-      typename flat_view_type::const_type flat_B_view = Btmp->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto A_view = Atmp->getLocalViewDevice(Tpetra::Access::ReadOnly);
+      auto B_view = Btmp->getLocalViewDevice(Tpetra::Access::ReadOnly);
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
+      typename flat_view_type::const_type flat_A_view = A_view;
+      typename flat_view_type::const_type flat_B_view = B_view;
+#else
+      auto flat_A_view = Stokhos::reinterpret_as_unmanaged_scalar_columnwise_flat_view(A_view);
+      auto flat_B_view = Stokhos::reinterpret_as_unmanaged_scalar_columnwise_flat_view(B_view);
+#endif
 
       // Create a view for C on the host
       typedef Kokkos::View<dot_type**, Kokkos::LayoutLeft, Kokkos::HostSpace> c_host_view_type;
-      c_host_view_type C_view_host_input( C.values(), strideC, numColsC);
+      c_host_view_type C_view_host_input( DMT::GetRawHostPtr(C), strideC, numColsC);
       auto C_view_host = Kokkos::subview(C_view_host_input, 
                                          Kokkos::pair<int,int>(0,numRowsC), 
                                          Kokkos::pair<int,int>(0,numColsC));
@@ -500,7 +519,7 @@ namespace Belos {
         KokkosBlas::gemm (
           &ctransA, &ctransB,
           alpha, flat_A_view, flat_B_view,
-          Kokkos::ArithTraits<dot_type>::zero(),
+          KokkosKernels::ArithTraits<dot_type>::zero(),
           C_view_dev);
       }
 

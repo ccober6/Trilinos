@@ -250,6 +250,16 @@ void Faceted_Surface<FACET>::prepare_to_compute(const double /*time*/, const Bou
 {
   build_local_facets(point_bbox);
 
+  const stk::ParallelMachine comm = stk::EnvData::parallel_comm();
+  if (stk::is_true_on_all_procs(comm, myLocalFacets.empty()))
+  {
+    my_bounding_box.clear();
+    myNonLocalFacets.clear();
+    myAllFacetPtrs.clear();
+    my_facet_tree = std::make_unique<SearchTree<const FACET*>>( myAllFacetPtrs, FACET::get_centroid, FACET::insert_into_bounding_box );
+    return;
+  }
+
   if (my_transformation != nullptr)
   {
     for ( auto&& facet : myLocalFacets )
@@ -345,6 +355,19 @@ stk::math::Vector3d Faceted_Surface<FACET>::closest_point(const stk::math::Vecto
   STK_ThrowRequire( !nearestFacets.empty() );
 
   return compute_closest_point(x, nearestFacets);
+}
+
+template<class FACET>
+stk::math::Vector3d Faceted_Surface<FACET>::closest_point_normal(const stk::math::Vector3d &x) const
+{
+  if (my_facet_tree->empty())
+    return stk::math::Vector3d::ZERO;
+
+  std::vector<const FACET*> nearestFacets;
+  my_facet_tree->find_closest_entities( x, nearestFacets, 0. );
+  STK_ThrowRequire( !nearestFacets.empty() );
+
+  return compute_closest_point_normal(x, nearestFacets);
 }
 
 template<class FACET>

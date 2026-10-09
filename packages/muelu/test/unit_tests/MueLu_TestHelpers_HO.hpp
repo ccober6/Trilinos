@@ -12,14 +12,10 @@
 #include "MueLu_ConfigDefs.hpp"
 
 // Intrepid
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
 #include "Kokkos_DynRankView.hpp"
 
 #include "MueLu_TestHelpers.hpp"
-
-#ifdef HAVE_MUELU_EPETRA
-#include "Epetra_FECrsMatrix.h"
-#endif
 
 #include "MueLu_Utilities_def.hpp"
 
@@ -180,9 +176,7 @@ Build1DPseudoPoissonHigherOrder(GlobalOrdinal nx, int degree,
 
   // Since we're inserting off-proc, we really need to use the Epetra_FECrsMatrix here if we're in Epetra mode
   RCP<Matrix> B;
-  if (lib == Xpetra::UseEpetra) {
-    AllocateEpetraFECrsMatrix(pn_rowmap, pn_colmap, B);
-  } else {
+  {
     // Tpetra is easy
     B = rcp(new CrsMatrixWrap(pn_rowmap, pn_colmap, global_num_elements));
   }
@@ -252,6 +246,6 @@ Build1DPseudoPoissonHigherOrder(GlobalOrdinal nx, int degree,
 
 }  // namespace MueLuTests
 
-#endif  // ifdef HAVE_MUELU_INTREPID2
+#endif  // if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
 
 #endif  // ifndef MUELU_TEST_HELPERS_HO_H

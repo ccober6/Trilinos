@@ -17,6 +17,7 @@
 #include "Tpetra_BlockView.hpp"
 #include "Ifpack2_Utilities.hpp"
 #include "Ifpack2_Details_getCrsMatrix.hpp"
+#include "Ifpack2_Details_Behavior.hpp"
 #include "MatrixMarket_Tpetra.hpp"
 #include "Tpetra_Details_residual.hpp"
 #include <cstdlib>
@@ -128,7 +129,7 @@ struct RealTraits<Scalar, true> {
   using val_type = Scalar;
   using mag_type = typename Teuchos::ScalarTraits<Scalar>::magnitudeType;
   static KOKKOS_INLINE_FUNCTION mag_type real(const val_type& z) {
-    return Kokkos::ArithTraits<val_type>::real(z);
+    return KokkosKernels::ArithTraits<val_type>::real(z);
   }
 };
 
@@ -933,21 +934,21 @@ void Relaxation<MatrixType>::computeBlockCrs() {
 
     // In a debug build, do an extra test to make sure that all the
     // factorizations were computed correctly.
-#ifdef HAVE_IFPACK2_DEBUG
-    const int numResults = 2;
-    // Use "max = -min" trick to get min and max in a single all-reduce.
-    int lclResults[2], gblResults[2];
-    lclResults[0] = info;
-    lclResults[1] = -info;
-    gblResults[0] = 0;
-    gblResults[1] = 0;
-    reduceAll<int, int>(*(A_->getGraph()->getComm()), REDUCE_MIN,
-                        numResults, lclResults, gblResults);
-    TEUCHOS_TEST_FOR_EXCEPTION(gblResults[0] != 0 || gblResults[1] != 0, std::runtime_error,
-                               "Ifpack2::Relaxation::compute: When processing the input "
-                               "Tpetra::BlockCrsMatrix, one or more diagonal block LU factorizations "
-                               "failed on one or more (MPI) processes.");
-#endif  // HAVE_IFPACK2_DEBUG
+    if (Ifpack2::Details::Behavior::debug()) {
+      const int numResults = 2;
+      // Use "max = -min" trick to get min and max in a single all-reduce.
+      int lclResults[2], gblResults[2];
+      lclResults[0] = info;
+      lclResults[1] = -info;
+      gblResults[0] = 0;
+      gblResults[1] = 0;
+      reduceAll<int, int>(*(A_->getGraph()->getComm()), REDUCE_MIN,
+                          numResults, lclResults, gblResults);
+      TEUCHOS_TEST_FOR_EXCEPTION(gblResults[0] != 0 || gblResults[1] != 0, std::runtime_error,
+                                 "Ifpack2::Relaxation::compute: When processing the input "
+                                 "Tpetra::BlockCrsMatrix, one or more diagonal block LU factorizations "
+                                 "failed on one or more (MPI) processes.");
+    }
     serialGaussSeidel_ = rcp(new SerialGaussSeidel(blockCrsA, blockDiag_, localSmoothingIndices_, DampingFactor_));
   }  // end TimeMonitor scope
 
@@ -973,7 +974,7 @@ void Relaxation<MatrixType>::compute() {
   using vector_type = Tpetra::Vector<scalar_type, local_ordinal_type,
                                      global_ordinal_type, node_type>;
   using IST         = typename vector_type::impl_scalar_type;
-  using KAT         = Kokkos::ArithTraits<IST>;
+  using KAT         = KokkosKernels::ArithTraits<IST>;
 
   const char methodName[] = "Ifpack2::Relaxation::compute";
   const scalar_type zero  = STS::zero();
@@ -1176,11 +1177,7 @@ void Relaxation<MatrixType>::compute() {
                               fixTinyDiagEntries_, minDiagValMag);
       savedDiagOffsets_ = true;
 
-      // mfh 27 May 2019: Later on, we should introduce an IFPACK2_DEBUG
-      // environment variable to control this behavior at run time.
-#ifdef HAVE_IFPACK2_DEBUG
-      debugAgainstSlowPath = true;
-#endif
+      debugAgainstSlowPath = Ifpack2::Details::Behavior::debug();
     }
 
     if (crsMat.is_null() || !crsMat->isFillComplete() || debugAgainstSlowPath) {
@@ -1371,10 +1368,13 @@ void Relaxation<MatrixType>::
 
   // Floating-point operations due to the damping factor, per matrix
   // row, per direction, per columm of output.
-  const double numGlobalNonzeros = as<double>(A_->getGlobalNumEntries());
-  const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
-  ApplyFlops_ += as<double>(NumSweeps_ - startSweep) * numVectors *
-                 (2.0 * numGlobalNonzeros + dampingFlops);
+  auto crsMat = Details::getCrsMatrix(A_);
+  if (!crsMat.is_null() && crsMat->haveGlobalConstants()) {
+    const double numGlobalNonzeros = as<double>(A_->getGlobalNumEntries());
+    const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
+    ApplyFlops_ += as<double>(NumSweeps_ - startSweep) * numVectors *
+                   (2.0 * numGlobalNonzeros + dampingFlops);
+  }
 }
 
 template <class MatrixType>
@@ -1438,10 +1438,13 @@ void Relaxation<MatrixType>::
 
   // Floating-point operations due to the damping factor, per matrix
   // row, per direction, per columm of output.
-  const double numGlobalNonzeros = as<double>(A_->getGlobalNumEntries());
-  const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
-  ApplyFlops_ += as<double>(NumSweeps_ - startSweep) * numVectors *
-                 (2.0 * numGlobalRows + 2.0 * numGlobalNonzeros + dampingFlops);
+  auto crsMat = Details::getCrsMatrix(A_);
+  if (!crsMat.is_null() && crsMat->haveGlobalConstants()) {
+    const double numGlobalNonzeros = as<double>(A_->getGlobalNumEntries());
+    const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
+    ApplyFlops_ += as<double>(NumSweeps_ - startSweep) * numVectors *
+                   (2.0 * numGlobalRows + 2.0 * numGlobalNonzeros + dampingFlops);
+  }
 }
 
 template <class MatrixType>
@@ -1589,12 +1592,15 @@ void Relaxation<MatrixType>::
   }
 
   // See flop count discussion in implementation of ApplyInverseGS_CrsMatrix().
-  const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
-  const double numVectors        = as<double>(X.getNumVectors());
-  const double numGlobalRows     = as<double>(A_->getGlobalNumRows());
-  const double numGlobalNonzeros = as<double>(A_->getGlobalNumEntries());
-  ApplyFlops_ += 2.0 * NumSweeps_ * numVectors *
-                 (2.0 * numGlobalRows + 2.0 * numGlobalNonzeros + dampingFlops);
+  auto crsMat = Details::getCrsMatrix(A_);
+  if (!crsMat.is_null() && crsMat->haveGlobalConstants()) {
+    const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
+    const double numVectors        = as<double>(X.getNumVectors());
+    const double numGlobalRows     = as<double>(A_->getGlobalNumRows());
+    const double numGlobalNonzeros = as<double>(A_->getGlobalNumEntries());
+    ApplyFlops_ += 2.0 * NumSweeps_ * numVectors *
+                   (2.0 * numGlobalRows + 2.0 * numGlobalNonzeros + dampingFlops);
+  }
 }
 
 template <class MatrixType>
@@ -1632,8 +1638,7 @@ void Relaxation<MatrixType>::
   RCP<const map_type> rowMap    = A.getGraph()->getRowMap();
   RCP<const map_type> colMap    = A.getGraph()->getColMap();
 
-#ifdef HAVE_IFPACK2_DEBUG
-  {
+  if (Ifpack2::Details::Behavior::debug()) {
     // The relation 'isSameAs' is transitive.  It's also a
     // collective, so we don't have to do a "shared" test for
     // exception (i.e., a global reduction on the test value).
@@ -1658,7 +1663,6 @@ void Relaxation<MatrixType>::
         "Tpetra::CrsMatrix::gaussSeidelCopy requires that the domain Map and "
         "the range Map of the matrix be the same.");
   }
-#endif
 
   // Fetch a (possibly cached) temporary column Map multivector
   // X_colMap, and a domain Map view X_domainMap of it.  Both have
@@ -1737,12 +1741,15 @@ void Relaxation<MatrixType>::
 
   // Floating-point operations due to the damping factor, per matrix
   // row, per direction, per columm of output.
-  const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
-  const double numVectors        = X.getNumVectors();
-  const double numGlobalRows     = A_->getGlobalNumRows();
-  const double numGlobalNonzeros = A_->getGlobalNumEntries();
-  ApplyFlops_ += NumSweeps_ * numVectors *
-                 (2.0 * numGlobalRows + 2.0 * numGlobalNonzeros + dampingFlops);
+  auto crsMat = Details::getCrsMatrix(A_);
+  if (!crsMat.is_null() && crsMat->haveGlobalConstants()) {
+    const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
+    const double numVectors        = X.getNumVectors();
+    const double numGlobalRows     = A_->getGlobalNumRows();
+    const double numGlobalNonzeros = A_->getGlobalNumEntries();
+    ApplyFlops_ += NumSweeps_ * numVectors *
+                   (2.0 * numGlobalRows + 2.0 * numGlobalNonzeros + dampingFlops);
+  }
 }
 
 template <class MatrixType>
@@ -1870,13 +1877,12 @@ void Relaxation<MatrixType>::
       "domain, and range Maps be the same.  This cannot be the case, because "
       "the matrix has a nontrivial Export object.");
 
-  RCP<const map_type> domainMap = crsMat->getDomainMap();
-  RCP<const map_type> rangeMap  = crsMat->getRangeMap();
-  RCP<const map_type> rowMap    = crsMat->getGraph()->getRowMap();
-  RCP<const map_type> colMap    = crsMat->getGraph()->getColMap();
+  RCP<const map_type> domainMap                 = crsMat->getDomainMap();
+  RCP<const map_type> colMap                    = crsMat->getGraph()->getColMap();
+  [[maybe_unused]] RCP<const map_type> rangeMap = crsMat->getRangeMap();
+  [[maybe_unused]] RCP<const map_type> rowMap   = crsMat->getGraph()->getRowMap();
 
-#ifdef HAVE_IFPACK2_DEBUG
-  {
+  if (Ifpack2::Details::Behavior::debug()) {
     // The relation 'isSameAs' is transitive.  It's also a
     // collective, so we don't have to do a "shared" test for
     // exception (i.e., a global reduction on the test value).
@@ -1897,11 +1903,6 @@ void Relaxation<MatrixType>::
         "Ifpack2::Relaxation::MTGaussSeidel requires that the domain Map and "
         "the range Map of the matrix be the same.");
   }
-#else
-  // Forestall any compiler warnings for unused variables.
-  (void)rangeMap;
-  (void)rowMap;
-#endif  // HAVE_IFPACK2_DEBUG
 
   // Fetch a (possibly cached) temporary column Map multivector
   // X_colMap, and a domain Map view X_domainMap of it.  Both have
@@ -2070,15 +2071,17 @@ void Relaxation<MatrixType>::
     }
   }
 
-  const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
-  const double numVectors        = as<double>(X.getNumVectors());
-  const double numGlobalRows     = as<double>(A_->getGlobalNumRows());
-  const double numGlobalNonzeros = as<double>(A_->getGlobalNumEntries());
-  double ApplyFlops              = NumSweeps_ * numVectors *
-                      (2.0 * numGlobalRows + 2.0 * numGlobalNonzeros + dampingFlops);
-  if (direction == Tpetra::Symmetric)
-    ApplyFlops *= 2.0;
-  ApplyFlops_ += ApplyFlops;
+  if (crsMat->haveGlobalConstants()) {
+    const double dampingFlops      = (DampingFactor_ == STS::one()) ? 0.0 : 1.0;
+    const double numVectors        = as<double>(X.getNumVectors());
+    const double numGlobalRows     = as<double>(A_->getGlobalNumRows());
+    const double numGlobalNonzeros = as<double>(A_->getGlobalNumEntries());
+    double ApplyFlops              = NumSweeps_ * numVectors *
+                        (2.0 * numGlobalRows + 2.0 * numGlobalNonzeros + dampingFlops);
+    if (direction == Tpetra::Symmetric)
+      ApplyFlops *= 2.0;
+    ApplyFlops_ += ApplyFlops;
+  }
 }
 
 template <class MatrixType>
@@ -2173,8 +2176,11 @@ std::string Relaxation<MatrixType>::description() const {
     os << "Matrix: null";
   } else {
     os << "Global matrix dimensions: ["
-       << A_->getGlobalNumRows() << ", " << A_->getGlobalNumCols() << "]"
-       << ", Global nnz: " << A_->getGlobalNumEntries();
+       << A_->getGlobalNumRows() << ", " << A_->getGlobalNumCols() << "]";
+    auto crsMat = Details::getCrsMatrix(A_);
+    if (!crsMat.is_null() && crsMat->haveGlobalConstants()) {
+      os << ", Global nnz: " << A_->getGlobalNumEntries();
+    }
   }
 
   os << "}";

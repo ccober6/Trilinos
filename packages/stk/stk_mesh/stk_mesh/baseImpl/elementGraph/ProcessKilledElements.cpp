@@ -165,10 +165,21 @@ private:
               stk::mesh::Entity side = stk::mesh::get_side_entity_for_elem_side_pair(m_bulkData, element, local_side);
 
               if(m_bulkData.is_valid(side)) {
-                // Update shared info for existing side that can't be removed
-                int other_proc = parallel_edge_info.get_proc_rank_of_neighbor();
-                int owning_proc = std::min(other_proc, m_bulkData.parallel_rank());
-                shared_modified.push_back(stk::mesh::sharing_info(side, other_proc, owning_proc));
+                // Update shared info for existing side that can't be removed.
+                // Record the complete co-sharer set (the side may be shared by
+                // more than two procs) with a globally consistent owner.
+                std::vector<int> sharingProcs;
+                impl::get_remote_procs_sharing_side(m_bulkData, element, local_side, sharingProcs);
+                if(sharingProcs.empty()) {
+                  sharingProcs.push_back(parallel_edge_info.get_proc_rank_of_neighbor());
+                }
+                int owning_proc = m_bulkData.parallel_rank();
+                for(int sp : sharingProcs) {
+                  owning_proc = std::min(owning_proc, sp);
+                }
+                for(int sp : sharingProcs) {
+                  shared_modified.push_back(stk::mesh::sharing_info(side, sp, owning_proc));
+                }
               } else {
                 // Create the side since it is meant to exist
                 impl::add_side_into_exposed_boundary(m_bulkData,
@@ -258,17 +269,19 @@ bool process_killed_elements(stk::mesh::BulkData& bulkData,
                 remote_death_boundary.set_topology_is_modified();
                 if(elementGraph.is_connected_elem_locally_owned(this_element, j))
                 {
-                    impl::ElementViaSidePair other_element_via_side = elementGraph.get_connected_element_and_via_side(this_element, j);
-                    stk::mesh::Entity other_element = other_element_via_side.element;
-                    if(impl::does_element_have_side(bulkData, other_element_via_side.element))
+                    impl::ConnectedElementInfo other_element_info = elementGraph.get_connected_element_info(this_element, j);
+                    stk::mesh::Entity other_element = other_element_info.element;
+                    if(impl::does_element_have_side(bulkData, other_element))
                     {
-                        int side_id = other_element_via_side.side;
-                        STK_ThrowRequireWithSierraHelpMsg(side_id != -1);
+                        int this_side_id = other_element_info.thisSide;
+                        int other_side_id = other_element_info.otherSide;
+                        STK_ThrowRequireWithSierraHelpMsg(this_side_id != -1);
+                        STK_ThrowRequireWithSierraHelpMsg(other_side_id != -1);
 
                         bool is_other_element_alive = bulkData.bucket(other_element).member(active);
                         if(is_other_element_alive)
                         {
-                            stk::mesh::Entity side = stk::mesh::get_side_entity_for_elem_side_pair(bulkData, this_element, side_id);
+                            stk::mesh::Entity side = stk::mesh::get_side_entity_for_elem_side_pair(bulkData, this_element, this_side_id);
 
                             if(bulkData.is_valid(side))
                             {
@@ -278,9 +291,9 @@ bool process_killed_elements(stk::mesh::BulkData& bulkData,
                                     bulkData.change_entity_parts(side, parts);
                                 }
                             }
-                            else if(impl::can_add_side_into_exposed_boundary(bulkData, this_element, side_id, remoteActiveSelector, active))
+                            else if(impl::can_add_side_into_exposed_boundary(bulkData, this_element, this_side_id, remoteActiveSelector, active))
                             {
-                                stk::mesh::PartVector parts = impl::get_parts_for_creating_side(bulkData, parts_for_creating_side, other_element, side_id);
+                                stk::mesh::PartVector parts = impl::get_parts_for_creating_side(bulkData, parts_for_creating_side, other_element, other_side_id);
 
                                 // switch elements
                                 stk::mesh::Entity element_with_perm_0 = other_element;
@@ -297,13 +310,13 @@ bool process_killed_elements(stk::mesh::BulkData& bulkData,
                         }
                         else
                         {
-                            if(!impl::remove_side_from_death_boundary(bulkData, this_element, active, deletedEntities, side_id, remoteActiveSelector)) {
-                                stk::mesh::Entity side = stk::mesh::get_side_entity_for_elem_side_pair(bulkData, this_element, side_id);
+                            if(!impl::remove_side_from_death_boundary(bulkData, this_element, active, deletedEntities, this_side_id, remoteActiveSelector)) {
+                                stk::mesh::Entity side = stk::mesh::get_side_entity_for_elem_side_pair(bulkData, this_element, this_side_id);
                                 bool sideExists = bulkData.is_valid(side);
 
-                                if(!sideExists && impl::can_add_side_into_exposed_boundary(bulkData, this_element, side_id, remoteActiveSelector, active)) {
+                                if(!sideExists && impl::can_add_side_into_exposed_boundary(bulkData, this_element, this_side_id, remoteActiveSelector, active)) {
                                   // Create the side since it is meant to exist
-                                  stk::mesh::PartVector parts = impl::get_parts_for_creating_side(bulkData, parts_for_creating_side, other_element, side_id);
+                                  stk::mesh::PartVector parts = impl::get_parts_for_creating_side(bulkData, parts_for_creating_side, other_element, other_side_id);
 
                                   // switch elements
                                   stk::mesh::Entity element_with_perm_0 = other_element;
@@ -342,10 +355,23 @@ bool process_killed_elements(stk::mesh::BulkData& bulkData,
                         if(!impl::remove_side_from_death_boundary(bulkData, this_element, active, deletedEntities, side_id, remoteActiveSelector)) {
                           stk::mesh::Entity side = stk::mesh::get_side_entity_for_elem_side_pair(bulkData, this_element, side_id);
                           if(bulkData.is_valid(side)) {
-                            // Update shared info for existing side that can't be removed
-                            int other_proc = parallel_edge_info.get_proc_rank_of_neighbor();
-                            int owning_proc = std::min(other_proc, bulkData.parallel_rank());
-                            shared_modified.push_back(stk::mesh::sharing_info(side, other_proc, owning_proc));
+                            // Update shared info for existing side that can't be removed.
+                            // The side may be shared by more than two procs (e.g. an
+                            // exposed edge where several shell blocks meet), so record
+                            // the complete co-sharer set rather than the single pairwise
+                            // neighbor, and choose the owner as the global minimum proc.
+                            std::vector<int> sharingProcs;
+                            impl::get_remote_procs_sharing_side(bulkData, this_element, side_id, sharingProcs);
+                            if(sharingProcs.empty()) {
+                              sharingProcs.push_back(parallel_edge_info.get_proc_rank_of_neighbor());
+                            }
+                            int owning_proc = bulkData.parallel_rank();
+                            for(int sp : sharingProcs) {
+                              owning_proc = std::min(owning_proc, sp);
+                            }
+                            for(int sp : sharingProcs) {
+                              shared_modified.push_back(stk::mesh::sharing_info(side, sp, owning_proc));
+                            }
                           } else {
                             // Create the side since it is meant to exist
                             impl::add_side_into_exposed_boundary(bulkData, parallel_edge_info, this_element, remote_id_side_pair.side, parts_for_creating_side,

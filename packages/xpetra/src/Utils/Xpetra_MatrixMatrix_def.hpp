@@ -21,17 +21,6 @@
 #include "Xpetra_StridedMapFactory.hpp"
 #include "Xpetra_StridedMap.hpp"
 
-#ifdef HAVE_XPETRA_EPETRA
-#include <Xpetra_EpetraCrsMatrix_fwd.hpp>
-#endif
-
-#ifdef HAVE_XPETRA_EPETRAEXT
-#include <EpetraExt_MatrixMatrix.h>
-#include <EpetraExt_RowMatrixOut.h>
-#include <Epetra_RowMatrixTransposer.h>
-#endif  // HAVE_XPETRA_EPETRAEXT
-
-#ifdef HAVE_XPETRA_TPETRA
 #include <TpetraExt_MatrixMatrix.hpp>
 #include <Tpetra_RowMatrixTransposer.hpp>
 #include <MatrixMarket_Tpetra.hpp>
@@ -40,7 +29,6 @@
 #include <Tpetra_BlockCrsMatrix_Helpers.hpp>
 #include <Xpetra_TpetraMultiVector.hpp>
 #include <Xpetra_TpetraVector.hpp>
-#endif  // HAVE_XPETRA_TPETRA
 
 #include "Xpetra_MatrixMatrix_decl.hpp"
 
@@ -64,15 +52,7 @@ void MatrixMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Multiply(const Mat
 
   bool haveMultiplyDoFillComplete = call_FillComplete_on_result && doOptimizeStorage;
 
-  if (C.getRowMap()->lib() == Xpetra::UseEpetra) {
-#if defined(HAVE_XPETRA_EPETRA) && defined(HAVE_XPETRA_EPETRAEXT)
-    throw(Xpetra::Exceptions::RuntimeError("Xpetra::MatrixMatrix::Multiply only available for GO=int or GO=long long with EpetraNode (Serial or OpenMP depending on configuration)"));
-#else
-    throw(Xpetra::Exceptions::RuntimeError("Xpetra::MatrixMatrix::Multiply requires EpetraExt to be compiled."));
-
-#endif
-  } else if (C.getRowMap()->lib() == Xpetra::UseTpetra) {
-#ifdef HAVE_XPETRA_TPETRA
+  if (C.getRowMap()->lib() == Xpetra::UseTpetra) {
     using helpers = Xpetra::Helpers<SC, LO, GO, NO>;
     if (helpers::isTpetraCrs(A) && helpers::isTpetraCrs(B) && helpers::isTpetraCrs(C)) {
       // All matrices are Crs
@@ -119,9 +99,6 @@ void MatrixMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Multiply(const Mat
       // Mix and match
       TEUCHOS_TEST_FOR_EXCEPTION(1, Exceptions::RuntimeError, "Mix-and-match Crs/BlockCrs Multiply not currently supported");
     }
-#else
-    throw(Xpetra::Exceptions::RuntimeError("Xpetra must be compiled with Tpetra."));
-#endif
   }
 
   if (call_FillComplete_on_result && !haveMultiplyDoFillComplete) {
@@ -135,7 +112,8 @@ void MatrixMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Multiply(const Mat
   // transfer striding information
   RCP<Matrix> rcpA = Teuchos::rcp_const_cast<Matrix>(Teuchos::rcpFromRef(A));
   RCP<Matrix> rcpB = Teuchos::rcp_const_cast<Matrix>(Teuchos::rcpFromRef(B));
-  C.CreateView("stridedMaps", rcpA, transposeA, rcpB, transposeB);  // TODO use references instead of RCPs
+  if (A.IsView("stridedMaps") || B.IsView("stridedMaps"))
+    C.CreateView("stridedMaps", rcpA, transposeA, rcpB, transposeB);  // TODO use references instead of RCPs
 }  // end Multiply
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
@@ -145,6 +123,12 @@ RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> MatrixMatrix<Scal
                                                                                                                                  bool doOptimizeStorage,
                                                                                                                                  const std::string& label,
                                                                                                                                  const RCP<ParameterList>& params) {
+  auto A_blk = rcp_dynamic_cast<const BlockedCrsMatrix>(rcpFromRef(A));
+  auto B_blk = rcp_dynamic_cast<const BlockedCrsMatrix>(rcpFromRef(B));
+  if (A_blk != Teuchos::null && B_blk != Teuchos::null) {
+    return TwoMatrixMultiplyBlock(*A_blk, transposeA, *B_blk, transposeB, fos);
+  }
+
   TEUCHOS_TEST_FOR_EXCEPTION(!A.isFillComplete(), Exceptions::RuntimeError, "A is not fill-completed");
   TEUCHOS_TEST_FOR_EXCEPTION(!B.isFillComplete(), Exceptions::RuntimeError, "B is not fill-completed");
 
@@ -193,31 +177,24 @@ RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> MatrixMatrix<Scal
   return Multiply(A, transposeA, B, transposeB, Teuchos::null, fos, callFillCompleteOnResult, doOptimizeStorage, label, params);
 }
 
-#ifdef HAVE_XPETRA_EPETRAEXT
-template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-RCP<Epetra_CrsMatrix> MatrixMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::MLTwoMatrixMultiply(const Epetra_CrsMatrix& epA,
-                                                                                                   const Epetra_CrsMatrix& epB,
-                                                                                                   Teuchos::FancyOStream& fos) {
-  throw(Xpetra::Exceptions::RuntimeError("MLTwoMatrixMultiply only available for GO=int or GO=long long with EpetraNode (Serial or OpenMP depending on configuration)"));
-  TEUCHOS_UNREACHABLE_RETURN(Teuchos::null);
-}
-#endif  // ifdef HAVE_XPETRA_EPETRAEXT
-
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 RCP<Xpetra::BlockedCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> MatrixMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::TwoMatrixMultiplyBlock(const BlockedCrsMatrix& A, bool transposeA,
                                                                                                                                                          const BlockedCrsMatrix& B, bool transposeB,
                                                                                                                                                          Teuchos::FancyOStream& fos,
                                                                                                                                                          bool doFillComplete,
                                                                                                                                                          bool doOptimizeStorage) {
-  TEUCHOS_TEST_FOR_EXCEPTION(transposeA || transposeB, Exceptions::RuntimeError,
-                             "TwoMatrixMultiply for BlockedCrsMatrix not implemented for transposeA==true or transposeB==true");
-
   // Preconditions
   TEUCHOS_TEST_FOR_EXCEPTION(!A.isFillComplete(), Exceptions::RuntimeError, "A is not fill-completed");
   TEUCHOS_TEST_FOR_EXCEPTION(!B.isFillComplete(), Exceptions::RuntimeError, "B is not fill-completed");
+  const size_t A_inner = transposeA ? A.Rows() : A.Cols();
+  const size_t B_inner = transposeB ? B.Cols() : B.Rows();
+  TEUCHOS_TEST_FOR_EXCEPTION(A_inner != B_inner, Exceptions::RuntimeError,
+                             "TwoMatrixMultiplyBlock: Block dimensions are not compatible for multiplication. "
+                             "A has "
+                                 << A_inner << " block columns and B has " << B_inner << " block rows.");
 
-  RCP<const MapExtractor> rgmapextractor = A.getRangeMapExtractor();
-  RCP<const MapExtractor> domapextractor = B.getDomainMapExtractor();
+  RCP<const MapExtractor> rgmapextractor = transposeA ? A.getDomainMapExtractor() : A.getRangeMapExtractor();
+  RCP<const MapExtractor> domapextractor = transposeB ? B.getRangeMapExtractor() : B.getDomainMapExtractor();
 
   RCP<BlockedCrsMatrix> C = rcp(new BlockedCrsMatrix(rgmapextractor, domapextractor, 33 /* TODO fix me */));
 
@@ -225,9 +202,10 @@ RCP<Xpetra::BlockedCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> MatrixM
     for (size_t j = 0; j < B.Cols(); ++j) {  // loop over all block columns of B
       RCP<Matrix> Cij;
 
-      for (size_t l = 0; l < B.Rows(); ++l) {  // loop for calculating entry C_{ij}
-        RCP<Matrix> crmat1 = A.getMatrix(i, l);
-        RCP<Matrix> crmat2 = B.getMatrix(l, j);
+      const size_t innerDim = transposeB ? B.Cols() : B.Rows();
+      for (size_t l = 0; l < innerDim; ++l) {  // loop for calculating entry C_{ij}
+        RCP<Matrix> crmat1 = transposeA ? A.getMatrix(l, i) : A.getMatrix(i, l);
+        RCP<Matrix> crmat2 = transposeB ? B.getMatrix(j, l) : B.getMatrix(l, j);
 
         if (crmat1.is_null() || crmat2.is_null())
           continue;
@@ -268,25 +246,37 @@ RCP<Xpetra::BlockedCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> MatrixM
         RCP<Matrix> temp = Teuchos::null;
 
         if (crop1 != Teuchos::null && crop2 != Teuchos::null)
-          temp = Multiply(*crop1, false, *crop2, false, fos);
+          temp = Multiply(*crop1, transposeA, *crop2, transposeB, fos);
         else {
           RCP<BlockedCrsMatrix> bop1 = Teuchos::rcp_dynamic_cast<BlockedCrsMatrix>(crmat1);
           RCP<BlockedCrsMatrix> bop2 = Teuchos::rcp_dynamic_cast<BlockedCrsMatrix>(crmat2);
           TEUCHOS_TEST_FOR_EXCEPTION(bop1.is_null() == true, Xpetra::Exceptions::BadCast, "A is not a BlockedCrsMatrix. (TwoMatrixMultiplyBlock)");
           TEUCHOS_TEST_FOR_EXCEPTION(bop2.is_null() == true, Xpetra::Exceptions::BadCast, "B is not a BlockedCrsMatrix. (TwoMatrixMultiplyBlock)");
-          TEUCHOS_TEST_FOR_EXCEPTION(bop1->Cols() != bop2->Rows(), Xpetra::Exceptions::RuntimeError, "A has " << bop1->Cols() << " columns and B has " << bop2->Rows() << " rows. Matrices are not compatible! (TwoMatrixMultiplyBlock)");
-          TEUCHOS_TEST_FOR_EXCEPTION(bop1->getDomainMap()->isSameAs(*(bop2->getRangeMap())) == false, Xpetra::Exceptions::RuntimeError, "Domain map of A is not the same as range map of B. Matrices are not compatible! (TwoMatrixMultiplyBlock)");
+
+          const auto op1Cols = transposeA ? bop1->Rows() : bop1->Cols();
+          const auto op2Rows = transposeB ? bop2->Cols() : bop2->Rows();
+          TEUCHOS_TEST_FOR_EXCEPTION(op1Cols != op2Rows, Xpetra::Exceptions::RuntimeError, "A has " << op1Cols << " columns and B has " << op2Rows << " rows. Matrices are not compatible! (TwoMatrixMultiplyBlock)");
+
+          const auto op1DomainMap = transposeA ? bop1->getRangeMap() : bop1->getDomainMap();
+          const auto op2RangeMap  = transposeB ? bop2->getDomainMap() : bop2->getRangeMap();
+          TEUCHOS_TEST_FOR_EXCEPTION(op1DomainMap->isSameAs(*(op2RangeMap)) == false, Xpetra::Exceptions::RuntimeError, "Domain map of A is not the same as range map of B. Matrices are not compatible! (TwoMatrixMultiplyBlock)");
 
           // recursive multiplication call
           temp = TwoMatrixMultiplyBlock(*bop1, transposeA, *bop2, transposeB, fos, doFillComplete, doOptimizeStorage);
 
+          const auto op1Rows = transposeA ? bop1->Cols() : bop1->Rows();
+          const auto op2Cols = transposeB ? bop2->Rows() : bop2->Cols();
+
+          const auto bop1RangeMap  = transposeA ? bop1->getDomainMapExtractor() : bop1->getRangeMapExtractor();
+          const auto bop2DomainMap = transposeB ? bop2->getRangeMapExtractor() : bop2->getDomainMapExtractor();
+
           RCP<BlockedCrsMatrix> btemp = Teuchos::rcp_dynamic_cast<BlockedCrsMatrix>(temp);
-          TEUCHOS_TEST_FOR_EXCEPTION(btemp->Rows() != bop1->Rows(), Xpetra::Exceptions::RuntimeError, "Number of block rows of local blocked operator is " << btemp->Rows() << " but should be " << bop1->Rows() << ". (TwoMatrixMultiplyBlock)");
-          TEUCHOS_TEST_FOR_EXCEPTION(btemp->Cols() != bop2->Cols(), Xpetra::Exceptions::RuntimeError, "Number of block cols of local blocked operator is " << btemp->Cols() << " but should be " << bop2->Cols() << ". (TwoMatrixMultiplyBlock)");
-          TEUCHOS_TEST_FOR_EXCEPTION(btemp->getRangeMapExtractor()->getFullMap()->isSameAs(*(bop1->getRangeMapExtractor()->getFullMap())) == false, Xpetra::Exceptions::RuntimeError, "Range map of local blocked operator should be same as first operator. (TwoMatrixMultiplyBlock)");
-          TEUCHOS_TEST_FOR_EXCEPTION(btemp->getDomainMapExtractor()->getFullMap()->isSameAs(*(bop2->getDomainMapExtractor()->getFullMap())) == false, Xpetra::Exceptions::RuntimeError, "Domain map of local blocked operator should be same as second operator. (TwoMatrixMultiplyBlock)");
-          TEUCHOS_TEST_FOR_EXCEPTION(btemp->getRangeMapExtractor()->getThyraMode() != bop1->getRangeMapExtractor()->getThyraMode(), Xpetra::Exceptions::RuntimeError, "Thyra mode of local range map extractor incompatible with range map extractor of A (TwoMatrixMultiplyBlock)");
-          TEUCHOS_TEST_FOR_EXCEPTION(btemp->getDomainMapExtractor()->getThyraMode() != bop2->getDomainMapExtractor()->getThyraMode(), Xpetra::Exceptions::RuntimeError, "Thyra mode of local domain map extractor incompatible with domain map extractor of B (TwoMatrixMultiplyBlock)");
+          TEUCHOS_TEST_FOR_EXCEPTION(btemp->Rows() != op1Rows, Xpetra::Exceptions::RuntimeError, "Number of block rows of local blocked operator is " << btemp->Rows() << " but should be " << op1Rows << ". (TwoMatrixMultiplyBlock)");
+          TEUCHOS_TEST_FOR_EXCEPTION(btemp->Cols() != op2Cols, Xpetra::Exceptions::RuntimeError, "Number of block cols of local blocked operator is " << btemp->Cols() << " but should be " << op2Cols << ". (TwoMatrixMultiplyBlock)");
+          TEUCHOS_TEST_FOR_EXCEPTION(btemp->getRangeMapExtractor()->getFullMap()->isSameAs(*(bop1RangeMap->getFullMap())) == false, Xpetra::Exceptions::RuntimeError, "Range map of local blocked operator should be same as first operator. (TwoMatrixMultiplyBlock)");
+          TEUCHOS_TEST_FOR_EXCEPTION(btemp->getDomainMapExtractor()->getFullMap()->isSameAs(*(bop2DomainMap->getFullMap())) == false, Xpetra::Exceptions::RuntimeError, "Domain map of local blocked operator should be same as second operator. (TwoMatrixMultiplyBlock)");
+          TEUCHOS_TEST_FOR_EXCEPTION(btemp->getRangeMapExtractor()->getThyraMode() != bop1RangeMap->getThyraMode(), Xpetra::Exceptions::RuntimeError, "Thyra mode of local range map extractor incompatible with range map extractor of A (TwoMatrixMultiplyBlock)");
+          TEUCHOS_TEST_FOR_EXCEPTION(btemp->getDomainMapExtractor()->getThyraMode() != bop2DomainMap->getThyraMode(), Xpetra::Exceptions::RuntimeError, "Thyra mode of local domain map extractor incompatible with domain map extractor of B (TwoMatrixMultiplyBlock)");
         }
 
         TEUCHOS_TEST_FOR_EXCEPTION(temp->isFillComplete() == false, Xpetra::Exceptions::RuntimeError, "Local block is not filled. (TwoMatrixMultiplyBlock)");
@@ -303,7 +293,11 @@ RCP<Xpetra::BlockedCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>> MatrixM
       if (!Cij.is_null()) {
         if (Cij->isFillComplete())
           Cij->resumeFill();
-        Cij->fillComplete(B.getDomainMap(j), A.getRangeMap(i));
+
+        auto BjDomainMap = transposeB ? B.getRangeMap(j) : B.getDomainMap(j);
+        auto AiDomainMap = transposeA ? A.getDomainMap(i) : A.getRangeMap(i);
+        Cij->fillComplete(BjDomainMap, AiDomainMap);
+
         C->setMatrix(i, j, Cij);
       } else {
         C->setMatrix(i, j, Teuchos::null);
@@ -322,17 +316,11 @@ void MatrixMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::TwoMatrixAdd(const
   if (!(A.getRowMap()->isSameAs(*(B.getRowMap()))))
     throw Exceptions::Incompatible("TwoMatrixAdd: matrix row maps are not the same.");
 
-  if (A.getRowMap()->lib() == Xpetra::UseEpetra) {
-    throw Exceptions::RuntimeError("TwoMatrixAdd for Epetra matrices needs <double,int,int> for Scalar, LocalOrdinal and GlobalOrdinal.");
-  } else if (A.getRowMap()->lib() == Xpetra::UseTpetra) {
-#ifdef HAVE_XPETRA_TPETRA
+  if (A.getRowMap()->lib() == Xpetra::UseTpetra) {
     const Tpetra::CrsMatrix<SC, LO, GO, NO>& tpA = Xpetra::Helpers<SC, LO, GO, NO>::Op2TpetraCrs(A);
     Tpetra::CrsMatrix<SC, LO, GO, NO>& tpB       = Xpetra::Helpers<SC, LO, GO, NO>::Op2NonConstTpetraCrs(B);
 
     Tpetra::MatrixMatrix::Add(tpA, transposeA, alpha, tpB, beta);
-#else
-    throw Exceptions::RuntimeError("Xpetra must be compiled with Tpetra.");
-#endif
   }
 }  // MatrixMatrix::TwoMatrixAdd()
 
@@ -354,18 +342,12 @@ void MatrixMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::TwoMatrixAdd(const
   if (rcpBopA == Teuchos::null && rcpBopB == Teuchos::null) {
     if (!(A.getRowMap()->isSameAs(*(B.getRowMap()))))
       throw Exceptions::Incompatible("TwoMatrixAdd: matrix row maps are not the same.");
-    if (lib == Xpetra::UseEpetra) {
-      throw Exceptions::RuntimeError("MatrixMatrix::Add for Epetra only available with Scalar = double, LO = GO = int.");
-    } else if (lib == Xpetra::UseTpetra) {
-#ifdef HAVE_XPETRA_TPETRA
+    if (lib == Xpetra::UseTpetra) {
       using tcrs_matrix_type      = Tpetra::CrsMatrix<SC, LO, GO, NO>;
       using helpers               = Xpetra::Helpers<SC, LO, GO, NO>;
       const tcrs_matrix_type& tpA = helpers::Op2TpetraCrs(A);
       const tcrs_matrix_type& tpB = helpers::Op2TpetraCrs(B);
       C                           = helpers::tpetraAdd(tpA, transposeA, alpha, tpB, transposeB, beta);
-#else
-      throw Exceptions::RuntimeError("Xpetra must be compiled with Tpetra.");
-#endif
     }
     ///////////////////////// EXPERIMENTAL
     if (A.IsView("stridedMaps")) C->CreateView("stridedMaps", rcpFromRef(A));

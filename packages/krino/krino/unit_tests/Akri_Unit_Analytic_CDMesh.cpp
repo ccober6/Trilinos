@@ -18,7 +18,7 @@
 #include <Akri_Phase_Support.hpp>
 #include <Akri_Snap.hpp>
 #include <Akri_Unit_BoundingBoxMesh.hpp>
-#include <Akri_Unit_LogRedirecter.hpp>
+#include <Akri_LogRedirecter.hpp>
 #include <gtest/gtest.h>
 #include <stk_io/IossBridge.hpp>
 #include <stk_io/WriteMesh.hpp>
@@ -49,7 +49,6 @@ public:
     auto & vec_type = fixture.meta_data().spatial_dimension() == 2 ? FieldType::VECTOR_2D : FieldType::VECTOR_3D;
     coord_field = aux_meta.register_field("coordinates", vec_type, stk::topology::NODE_RANK, 1u, 1u, fixture.meta_data().universal_part());
     cdfemSupport.set_coords_field(coord_field);
-    cdfemSupport.add_edge_interpolation_field(coord_field);
 
     cdfemSupport.set_prolongation_model(INTERPOLATION);
   }

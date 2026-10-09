@@ -151,6 +151,11 @@ namespace panzer_stk {
         p.set<bool>("Use DOFManager FEI",false);
         p.set<bool>("Load Balance DOFs",false);
         p.set<bool>("Use Tpetra",false);
+        // Assemble the Jacobian into a Tpetra::FECrsMatrix instead of separate owned and
+        // ghosted matrices joined by an explicit export. Requires "Use Tpetra"=true and a
+        // non-blocked field order; requesting it elsewhere is an error rather than a
+        // silent no-op, so a run that asks for FE assembly and does not get it fails loudly.
+        p.set<bool>("Use FE Assembly",false);
         p.set<bool>("Use Epetra ME",true);
         p.set<bool>("Lump Explicit Mass",false);
         p.set<bool>("Constant Mass Matrix",true);
@@ -273,7 +278,16 @@ namespace panzer_stk {
     bool use_dofmanager_fei  = assembly_params.get<bool>("Use DOFManager FEI"); // use FEI if true, otherwise use internal dof manager
     bool use_load_balance = assembly_params.get<bool>("Load Balance DOFs");
     bool useTpetra = assembly_params.get<bool>("Use Tpetra");
+    bool useFEAssembly = assembly_params.get<bool>("Use FE Assembly");
     bool useThyraME = !assembly_params.get<bool>("Use Epetra ME");
+
+    // FE assembly is implemented for the Tpetra linear object factories, flat and blocked.
+    // Fail here rather than quietly falling through to a classic factory, which would let a
+    // run that requested FE assembly silently not use it.
+    TEUCHOS_TEST_FOR_EXCEPTION(useFEAssembly && !useTpetra,std::logic_error,
+      "panzer_stk::ModelEvaluatorFactory: Assembly parameter \"Use FE Assembly\"=true "
+      "requires \"Use Tpetra\"=true; FE assembly is only implemented for the Tpetra "
+      "linear object factory.");
 
     // this is weird...we are accessing the solution control to determine if things are transient
     // it is backwards!
@@ -314,6 +328,47 @@ namespace panzer_stk {
 
     m_eqset_factory = eqset_factory;
 
+        // Setup active parameters
+    /////////////////////////////////////////////////////////////
+
+    std::vector<Teuchos::RCP<Teuchos::Array<std::string> > > p_names;
+    std::vector<Teuchos::RCP<Teuchos::Array<double> > > p_values;
+    std::vector<std::string> tangent_param_names;
+    if (p.isSublist("Active Parameters")) {
+      Teuchos::ParameterList& active_params = p.sublist("Active Parameters");
+
+      int num_param_vecs = active_params.get<int>("Number of Parameter Vectors",0);
+      p_names.resize(num_param_vecs);
+      p_values.resize(num_param_vecs);
+      for (int i=0; i<num_param_vecs; i++) {
+        std::stringstream ss;
+        ss << "Parameter Vector " << i;
+        Teuchos::ParameterList& pList = active_params.sublist(ss.str());
+        int numParameters = pList.get<int>("Number");
+        TEUCHOS_TEST_FOR_EXCEPTION(numParameters == 0,
+                                   Teuchos::Exceptions::InvalidParameter,
+                                   std::endl << "Error!  panzer::ModelEvaluator::ModelEvaluator():  " <<
+                                   "Parameter vector " << i << " has zero parameters!" << std::endl);
+        p_names[i] =
+          Teuchos::rcp(new Teuchos::Array<std::string>(numParameters));
+        p_values[i] =
+          Teuchos::rcp(new Teuchos::Array<double>(numParameters));
+        for (int j=0; j<numParameters; j++) {
+          std::stringstream ss2;
+          ss2 << "Parameter " << j;
+          (*p_names[i])[j] = pList.get<std::string>(ss2.str());
+          ss2.str("");
+
+          ss2 << "Initial Value " << j;
+          (*p_values[i])[j] = pList.get<double>(ss2.str());
+
+          // This is to make sure parameters are registered before they are accessed
+          panzer::registerScalarParameter((*p_names[i])[j],*global_data->pl,(*p_values[i])[j]);
+          tangent_param_names.push_back((*p_names[i])[j]);
+        }
+      }
+    }
+
     // setup the physcs blocks
     ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -341,7 +396,8 @@ namespace panzer_stk {
                                  eqset_factory,
                                  global_data,
                                  is_transient,
-                                 physicsBlocks);
+                                 physicsBlocks,
+                                 tangent_param_names);
       m_physics_blocks = physicsBlocks; // hold onto physics blocks for safe keeping
     }
 
@@ -484,7 +540,8 @@ namespace panzer_stk {
 
        Teuchos::RCP<panzer::BlockedTpetraLinearObjFactory<panzer::Traits,double,int,panzer::GlobalOrdinal> > bloLinObjFactory
         = Teuchos::rcp(new panzer::BlockedTpetraLinearObjFactory<panzer::Traits,double,int,panzer::GlobalOrdinal>(mpi_comm,
-                                                          Teuchos::rcp_dynamic_cast<panzer::BlockedDOFManager>(dofManager)));
+                                                          Teuchos::rcp_dynamic_cast<panzer::BlockedDOFManager>(dofManager),
+                                                          useFEAssembly));
 
        // parse any explicitly excluded pairs or blocks
        const std::string excludedBlocks = assembly_params.get<std::string>("Excluded Blocks");
@@ -528,7 +585,7 @@ namespace panzer_stk {
          checkInterfaceConnections(conn_manager, dofManager->getComm());
 
        TEUCHOS_ASSERT(!useDiscreteAdjoint); // safety check
-       linObjFactory = Teuchos::rcp(new panzer::TpetraLinearObjFactory<panzer::Traits,double,int,panzer::GlobalOrdinal>(mpi_comm,dofManager));
+       linObjFactory = Teuchos::rcp(new panzer::TpetraLinearObjFactory<panzer::Traits,double,int,panzer::GlobalOrdinal>(mpi_comm,dofManager,useFEAssembly));
 
        // build load balancing string for informative output
        loadBalanceString = printUGILoadBalancingInformation(*dofManager);
@@ -624,45 +681,6 @@ namespace panzer_stk {
 
     if(!meConstructionOn)
       return;
-
-    // Setup active parameters
-    /////////////////////////////////////////////////////////////
-
-    std::vector<Teuchos::RCP<Teuchos::Array<std::string> > > p_names;
-    std::vector<Teuchos::RCP<Teuchos::Array<double> > > p_values;
-    if (p.isSublist("Active Parameters")) {
-      Teuchos::ParameterList& active_params = p.sublist("Active Parameters");
-
-      int num_param_vecs = active_params.get<int>("Number of Parameter Vectors",0);
-      p_names.resize(num_param_vecs);
-      p_values.resize(num_param_vecs);
-      for (int i=0; i<num_param_vecs; i++) {
-        std::stringstream ss;
-        ss << "Parameter Vector " << i;
-        Teuchos::ParameterList& pList = active_params.sublist(ss.str());
-        int numParameters = pList.get<int>("Number");
-        TEUCHOS_TEST_FOR_EXCEPTION(numParameters == 0,
-                                   Teuchos::Exceptions::InvalidParameter,
-                                   std::endl << "Error!  panzer::ModelEvaluator::ModelEvaluator():  " <<
-                                   "Parameter vector " << i << " has zero parameters!" << std::endl);
-        p_names[i] =
-          Teuchos::rcp(new Teuchos::Array<std::string>(numParameters));
-        p_values[i] =
-          Teuchos::rcp(new Teuchos::Array<double>(numParameters));
-        for (int j=0; j<numParameters; j++) {
-          std::stringstream ss2;
-          ss2 << "Parameter " << j;
-          (*p_names[i])[j] = pList.get<std::string>(ss2.str());
-          ss2.str("");
-
-          ss2 << "Initial Value " << j;
-          (*p_values[i])[j] = pList.get<double>(ss2.str());
-
-          // this is a band-aid/hack to make sure parameters are registered before they are accessed
-          panzer::registerScalarParameter((*p_names[i])[j],*global_data->pl,(*p_values[i])[j]);
-        }
-      }
-    }
 
     // setup the closure model for automatic writing (during residual/jacobian update)
     ////////////////////////////////////////////////////////////////////////////////////////
@@ -1078,12 +1096,14 @@ namespace panzer_stk {
 
         Teuchos::RCP<const panzer::PhysicsBlock> pb = *physIter;
         const std::vector<panzer::StrPureBasisPair> & blockFields = pb->getProvidedDOFs();
+        const std::vector<panzer::StrPureBasisPair> & blockTangents = pb->getTangentFields();
         const std::vector<std::vector<std::string> > & coordinateDOFs = pb->getCoordinateDOFs();
           // these are treated specially
 
         // insert all fields into a set
         std::set<panzer::StrPureBasisPair,panzer::StrPureBasisComp> fieldNames;
         fieldNames.insert(blockFields.begin(),blockFields.end());
+        fieldNames.insert(blockTangents.begin(),blockTangents.end());
 
         // Now we will set up the coordinate fields (make sure to remove
         // the DOF fields)

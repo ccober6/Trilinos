@@ -28,18 +28,19 @@ namespace Belos {
  * Xpetra::MultiVector and Belos::OperatorT MueLu adapter class.
  */
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-class StatusTestGenResSubNorm<Scalar, Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>, Belos::OperatorT<Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node> > >
-  : public StatusTestResNorm<Scalar, Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>, Belos::OperatorT<Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node> > > {
+class StatusTestGenResSubNorm<Scalar, Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>, Belos::OperatorT<Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node> >, Teuchos::SerialDenseMatrix<LocalOrdinal, Scalar> >
+  : public StatusTestResNorm<Scalar, Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>, Belos::OperatorT<Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node> >, Teuchos::SerialDenseMatrix<LocalOrdinal, Scalar> > {
  public:
   // Convenience typedefs
   typedef Xpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node> MV;
   typedef Xpetra::BlockedCrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> BCRS;
   typedef Xpetra::MapExtractor<Scalar, LocalOrdinal, GlobalOrdinal, Node> ME;
+  typedef Teuchos::SerialDenseMatrix<LocalOrdinal, Scalar> DM;
   typedef Belos::OperatorT<MV> OP;
 
   typedef Teuchos::ScalarTraits<Scalar> SCT;
   typedef typename SCT::magnitudeType MagnitudeType;
-  typedef MultiVecTraits<Scalar, MV> MVT;
+  typedef MultiVecTraits<Scalar, MV, DM> MVT;
   typedef OperatorTraits<Scalar, MV, OP> OT;
 
   //! @name Constructors/destructors.
@@ -51,7 +52,7 @@ class StatusTestGenResSubNorm<Scalar, Xpetra::MultiVector<Scalar, LocalOrdinal, 
     \f$\|r^{(0)}\|\f$ is the corresponding norm of the initial residual.
     The used norm can be specified by defineResForm and defineScaleForm.
 
-    @param Tolerance: Specifies tolerance \f$\tau\f
+    @param Tolerance: Specifies tolerance \f$\tau\f$
     @param subIdx: index of block row in the n x n block system we want to check the residual of
     @param quorum: Number of residual (sub-)vectors which are needed to be within the tolerance before check is considered to be passed
     @param showMaxResNormOnly: for output only
@@ -174,7 +175,7 @@ class StatusTestGenResSubNorm<Scalar, Xpetra::MultiVector<Scalar, LocalOrdinal, 
 
     \return StatusType: Passed, Failed, or Undefined.
   */
-  StatusType checkStatus(Iteration<Scalar, MV, OP>* iSolver) {
+  StatusType checkStatus(Iteration<Scalar, MV, OP, DM>* iSolver) {
     MagnitudeType zero                      = Teuchos::ScalarTraits<MagnitudeType>::zero();
     const LinearProblem<Scalar, MV, OP>& lp = iSolver->getProblem();
     // Compute scaling term (done once for each block that's being solved)

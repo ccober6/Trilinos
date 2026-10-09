@@ -302,7 +302,6 @@ private:
   Timer::Metric<WallTime>       m_wallTime;     ///< Wall time
   Timer::Metric<MPICount>       m_MPICount;     ///< MPI call count
   Timer::Metric<MPIByteCount>   m_MPIByteCount; ///< MPI byte count
-  Timer::Metric<HeapAlloc>      m_heapAlloc;    ///< Heap allocated
 };
 
 template<>
@@ -338,14 +337,6 @@ inline const Timer::Metric<MPIByteCount> &
 TimerImpl::getMetric<MPIByteCount>() const {
   return m_MPIByteCount;
 }
-
-
-template<>
-inline const Timer::Metric<HeapAlloc> &
-TimerImpl::getMetric<HeapAlloc>() const {
-  return m_heapAlloc;
-}
-
 
 }
 

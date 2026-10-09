@@ -54,6 +54,7 @@ public:
 
   using size_type_array = Kokkos::View<size_type *, device_type>;
   using ordinal_type_array = Kokkos::View<ordinal_type *, device_type>;
+  using mag_type_array = Kokkos::View<mag_type *, device_type>;
   using value_type_array = Kokkos::View<value_type *, device_type>;
   using value_type_matrix = Kokkos::View<value_type **, Kokkos::LayoutLeft, device_type>;
 
@@ -79,13 +80,15 @@ public:
   using numeric_tools_levelset_var2_type = NumericToolsLevelSet<value_type, device_type, 2>;
 
 private:
-  enum : int { Cholesky = 1, LDL = 2, SymLU = 3, LU = 4 };
+  enum : int { LDL_nopiv = 0, Cholesky = 1, LDL = 2, SymLU = 3, LU = 4 };
 
   // ** solver mode
+  ordinal_type _method_setup;
   ordinal_type _method;
 
   // ** ordering options
-  ordinal_type _order_connected_graph_separately;
+  bool _order_connected_graph_separately;
+  int _graph_algo_type;
 
   // ** problem
   ordinal_type _m;
@@ -95,6 +98,9 @@ private:
   size_type_array_host _h_ap;
   ordinal_type_array _aj;
   ordinal_type_array_host _h_aj;
+
+  // in debug mode (e.g., to compute residual)
+  value_type_array _ax;
 
   ordinal_type_array _perm;
   ordinal_type_array_host _h_perm;
@@ -147,6 +153,7 @@ private:
 
   // ** options
   ordinal_type _verbose;             // print
+  ordinal_type _debug;               // debug
   ordinal_type _small_problem_thres; // smaller than this, use lapack
 
 #ifdef TACHO_DEPRECATED_PARAMETERS
@@ -166,7 +173,13 @@ private:
   ordinal_type _device_solve_thres;  // bigger than this threshold, device function is used
   ordinal_type _variant;             // algorithmic variant in levelset 0: naive, 1: invert diagonals
   ordinal_type _nstreams;            // on cuda, multi streams are used
+  bool _team_on_user_stream;         // run team/batched kernel on user steram-0
 
+  int _shift_diag;                   // shift diagonal with small perturbation
+  mag_type _shift;
+  mag_type_array _dv;
+
+  int _replace_tiny_pivot;           // replace tiny pivot
   mag_type _pivot_tol;               // tolerance for tiny pivot perturbation
   bool _store_transpose;             // store transpose explicitly
 
@@ -188,16 +201,18 @@ public:
   ///
   /// common options
   ///
-  void setVerbose(const ordinal_type verbose = 1);
+  void setVerbose(const ordinal_type verbose = 1, const ordinal_type debug = 0);
   void setSmallProblemThresholdsize(const ordinal_type small_problem_thres = 1024);
   void setMatrixType(const int symmetric, // 0 - unsymmetric, 1 - structure sym, 2 - symmetric
                      const bool is_positive_definite);
-  void setSolutionMethod(const int method); /// 1 - cholesky, 2 - LDL, 3 - LU
+  void setSolutionMethod(const int method);      /// 1 - cholesky, 2 - LDL, 3 - LU
+  void setFactorizationMethod(const int method); /// 1 - cholesky, 2 - LDL, 3 - LU
 
   ///
   /// Graph options
   ///
-  void setOrderConnectedGraphSeparately(const ordinal_type order_connected_graph_separately = 1);
+  void setOrderConnectedGraphSeparately(const bool order_connected_graph_separately = true);
+  void setGraphAlgorithmType(const int graph_algo_type);
 
   ///
   /// tasking options
@@ -215,12 +230,14 @@ public:
   void setLevelSetOptionDeviceLevelCut(const ordinal_type device_level_cut);
   void setLevelSetOptionDeviceFunctionThreshold(const ordinal_type device_factor_thres,
                                                 const ordinal_type device_solve_thres);
-  void setLevelSetOptionNumStreams(const ordinal_type nstreams);
+  void setLevelSetOptionNumStreams(const ordinal_type nstreams, const bool team_on_user_stream = false);
   void setLevelSetOptionAlgorithmVariant(const ordinal_type variant);
 
+  void shiftDiagonal(const int option = 1);
+  mag_type currentShift() { return _shift; }
   void setPivotTolerance(const mag_type pivot_tol);
   void useNoPivotTolerance();
-  void useDefaultPivotTolerance();
+  void useDefaultPivotTolerance(const int option = 1); // default is tol = eps
   void storeExplicitTranspose(bool flag);
 
   ///
@@ -243,7 +260,7 @@ public:
 
     _m = m;
 
-    if (duplicate) {
+    if (duplicate || _debug) {
       /// for most cases, ap and aj are from host; so construct ap and aj and mirror to device
       _h_ap = size_type_array_host(Kokkos::ViewAllocateWithoutInitializing("h_ap"), ap.extent(0));
       Kokkos::deep_copy(_h_ap, ap);
@@ -290,7 +307,7 @@ public:
     _m = m;
 
     // this takes the user-specified perm, such that analyze() won't call graph partitioner
-    if (duplicate) {
+    if (duplicate || _debug) {
       /// for most cases, ap and aj are from host; so construct ap and aj and mirror to device
       _h_ap = size_type_array_host(Kokkos::ViewAllocateWithoutInitializing("h_ap"), ap.extent(0));
       Kokkos::deep_copy(_h_ap, ap);
@@ -343,7 +360,7 @@ public:
               const arg_ordinal_type_array &aw_graph, const bool duplicate = false) {
     _m = m;
 
-    if (duplicate) {
+    if (duplicate || _debug) {
       /// for most cases, ap and aj are from host; so construct ap and aj and mirror to device
       _h_ap = size_type_array_host(Kokkos::ViewAllocateWithoutInitializing("h_ap"), ap.extent(0));
       Kokkos::deep_copy(_h_ap, ap);
@@ -373,7 +390,7 @@ public:
     _nnz = _h_ap(m);
 
     _m_graph = m_graph;
-    if (duplicate) {
+    if (duplicate || _debug) {
       _h_ap_graph = size_type_array_host(Kokkos::ViewAllocateWithoutInitializing("h_ap_graph"), ap_graph.extent(0));
       _h_aj_graph = ordinal_type_array_host(Kokkos::ViewAllocateWithoutInitializing("h_aj_graph"), aj_graph.extent(0));
       _h_aw_graph = ordinal_type_array_host(Kokkos::ViewAllocateWithoutInitializing("h_aw_graph"), aw_graph.extent(0));
@@ -438,12 +455,14 @@ public:
   int initialize();
 
   int factorize(const value_type_array &ax);
-  int factorize_small_host(const value_type_array &ax);
+  int factorize(const value_type_array &ax, ordinal_type method);
+  int factorize_small_host(const value_type_array &ax, const mag_type shift);
 
   int solve(const value_type_matrix &x, const value_type_matrix &b, const value_type_matrix &t);
   int solve_small_host(const value_type_matrix &x, const value_type_matrix &b, const value_type_matrix &t);
 
-  double computeRelativeResidual(const value_type_array &ax, const value_type_matrix &x, const value_type_matrix &b);
+  double computeRelativeResidual(const value_type_array &ax, const value_type_matrix &x, const value_type_matrix &b, const mag_type shift = 0.0, const bool verbose = true);
+  double computeRelativeResidual(const value_type_matrix &x, const value_type_matrix &b, const bool verbose = true);
   void   computeSpMV(const value_type_array &ax, const value_type_matrix &x, value_type_matrix &b);
 
   int exportFactorsToCrsMatrix(crs_matrix_type &A);

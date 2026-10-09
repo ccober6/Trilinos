@@ -429,7 +429,7 @@ bool Selector::select_bucket_impl(Bucket const& bucket, SelectorNode const* root
     //
     if(bucket.mesh().in_synchronized_state() &&
        bucket.entity_rank() == root->field()->entity_rank() &&
-       root->field()->get_meta_data_for_field().extent(0) > bucket.bucket_id())
+       root->field()->get_num_buckets_for_field() > bucket.bucket_id())
     {
       return field_is_allocated_for_bucket(*root->field(), bucket);
     } else {
@@ -647,7 +647,10 @@ const BulkData* Selector::find_mesh() const
 BucketVector const& Selector::get_buckets(EntityRank entity_rank) const
 {
     static BucketVector emptyBucketVector;
-    if (is_empty(entity_rank)) {
+    const bool wasDefaultConstructed = (m_expr.size()==1 &&
+                                        m_expr[0].node_type()==SelectorNodeType::PART &&
+                                        m_expr[0].part() == InvalidPartOrdinal);
+    if (m_expr.empty() || wasDefaultConstructed) {
         return emptyBucketVector;
     }
 

@@ -36,12 +36,13 @@
 #include "MueLu_FactoryManagerBase.hpp"
 #include "MueLu_FactoryManager.hpp"
 
-#include "MueLu_IfpackSmoother.hpp"
 #include "MueLu_Level.hpp"
 
 // Galeri
 #include <Galeri_XpetraProblemFactory.hpp>
 #include <Galeri_XpetraMatrixTypes.hpp>
+#include <Galeri_MatrixTraits.hpp>
+#include <Galeri_XpetraUtils.hpp>
 
 namespace Galeri {
 namespace Xpetra {
@@ -144,7 +145,7 @@ class TestFactory {
       numGlobalElements = nx;
     else if (matrixType == "Laplace2D" || matrixType == "Star2D")
       numGlobalElements = nx * ny;
-    else if (matrixType == "Laplace3D")
+    else if (matrixType == "Laplace3D" || matrixType == "Scalar3D_27Pt")
       numGlobalElements = nx * ny * nz;
     else {
       std::string msg = matrixType + " is unsupported (in unit testing)";
@@ -175,7 +176,7 @@ class TestFactory {
     } else if (matrixType == "Elasticity2D") {
       DofsPerNode = 2;
       mapType     = "Cartesian2D";
-    } else if (matrixType == "Laplace3D" || matrixType == "Brick3D") {
+    } else if (matrixType == "Laplace3D" || matrixType == "Brick3D" || matrixType == "Scalar3D_27Pt") {
       mapType = "Cartesian3D";
     } else if (matrixType == "Elasticity3D") {
       DofsPerNode = 3;
@@ -221,18 +222,12 @@ class TestFactory {
     return std::make_tuple(Op, Coords, Nullspace, DofsPerNode);
   }  // BuildMatrixCoordsNullspace()
 
-#if KOKKOS_VERSION >= 40799
-  static typename Matrix::local_matrix_type::host_mirror_type buildLocal2x2Host(Scalar a00, Scalar a01, Scalar a10, Scalar a11, const bool keepZeros) {
-    using local_matrix_type = typename Matrix::local_matrix_type::host_mirror_type;
-    using local_graph_type  = typename CrsGraph::local_graph_type::host_mirror_type;
-#else
-  static typename Matrix::local_matrix_type::HostMirror buildLocal2x2Host(Scalar a00, Scalar a01, Scalar a10, Scalar a11, const bool keepZeros) {
-    using local_matrix_type = typename Matrix::local_matrix_type::HostMirror;
-    using local_graph_type  = typename CrsGraph::local_graph_type::HostMirror;
-#endif
-    using rowptr_type  = typename local_graph_type::row_map_type::non_const_type;
-    using entries_type = typename local_graph_type::entries_type::non_const_type;
-    using values_type  = typename local_matrix_type::values_type::non_const_type;
+  static typename Matrix::local_matrix_host_type buildLocal2x2Host(Scalar a00, Scalar a01, Scalar a10, Scalar a11, const bool keepZeros) {
+    using local_matrix_type = typename Matrix::local_matrix_host_type;
+    using local_graph_type  = typename CrsGraph::local_graph_device_type::host_mirror_type;
+    using rowptr_type       = typename local_graph_type::row_map_type::non_const_type;
+    using entries_type      = typename local_graph_type::entries_type::non_const_type;
+    using values_type       = typename local_matrix_type::values_type::non_const_type;
 
     using TST = Teuchos::ScalarTraits<Scalar>;
     size_t nnz;
@@ -285,11 +280,7 @@ class TestFactory {
     return lclA;
   }
 
-#if KOKKOS_VERSION >= 40799
-  static std::string localMatToString(typename Matrix::local_matrix_type::host_mirror_type& mat) {
-#else
-  static std::string localMatToString(typename Matrix::local_matrix_type::HostMirror& mat) {
-#endif
+  static std::string localMatToString(typename Matrix::local_matrix_host_type& mat) {
     std::stringstream s;
     typename Matrix::local_ordinal_type numCols = mat.numCols();
     for (typename Matrix::local_ordinal_type row_id = 0; row_id < mat.numRows(); ++row_id) {
@@ -310,9 +301,9 @@ class TestFactory {
     return s.str();
   }
 
-  static typename Matrix::local_matrix_type buildLocal2x2(Scalar a00, Scalar a01, Scalar a10, Scalar a11) {
-    using local_matrix_type = typename Matrix::local_matrix_type;
-    using local_graph_type  = typename CrsGraph::local_graph_type;
+  static typename Matrix::local_matrix_device_type buildLocal2x2(Scalar a00, Scalar a01, Scalar a10, Scalar a11) {
+    using local_matrix_type = typename Matrix::local_matrix_device_type;
+    using local_graph_type  = typename CrsGraph::local_graph_device_type;
     using rowptr_type       = typename local_graph_type::row_map_type::non_const_type;
     using entries_type      = typename local_graph_type::entries_type::non_const_type;
     using values_type       = typename local_matrix_type::values_type::non_const_type;
@@ -805,15 +796,6 @@ class TestFactory {
   }
 
 #if 0
-#if defined(HAVE_MUELU_EPETRA) && defined(HAVE_MUELU_IFPACK)
-      static RCP<SmootherPrototype> createSmootherPrototype(const std::string& type="Gauss-Seidel", LO sweeps=1) {
-        Teuchos::ParameterList  ifpackList;
-        ifpackList.set("relaxation: type", type);
-        ifpackList.set("relaxation: sweeps", (LO) sweeps);
-        ifpackList.set("relaxation: damping factor", (SC) 1.0);
-        return rcp( new IfpackSmoother("point relaxation stand-alone",ifpackList) );
-      }
-#endif
 #endif
 
   // Create a matrix as specified by parameter list options
@@ -941,51 +923,6 @@ class TpetraTestFactory {
 
 // TAW: 3/14/2016: If both Epetra and Tpetra are enabled we need partial specializations
 //                 on GO=int/long long as well as NO=EpetraNode to disable BuildBlockMatrix
-#ifdef HAVE_MUELU_EPETRA
-// partial specializations (GO=int not enabled with Tpetra)
-#if !defined(HAVE_TPETRA_INST_INT_INT)
-template <class Scalar, class LocalOrdinal, class Node>
-class TpetraTestFactory<Scalar, LocalOrdinal, int, Node> {
-  typedef int GlobalOrdinal;
-#include "MueLu_UseShortNames.hpp"
- public:
-  static RCP<Matrix> BuildBlockMatrix(Teuchos::ParameterList& matrixList, Xpetra::UnderlyingLib lib) { return Teuchos::null; }
-
- private:
-  TpetraTestFactory() {}  // static class
-};                        // class TpetraTestFactory
-#endif
-
-// partial specializations (GO=long long not enabled with Tpetra)
-#if !defined(HAVE_TPETRA_INST_INT_LONG_LONG)
-template <class Scalar, class LocalOrdinal, class Node>
-class TpetraTestFactory<Scalar, LocalOrdinal, long long, Node> {
-  typedef long long GlobalOrdinal;
-#include "MueLu_UseShortNames.hpp"
- public:
-  static RCP<Matrix> BuildBlockMatrix(Teuchos::ParameterList& matrixList, Xpetra::UnderlyingLib lib) { return Teuchos::null; }
-
- private:
-  TpetraTestFactory() {}  // static class
-};                        // class TpetraTestFactory
-#endif
-
-// partial specializations (NO=EpetraNode not enabled with Tpetra)
-#if ((defined(EPETRA_HAVE_OMP) && !(defined(HAVE_TPETRA_INST_OPENMP))) || \
-     (!defined(EPETRA_HAVE_OMP) && !(defined(HAVE_TPETRA_INST_SERIAL))))
-
-template <class Scalar, class LocalOrdinal, class GlobalOrdinal>
-class TpetraTestFactory<Scalar, LocalOrdinal, GlobalOrdinal, Xpetra::EpetraNode> {
-  typedef Xpetra::EpetraNode Node;
-#include "MueLu_UseShortNames.hpp"
- public:
-  static RCP<Matrix> BuildBlockMatrix(Teuchos::ParameterList& matrixList, Xpetra::UnderlyingLib lib) { return Teuchos::null; }
-
- private:
-  TpetraTestFactory() {}  // static class
-};                        // class TpetraTestFactory
-#endif
-#endif  // endif HAVE_MUELU_EPETRA
 
 //! Return the list of files in the directory. Only files that are matching '*filter*' are returned.
 ArrayRCP<std::string> GetFileList(const std::string& dirPath, const std::string& filter);
@@ -995,20 +932,12 @@ ArrayRCP<std::string> GetFileList(const std::string& dirPath, const std::string&
 }  // namespace MueLuTests
 
 // Macro to skip a test when UnderlyingLib==Epetra or Tpetra
-#define MUELU_TEST_ONLY_FOR(UnderlyingLib)                                                                                               \
-  if (TestHelpers_kokkos::Parameters::getLib() != UnderlyingLib) {                                                                       \
-    out << "Skipping test for " << ((TestHelpers_kokkos::Parameters::getLib() == Xpetra::UseEpetra) ? "Epetra" : "Tpetra") << std::endl; \
-    return;                                                                                                                              \
+#define MUELU_TEST_ONLY_FOR(UnderlyingLib)                         \
+  if (TestHelpers_kokkos::Parameters::getLib() != UnderlyingLib) { \
+    out << "Skipping test for "                                    \
+        << "Tpetra" << std::endl;                                  \
+    return;                                                        \
   }
-
-// Macro to skip a test when Epetra is used with Ordinal != int
-#define MUELU_TEST_EPETRA_ONLY_FOR_INT(LocalOrdinal, GlobalOrdinal) \
-  if (!(TestHelpers_kokkos::Parameters::getLib() == Xpetra::UseEpetra && (Teuchos::OrdinalTraits<LocalOrdinal>::name() != string("int") || Teuchos::OrdinalTraits<GlobalOrdinal>::name() != string("int"))))
-
-// Macro to skip a test when Epetra is used with Scalar != double or Ordinal != int
-#define MUELU_TEST_EPETRA_ONLY_FOR_DOUBLE_AND_INT(Scalar, LocalOrdinal, GlobalOrdinal)                                               \
-  if (!(TestHelpers_kokkos::Parameters::getLib() == Xpetra::UseEpetra && Teuchos::ScalarTraits<Scalar>::name() != string("double"))) \
-  MUELU_TEST_EPETRA_ONLY_FOR_INT(LocalOrdinal, GlobalOrdinal)
 
 //! Namespace for MueLu test classes
 namespace MueLuTests {

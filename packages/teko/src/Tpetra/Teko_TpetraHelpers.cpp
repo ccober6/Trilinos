@@ -10,20 +10,6 @@
 #include "Teko_TpetraHelpers.hpp"
 #include "Teko_ConfigDefs.hpp"
 
-#ifdef TEKO_HAVE_EPETRA
-#include "Thyra_EpetraLinearOp.hpp"
-#include "Thyra_EpetraThyraWrappers.hpp"
-
-// Epetra includes
-#include "Epetra_Vector.h"
-
-// EpetraExt includes
-#include "EpetraExt_ProductOperator.h"
-#include "EpetraExt_MatrixMatrix.h"
-
-#include "Teko_EpetraOperatorWrapper.hpp"
-#endif
-
 // Thyra Includes
 #include "Thyra_BlockedLinearOpBase.hpp"
 #include "Thyra_DefaultMultipliedLinearOp.hpp"
@@ -45,6 +31,7 @@
 #include "Tpetra_Vector.hpp"
 #include "Thyra_TpetraThyraWrappers.hpp"
 #include "TpetraExt_MatrixMatrix.hpp"
+#include "Tpetra_RowMatrixTransposer.hpp"
 
 using Teuchos::null;
 using Teuchos::RCP;
@@ -126,7 +113,7 @@ void fillDefaultSpmdMultiVector(Teuchos::RCP<Thyra::TpetraMultiVector<ST, LO, GO
   // Build the MultiVector
   spmdMV->initialize(range, domain, tpetraMV);
 
-  // make sure the Epetra_MultiVector doesn't disappear prematurely
+  // make sure the Tpetra::MultiVector doesn't disappear prematurely
   Teuchos::set_extra_data<RCP<Tpetra::MultiVector<ST, LO, GO, NT> > >(
       tpetraMV, "Tpetra::MultiVector", Teuchos::outArg(spmdMV));
 }
@@ -198,12 +185,12 @@ void zeroMultiVectorRowIndices(Tpetra::MultiVector<ST, LO, GO, NT>& mv,
 
 /** \brief Constructor for a ZeroedOperator.
  *
- * Build a ZeroedOperator based on a particular Epetra_Operator and
+ * Build a ZeroedOperator based on a particular Tpetra::Operator and
  * a set of indices to zero out. These indices must be local to this
  * processor as specified by RowMap().
  *
  * \param[in] zeroIndices Set of indices to zero out (must be local).
- * \param[in] op           Underlying epetra operator to use.
+ * \param[in] op           Underlying Tpetra operator to use.
  */
 ZeroedOperator::ZeroedOperator(const std::vector<GO>& zeroIndices,
                                const Teuchos::RCP<const Tpetra::Operator<ST, LO, GO, NT> >& op)
@@ -214,9 +201,9 @@ void ZeroedOperator::apply(const Tpetra::MultiVector<ST, LO, GO, NT>& X,
                            Tpetra::MultiVector<ST, LO, GO, NT>& Y, Teuchos::ETransp mode, ST alpha,
                            ST beta) const {
   /*
-     Epetra_MultiVector temp(X);
+     Tpetra::MultiVector temp(X);
      zeroMultiVectorRowIndices(temp,zeroIndices_);
-     int result = epetraOp_->Apply(temp,Y);
+     int result = TpetraOp_->Apply(temp,Y);
   */
 
   tpetraOp_->apply(X, Y, mode, alpha, beta);
@@ -273,88 +260,32 @@ RCP<const Tpetra::CrsMatrix<ST, LO, GO, NT> > getTpetraCrsMatrix(const LinearOp&
   return Teuchos::null;
 }
 
-#ifdef TEKO_HAVE_EPETRA
-RCP<const Tpetra::CrsMatrix<ST, LO, GO, NT> > epetraCrsMatrixToTpetra(
-    const RCP<const Epetra_CrsMatrix> A_e, const RCP<const Teuchos::Comm<int> > comm) {
-  int* ptr;
-  int* ind;
-  double* val;
-
-  int info = A_e->ExtractCrsDataPointers(ptr, ind, val);
-  TEUCHOS_TEST_FOR_EXCEPTION(info != 0, std::logic_error,
-                             "Could not extract data from Epetra_CrsMatrix");
-  const LO numRows = A_e->Graph().NumMyRows();
-  const LO nnz     = A_e->Graph().NumMyEntries();
-
-  Teuchos::ArrayRCP<size_t> ptr2(numRows + 1);
-  Teuchos::ArrayRCP<int> ind2(nnz);
-  Teuchos::ArrayRCP<double> val2(nnz);
-
-  std::copy(ptr, ptr + numRows + 1, ptr2.begin());
-  std::copy(ind, ind + nnz, ind2.begin());
-  std::copy(val, val + nnz, val2.begin());
-
-  RCP<const Tpetra::Map<LO, GO, NT> > rowMap = epetraMapToTpetra(A_e->RowMap(), comm);
-  RCP<Tpetra::CrsMatrix<ST, LO, GO, NT> > A_t =
-      Tpetra::createCrsMatrix<ST, LO, GO, NT>(rowMap, A_e->GlobalMaxNumEntries());
-
-  RCP<const Tpetra::Map<LO, GO, NT> > domainMap = epetraMapToTpetra(A_e->OperatorDomainMap(), comm);
-  RCP<const Tpetra::Map<LO, GO, NT> > rangeMap  = epetraMapToTpetra(A_e->OperatorRangeMap(), comm);
-  RCP<const Tpetra::Map<LO, GO, NT> > colMap    = epetraMapToTpetra(A_e->ColMap(), comm);
-
-  A_t->replaceColMap(colMap);
-  A_t->setAllValues(ptr2, ind2, val2);
-  A_t->fillComplete(domainMap, rangeMap);
-  return A_t;
+RCP<Tpetra::CrsMatrix<ST, LO, GO, NT> > materializeTpetraCrsMatrix(const LinearOp& op) {
+  ST scalar          = 0.0;
+  bool transp        = false;
+  auto tCrsOp        = getTpetraCrsMatrix(op, &scalar, &transp);
+  auto explicitCrsOp = transp
+                           ? Tpetra::RowMatrixTransposer<ST, LO, GO, NT>(tCrsOp).createTranspose()
+                           : rcp(new Tpetra::CrsMatrix<ST, LO, GO, NT>(*tCrsOp, Teuchos::Copy));
+  if (scalar != Teuchos::ScalarTraits<ST>::one()) explicitCrsOp->scale(scalar);
+  return explicitCrsOp;
 }
 
-RCP<Tpetra::CrsMatrix<ST, LO, GO, NT> > nonConstEpetraCrsMatrixToTpetra(
-    const RCP<Epetra_CrsMatrix> A_e, const RCP<const Teuchos::Comm<int> > comm) {
-  int* ptr;
-  int* ind;
-  double* val;
+ModifiableLinearOp materializeTpetraLinearOp(const LinearOp& op, const ModifiableLinearOp& destOp) {
+  auto explicitCrsOp = materializeTpetraCrsMatrix(op);
 
-  int info = A_e->ExtractCrsDataPointers(ptr, ind, val);
-  TEUCHOS_TEST_FOR_EXCEPTION(info != 0, std::logic_error,
-                             "Could not extract data from Epetra_CrsMatrix");
-  const LO numRows = A_e->Graph().NumMyRows();
-  const LO nnz     = A_e->Graph().NumMyEntries();
+  RCP<Thyra::LinearOpBase<ST> > explicitOp;
+  if (destOp != Teuchos::null)
+    explicitOp = destOp;
+  else
+    explicitOp = rcp(new Thyra::TpetraLinearOp<ST, LO, GO, NT>());
 
-  Teuchos::ArrayRCP<size_t> ptr2(numRows + 1);
-  Teuchos::ArrayRCP<int> ind2(nnz);
-  Teuchos::ArrayRCP<double> val2(nnz);
-
-  std::copy(ptr, ptr + numRows + 1, ptr2.begin());
-  std::copy(ind, ind + nnz, ind2.begin());
-  std::copy(val, val + nnz, val2.begin());
-
-  RCP<const Tpetra::Map<LO, GO, NT> > rowMap = epetraMapToTpetra(A_e->RowMap(), comm);
-  RCP<Tpetra::CrsMatrix<ST, LO, GO, NT> > A_t =
-      Tpetra::createCrsMatrix<ST, LO, GO, NT>(rowMap, A_e->GlobalMaxNumEntries());
-
-  RCP<const Tpetra::Map<LO, GO, NT> > domainMap = epetraMapToTpetra(A_e->OperatorDomainMap(), comm);
-  RCP<const Tpetra::Map<LO, GO, NT> > rangeMap  = epetraMapToTpetra(A_e->OperatorRangeMap(), comm);
-  RCP<const Tpetra::Map<LO, GO, NT> > colMap    = epetraMapToTpetra(A_e->ColMap(), comm);
-
-  A_t->replaceColMap(colMap);
-  A_t->setAllValues(ptr2, ind2, val2);
-  A_t->fillComplete(domainMap, rangeMap);
-  return A_t;
+  auto tExplicitOp = rcp_dynamic_cast<Thyra::TpetraLinearOp<ST, LO, GO, NT> >(explicitOp, true);
+  tExplicitOp->initialize(Thyra::tpetraVectorSpace<ST, LO, GO, NT>(explicitCrsOp->getRangeMap()),
+                          Thyra::tpetraVectorSpace<ST, LO, GO, NT>(explicitCrsOp->getDomainMap()),
+                          explicitCrsOp);
+  return tExplicitOp;
 }
-
-RCP<const Tpetra::Map<LO, GO, NT> > epetraMapToTpetra(const Epetra_Map eMap,
-                                                      const RCP<const Teuchos::Comm<int> > comm) {
-  std::vector<int> intGIDs(eMap.NumMyElements());
-  eMap.MyGlobalElements(&intGIDs[0]);
-
-  std::vector<GO> myGIDs(eMap.NumMyElements());
-  for (int k = 0; k < eMap.NumMyElements(); k++) myGIDs[k] = (GO)intGIDs[k];
-
-  return rcp(
-      new const Tpetra::Map<LO, GO, NT>(Teuchos::OrdinalTraits<Tpetra::global_size_t>::invalid(),
-                                        Teuchos::ArrayView<GO>(myGIDs), 0, comm));
-}
-#endif  // TEKO_HAVE_EPETRA
 
 }  // end namespace TpetraHelpers
 }  // end namespace Teko

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 /// \file Test_Common_Sorting.hpp
 /// \brief Tests for radixSort and bitonicSort in KokkoKernels_Sorting.hpp
@@ -25,7 +12,7 @@
 #include <KokkosKernels_Utils.hpp>
 #include <KokkosKernels_Sorting.hpp>
 #include <KokkosKernels_default_types.hpp>
-#include <Kokkos_ArithTraits.hpp>
+#include <KokkosKernels_ArithTraits.hpp>
 #include <Kokkos_Complex.hpp>
 #include <cstdlib>
 
@@ -74,7 +61,7 @@ are some specializations
 
 template <typename T>
 T getRandom() {
-  return rand() % Kokkos::ArithTraits<T>::max();
+  return rand() % KokkosKernels::ArithTraits<T>::max();
 }
 
 // Generate a uniform double between (-5, 5)
@@ -197,6 +184,23 @@ void testSerialRadixSort(size_t k, size_t subArraySize) {
   auto keysHost = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), keys);
   for (size_t i = 0; i < n; i++) {
     ASSERT_EQ(keysHost(i), gold(i));
+  }
+}
+
+template <typename Key>
+void testSerialRadixSortToRange(size_t n, size_t maxKey) {
+  std::vector<Key> keys(n, 0);
+  if (maxKey) {
+    for (size_t i = 0; i < n; i++) {
+      keys[i] = rand() % maxKey;
+    }
+  }
+  std::vector<Key> keysGold = keys;
+  std::vector<Key> keysAux(n);
+  std::sort(keysGold.begin(), keysGold.end());
+  KokkosKernels::SerialRadixSort<int, Key>(keys.data(), keysAux.data(), n);
+  for (size_t i = 0; i < n; i++) {
+    ASSERT_EQ(keys[i], keysGold[i]);
   }
 }
 
@@ -347,6 +351,13 @@ TEST_F(TestCategory, common_serial_radix) {
   for (size_t arrayMax = 0; arrayMax < 1000; arrayMax = 1 + 4 * arrayMax) {
     testSerialRadixSort<TestDevice, char>(numArrays, arrayMax);
     testSerialRadixSort<TestDevice, int>(numArrays, arrayMax);
+  }
+  // For more thorough testing, test with a range of maximum keys and data types,
+  // since max key determines how many passes the algorithm takes.
+  for (int maxKey = 0; maxKey < 255; maxKey++) testSerialRadixSortToRange<unsigned char>(253, maxKey);
+  for (size_t maxKey = 0; maxKey < size_t(4e9); maxKey = (maxKey + 1) * 2) {
+    testSerialRadixSortToRange<unsigned int>(127, maxKey);
+    testSerialRadixSortToRange<size_t>(128, maxKey);
   }
 }
 

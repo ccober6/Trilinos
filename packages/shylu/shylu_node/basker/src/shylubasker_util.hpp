@@ -20,12 +20,8 @@
 #include "shylubasker_types.hpp"
 
 /*Kokkos Includes*/
-#ifdef BASKER_KOKKOS
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Timer.hpp>
-#else
-#include <omp.h>
-#endif
 
 /*System Includes*/
 #include <iostream>
@@ -43,11 +39,9 @@ namespace BaskerNS
   template <class Int, class Entry, class Exe_Space>
   struct kokkos_order_init_2D
   {
-    #ifdef BASKER_KOKKOS
     typedef Exe_Space                    execution_space;
     typedef Kokkos::TeamPolicy<Exe_Space>    TeamPolicy;
     typedef typename TeamPolicy::member_type  TeamMember;
-    #endif
 
     Basker<Int,Entry,Exe_Space>  *basker;
     BASKER_BOOL                  alloc;
@@ -72,15 +66,9 @@ namespace BaskerNS
       
 
     BASKER_INLINE
-    #ifdef BASKER_KOKKOS
     void operator()(const TeamMember &thread) const
-    #else
-    void operator()(Int kid) const
-    #endif
     {
-      #ifdef BASKER_KOKKOS
       Int kid = (Int)(thread.league_rank()*thread.team_size() + thread.team_rank());
-      #endif
       {
         basker->t_init_2DA(kid, alloc, keep_zeros);
       }
@@ -92,11 +80,9 @@ namespace BaskerNS
   template <class Int, class Entry, class Exe_Space>
   struct kokkos_reset_factor
   {
-    #ifdef BASKER_KOKKOS
     typedef Exe_Space                    execution_space;
     typedef Kokkos::TeamPolicy<Exe_Space>    TeamPolicy;
     typedef typename TeamPolicy::member_type  TeamMember;
-    #endif
 
     Basker<Int,Entry,Exe_Space>  *basker;
 
@@ -109,15 +95,9 @@ namespace BaskerNS
     }
 
     BASKER_INLINE
-    #ifdef BASKER_KOKKOS
     void operator()(const TeamMember &thread) const
-    #else
-    void operator()(Int kid) const
-    #endif
     {
-      #ifdef BASKER_KOKKOS
       Int kid = (Int)(thread.league_rank()*thread.team_size() + thread.team_rank());
-      #endif
       {
         if(basker->btf_tabs_offset!=0)
         {
@@ -247,19 +227,11 @@ namespace BaskerNS
     printf("\n===SHOULD NOT BE CALLED\n");
     BASKER_ASSERT(0==1, "init_int_thread");
 
-    #ifdef BASKER_KOKKOS
     Kokkos::parallel_for(
                          TeamPolicy(Exe_Space::thread_pool_size(),1),
                          BASKER_LAMBDA(const TeamMember& thread)
-    #else
-    #pragma omp parallel
-    #endif
     {
-      #ifdef BASKER_KOKKOS
       if(kid == thread.league_rank())
-      #else
-      if(kid == omp_get_thread_num())
-      #endif
       {
         for(Int i=0; i < size; i++)
         {
@@ -267,9 +239,7 @@ namespace BaskerNS
         }
       }
     }
-    #ifdef BASKER_KOKKOS
     );
-    #endif
   }//end init_value int 1d 
 
   
@@ -285,18 +255,10 @@ namespace BaskerNS
     printf("\n===SHOULD NOT BE CALLED===\n");
     BASKER_ASSERT(0==1, "INIT_VALUE_ENTRY_THREADS");
 
-    #ifdef BASKER_KOKKOS
     Kokkos::parallel_for(TeamPolicy(Exe_Space::thread_pool_size(),1),
                          BASKER_LAMBDA(const TeamMember& thread)
-    #else
-    #pragma omp parallel
-    #endif
     {
-      #ifdef BASKER_KOKKOS
       if(kid == thread.league_rank())
-      #else
-      if(kid == omp_get_thread_num())
-      #endif
       {
         for(Int i=0; i < size; i++)
         {
@@ -304,9 +266,7 @@ namespace BaskerNS
         }
       }
     }
-    #ifdef BASKER_KOKKOS
     );
-    #endif
   }//end init_value entry 1d 
 
 
@@ -357,7 +317,7 @@ namespace BaskerNS
 
         for(Int row = 0; row < LL_size(b); row++)
         {
-          #ifdef BASKER_DEBUG_INIT
+          #ifdef BASKER_DEBUG_UTIL
           printf("L Factor Init: %d %d , kid: %d, nnz: %ld \n",
               b, row, kid, LL(b)(row).nnz);
           #endif
@@ -375,7 +335,7 @@ namespace BaskerNS
       {
         Int b = S(lvl)(kid);
 
-        #ifdef BASKER_DEBUG_INIT
+        #ifdef BASKER_DEBUG_UTIL
         printf("U Factor init: %d %d, nnz: %ld \n",
             b, LU_size[b]-1, 
             LU(b)(LU_size[b]-1).nnz);
@@ -408,7 +368,7 @@ namespace BaskerNS
           //JDB TEST PASS
           U_row = my_new_row;
 
-          #ifdef BASKER_DEBUG_INIT
+          #ifdef BASKER_DEBUG_UTIL
           printf("Init U: %d %d lvl: %d l: %d kid: %d nnz: %ld \n",
               U_col, U_row, lvl, l, kid, 
               LU(U_col)(U_row).nnz);
@@ -477,14 +437,6 @@ namespace BaskerNS
           #ifdef BASKER_TIMER
           printf( " >> LL(%d,%d).init_matrix done <<\n",b,row ); fflush(stdout);
           init_matrixL_time += timer_init_matrixL.seconds();
-          #endif
-
-          //Fix when this all happens in the future
-          if(Options.incomplete == BASKER_TRUE)
-          {
-            LL(b)(row).init_inc_lvl();
-          }
-          #ifdef BASKER_TIMER
           timer_fill_matrixL.reset();
           printf( " ++ zero out (%d) ++\n",int(LL(b)(row).col_ptr.extent(0)) ); fflush(stdout);
           #endif
@@ -521,7 +473,7 @@ namespace BaskerNS
       {
         Int b = S(lvl)(kid);
 
-        #ifdef BASKER_DEBUG_INIT
+        #ifdef BASKER_DEBUG_UTIL
         printf("U Factor init: %d %d, nnz: %ld \n",
             b, LU_size[b]-1, 
             LU(b)(LU_size[b]-1).nnz);
@@ -575,7 +527,7 @@ namespace BaskerNS
           //JDB TEST PASS
           U_row = my_new_row;
 
-          #ifdef BASKER_DEBUG_INIT
+          #ifdef BASKER_DEBUG_UTIL
           printf("Init U: %d %d lvl: %d l: %d kid: %d nnz: %ld \n",
               U_col, U_row, lvl, l, kid, 
               LU(U_col)(U_row).nnz);
@@ -597,12 +549,6 @@ namespace BaskerNS
           //LU(U_col)(U_row).fill();
           LU(U_col)(U_row).init_ptr();
           //Kokkos::deep_copy(LU(U_col)(U_row).col_ptr, 0);
-
-          if(Options.incomplete == BASKER_TRUE)
-          {
-            LU(U_col)(U_row).init_inc_lvl();
-          }
-
         }//over inner lvls
       }//if KID
 
@@ -639,7 +585,7 @@ namespace BaskerNS
 
         for(Int row = 0; row < LL_size(b); row++)
         {
-          #ifdef BASKER_DEBUG_INIT
+          #ifdef BASKER_DEBUG_UTIL
           printf("ALM Factor Init: %d %d , kid: %d, nnz: %d nrow: %d ncol: %d \n",
               b, row, kid, ALM(b)(row).nnz, 
               ALM(b)(row).nrow, 
@@ -654,7 +600,7 @@ namespace BaskerNS
           }*/
           if(Options.btf == BASKER_FALSE)
           {
-            #ifdef BASKER_DEBUG_INIT
+            #ifdef BASKER_DEBUG_UTIL
             printf("ALM(%d,%d: %dx%d) alloc with A: kid=%d btf=%d\n",
                     b, row, ALM(b)(row).nrow, ALM(b)(row).ncol, kid, Options.btf);
             #endif
@@ -663,7 +609,7 @@ namespace BaskerNS
           else
           {
             //printf("Using BTF AL \n");
-            #ifdef BASKER_DEBUG_INIT
+            #ifdef BASKER_DEBUG_UTIL
             printf("ALM(%d,%d, %dx%d) alloc (btf) with BTF_A: kid=%d \n",
                    b, row, ALM(b)(row).nrow, ALM(b)(row).ncol, kid);
             #endif
@@ -763,7 +709,7 @@ namespace BaskerNS
              }
           */
 
-          #ifdef BASKER_DEBUG_INIT
+          #ifdef BASKER_DEBUG_UTIL
           printf("Init AUM: %d %d lvl: %d l: %d kid: %d nnz: %d nrow: %d ncol: %d \n",
               U_col, U_row, lvl, l, kid, 
               AVM(U_col)(U_row).nnz, 
@@ -807,7 +753,6 @@ namespace BaskerNS
     Int max_sep_size = 0;
 
     //printf( " *** kid=%d :: t_init_worksppace(%d, %d) ***\n",kid, flag,btf_tabs_offset );
-    #ifdef BASKER_2DL
     if(flag)
     {
       if(btf_tabs_offset != 0)
@@ -824,7 +769,7 @@ namespace BaskerNS
             {
               //defining here
               LL(b)(l).iws_size = LL(b)(l).nrow;
-              //This can be made smaller, see notes in Sfactor_old
+              //This can be made smaller, see notes in sfactor_old
               LL(b)(l).iws_mult = 5;
               LL(b)(l).ews_size = LL(b)(l).nrow;
               //This can be made smaller, see notes in sfactor_old
@@ -917,30 +862,6 @@ namespace BaskerNS
         }
       }//else
     }
-    #else //ifdef basker_2dl
-    if(flag)
-    {
-      if(btf_tabs_offset != 0)
-      {
-        INT_1DARRAY  &ws = thread_array(kid).iws;
-        ENTRY_1DARRAY &X = thread_array(kid).ews;
-        Int iws_size     = thread_array(kid).iws_size;
-        Int iws_mult     = thread_array(kid).iws_mult;
-        Int ews_size     = thread_array(kid).ews_size;
-        Int ews_mult     = thread_array(kid).ews_mult;
-      }
-    }
-    printf("init_workspace 1d, kid: %d size: %d %d %d %d \n",
-           kid, iws_mult, iws_size, ews_mult, ews_size);
-    for(Int i=0; i< iws_mult*iws_size; i++)
-    {
-      thread_array(kid).iws[i] = 0;
-    }
-    for(Int i = 0; i < ews_mult*ews_size; i++)
-    {
-      thread_array(kid).ews[i] = 0;
-    }
-    #endif  //endif def basker_2dl
     //return 0;
   }//end init_workspace
   
@@ -2417,15 +2338,13 @@ namespace BaskerNS
         break;
       }
     }
-
-    #ifdef BASKER_DEBUG_NFACTOR_BLK
+    #ifdef BASKER_DEBUG_UTIL
     printf("find_leader, kid: %d l: %d leader: %d \n", kid, l, my_loc);
     #endif
 
     return my_loc;
   }//end find_leader()
-
-
+ 
   //Added print function
   //I like printf because it is not a thread race dependend like 
   //c++ streams, however be may get compiler warnings

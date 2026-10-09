@@ -39,6 +39,8 @@ RCP<const ParameterList> RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal,
   SET_VALID_ENTRY("repartition: use subcommunicators in place");
 #undef SET_VALID_ENTRY
 
+  validParamList->set<std::string>("Matrix name", "A", "Name of the matrix that will be transferred on the coarse grid (level key)");
+
   validParamList->set<RCP<const FactoryBase> >("A", Teuchos::null, "Generating factory of the matrix A for rebalancing");
   validParamList->set<RCP<const FactoryBase> >("Importer", Teuchos::null, "Generating factory of the importer");
   validParamList->set<RCP<const FactoryBase> >("InPlaceMap", Teuchos::null, "Generating factory of the InPlaceMap");
@@ -48,8 +50,9 @@ RCP<const ParameterList> RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal,
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::DeclareInput(Level & /* fineLevel */, Level &coarseLevel) const {
-  Input(coarseLevel, "A");
   const Teuchos::ParameterList &pL = GetParameterList();
+  std::string matrixName           = pL.get<std::string>("Matrix name");
+  coarseLevel.DeclareInput(matrixName, GetFactory("A").get(), this);
   if (pL.isParameter("repartition: use subcommunicators in place") && pL.get<bool>("repartition: use subcommunicators in place") == true) {
     Input(coarseLevel, "InPlaceMap");
   } else
@@ -58,16 +61,30 @@ void RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::DeclareInput
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level & /* fineLevel */, Level &coarseLevel) const {
-  FactoryMonitor m(*this, "Computing Ac", coarseLevel);
-
   const Teuchos::ParameterList &pL = GetParameterList();
-  RCP<Matrix> originalAc           = Get<RCP<Matrix> >(coarseLevel, "A");
+  auto matrixName                  = pL.get<std::string>("Matrix name");
+  std::string coarseMatrixName;
+  if (matrixName.size() == 1)
+    coarseMatrixName = matrixName + "c";
+  else
+    coarseMatrixName = matrixName + "_coarse";
+
+  // ugly hack to fix issue with MinvA when number of max levels is small. Arises because
+  // M, Minv, or MinvA are not needed or requested/produced on last level and so we shouldn't
+  // try to rebalance them in this case. Note: Limiting the possible early return from this
+  // function only for M, Minv, or MinvA as in the reuse case data might not be available
+  // but Get() knows how to produce (or reuse it).
+
+  if (!(coarseLevel.IsAvailable(matrixName, GetFactory("A").get())) && ((matrixName == "M") || (matrixName == "Minv") || (matrixName == "MinvA"))) return;
+  FactoryMonitor m(*this, "Computing " + coarseMatrixName, coarseLevel);
+
+  RCP<Matrix> originalAc = coarseLevel.Get<RCP<Matrix> >(matrixName, GetFactory("A").get());
 
   // This is a short-circuit for if we want to leave A where it is, but restrict its communicator
   // to something corresponding to a given map.  Maxwell1 is the prime customer for this.
   bool inPlace = pL.get<bool>("repartition: use subcommunicators in place");
   if (inPlace) {
-    SubFactoryMonitor subM(*this, "Rebalancing existing Ac in-place", coarseLevel);
+    SubFactoryMonitor subM(*this, "Rebalancing existing " + coarseMatrixName + " in-place", coarseLevel);
     RCP<const Map> newMap = Get<RCP<const Map> >(coarseLevel, "InPlaceMap");
 
     originalAc->removeEmptyProcessesInPlace(newMap);
@@ -75,7 +92,7 @@ void RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level 
     // The "in place" still leaves a dummy matrix here.  That needs to go
     if (newMap.is_null()) originalAc = Teuchos::null;
 
-    Set(coarseLevel, "A", originalAc);
+    Set(coarseLevel, matrixName, originalAc);
     return;
   }
 
@@ -84,7 +101,7 @@ void RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level 
   if (rebalanceImporter != Teuchos::null) {
     RCP<Matrix> rebalancedAc;
     {
-      SubFactoryMonitor subM(*this, "Rebalancing existing Ac", coarseLevel);
+      SubFactoryMonitor subM(*this, "Rebalancing existing " + coarseMatrixName, coarseLevel);
       RCP<const Map> targetMap = rebalanceImporter->getTargetMap();
 
       ParameterList XpetraList;
@@ -92,20 +109,22 @@ void RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level 
         GetOStream(Runtime0) << "Replacing maps with a subcommunicator" << std::endl;
         XpetraList.set("Restrict Communicator", true);
       }
+      XpetraList.set("compute global constants", IsPrint(Statistics1));
       // NOTE: If the communicator is restricted away, Build returns Teuchos::null.
       XpetraList.set("Timer Label", "MueLu::RebalanceAc-" + Teuchos::toString(coarseLevel.GetLevelID()));
       {
-        SubFactoryMonitor subM2(*this, "Rebalancing existing Ac: MatrixFactory::Build", coarseLevel);
+        SubFactoryMonitor subM2(*this, "Rebalancing existing " + coarseMatrixName + ": MatrixFactory::Build", coarseLevel);
         rebalancedAc = MatrixFactory::Build(originalAc, *rebalanceImporter, *rebalanceImporter, targetMap, targetMap, rcp(&XpetraList, false));
       }
 
       if (!rebalancedAc.is_null()) {
-        rebalancedAc->SetFixedBlockSize(originalAc->GetFixedBlockSize());
+        if (originalAc->IsFixedBlockSizeSet())
+          rebalancedAc->SetFixedBlockSize(originalAc->GetFixedBlockSize());
         std::ostringstream oss;
         oss << "A_" << coarseLevel.GetLevelID();
         rebalancedAc->setObjectLabel(oss.str());
       }
-      Set(coarseLevel, "A", rebalancedAc);
+      Set(coarseLevel, matrixName, rebalancedAc);
     }
     if (!rebalancedAc.is_null() && IsPrint(Statistics2)) {
       int oldRank = SetProcRankVerbose(rebalancedAc->getRowMap()->getComm()->getRank());
@@ -113,7 +132,7 @@ void RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level 
       RCP<ParameterList> params = rcp(new ParameterList());
       params->set("printLoadBalancingInfo", true);
       params->set("printCommInfo", true);
-      GetOStream(Statistics2) << PerfUtils::PrintMatrixInfo(*rebalancedAc, "Ac (rebalanced)", params);
+      GetOStream(Statistics2) << PerfUtils::PrintMatrixInfo(*rebalancedAc, coarseMatrixName + " (rebalanced)", params);
 
       SetProcRankVerbose(oldRank);
     }
@@ -121,7 +140,7 @@ void RebalanceAcFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Build(Level 
   } else {
     // Ac already built by the load balancing process and no load balancing needed
     GetOStream(Runtime1) << "No rebalancing" << std::endl;
-    Set(coarseLevel, "A", originalAc);
+    Set(coarseLevel, matrixName, originalAc);
   }
 
   if (rebalanceFacts_.begin() != rebalanceFacts_.end()) {

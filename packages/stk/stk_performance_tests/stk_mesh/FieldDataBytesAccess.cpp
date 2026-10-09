@@ -81,12 +81,6 @@ protected:
     stk::mesh::put_field_on_mesh(*m_elementFieldRight, get_meta().universal_part(), 3, nullptr);
   }
 
-  void fill_multi_block_mesh(unsigned numElemsPerDim)
-  {
-    stk::io::fill_mesh(stk::unit_test_util::get_mesh_spec(numElemsPerDim), get_bulk());
-    stk::performance_tests::move_elements_to_other_blocks(get_bulk(), numElemsPerDim);
-  }
-
   template <typename BYTES_FUNCTOR, typename VERIFIER_FUNCTOR>
   void run_test(int numIters, const BYTES_FUNCTOR& bytesFunctor, const VERIFIER_FUNCTOR& verifierFunctor)
   {
@@ -177,7 +171,7 @@ auto verify_initialized_field = [](const stk::mesh::Selector& selector, auto& el
   const stk::mesh::BucketVector& buckets = bulk.get_buckets(stk::topology::ELEM_RANK, selector);
 
   std::array<double, 3> initValue { 1.0, 2.0, 3.0 };
-  auto fieldData = elementField.template data<stk::mesh::ReadOnly>();
+  auto fieldData = elementField.template data<>();
 
   for (const stk::mesh::Bucket* bucket : buckets) {
     for (stk::mesh::Entity elem : *bucket) {

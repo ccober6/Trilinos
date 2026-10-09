@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #include <cstdio>
 
@@ -35,7 +22,7 @@
 using Scalar  = KokkosKernels::default_scalar;
 using Ordinal = KokkosKernels::default_lno_t;
 using Offset  = KokkosKernels::default_size_type;
-using KAT     = Kokkos::ArithTraits<Scalar>;
+using KAT     = KokkosKernels::ArithTraits<Scalar>;
 
 struct SPMVBenchmarking {
   // note: CLI currently only allows square matrices to be randomly generated
@@ -49,6 +36,7 @@ struct SPMVBenchmarking {
   std::string filename = "";
   bool flush_cache     = false;
   bool non_reuse       = false;
+  bool new_handle      = false;
 
   // Using the parameters above, run and time spmv where x and y use the given
   // memory layout.
@@ -56,7 +44,7 @@ struct SPMVBenchmarking {
   void run() {
     using matrix_type = KokkosSparse::CrsMatrix<Scalar, Ordinal, Kokkos::DefaultExecutionSpace, void, Offset>;
     using mv_type     = Kokkos::View<Scalar**, Layout>;
-    using h_mv_type   = typename mv_type::HostMirror;
+    using h_mv_type   = typename mv_type::host_mirror_type;
 
     srand(17312837);
     matrix_type A;
@@ -107,8 +95,9 @@ struct SPMVBenchmarking {
     // Create handles for both rank-1 and rank-2 cases,
     // even though only 1 will get used below (depending on num_vecs)
 
-    KokkosSparse::SPMVHandle<Kokkos::DefaultExecutionSpace, matrix_type, decltype(x0), decltype(y0)> handle_rank1;
-    KokkosSparse::SPMVHandle<Kokkos::DefaultExecutionSpace, matrix_type, mv_type, mv_type> handle_rank2;
+    using HandleRank1 =
+        KokkosSparse::SPMVHandle<Kokkos::DefaultExecutionSpace, matrix_type, decltype(x0), decltype(y0)>;
+    using HandleRank2 = KokkosSparse::SPMVHandle<Kokkos::DefaultExecutionSpace, matrix_type, mv_type, mv_type>;
     // Assuming that 1GB is enough to fully clear the L3 cache of a CPU, or the
     // L2 of a GPU. (Some AMD EPYC chips have 768 MB L3)
     Kokkos::View<char*, Kokkos::DefaultExecutionSpace> cacheFlushData;
@@ -118,6 +107,9 @@ struct SPMVBenchmarking {
 
     Kokkos::DefaultExecutionSpace space;
 
+    std::shared_ptr<HandleRank1> handle_rank1 = std::make_shared<HandleRank1>();
+    std::shared_ptr<HandleRank2> handle_rank2 = std::make_shared<HandleRank2>();
+
     // Do 5 warm up calls (not timed). This will also initialize the handle.
     for (int i = 0; i < 5; i++) {
       if (num_vecs == 1) {
@@ -125,15 +117,14 @@ struct SPMVBenchmarking {
         if (non_reuse)
           KokkosSparse::spmv(space, &mode, 1.0, A, x0, beta, y0);
         else
-          KokkosSparse::spmv(space, &handle_rank1, &mode, 1.0, A, x0, beta, y0);
+          KokkosSparse::spmv(space, handle_rank1.get(), &mode, 1.0, A, x0, beta, y0);
       } else {
         // rank-2
         if (non_reuse)
           KokkosSparse::spmv(space, &mode, 1.0, A, x, beta, y);
         else
-          KokkosSparse::spmv(space, &handle_rank2, &mode, 1.0, A, x, beta, y);
+          KokkosSparse::spmv(space, handle_rank2.get(), &mode, 1.0, A, x, beta, y);
       }
-      space.fence();
     }
 
     double totalTime = 0;
@@ -151,14 +142,26 @@ struct SPMVBenchmarking {
         // run the rank-1 version
         if (non_reuse)
           KokkosSparse::spmv(space, &mode, 1.0, A, x0, beta, y0);
-        else
-          KokkosSparse::spmv(space, &handle_rank1, &mode, 1.0, A, x0, beta, y0);
+        else {
+          if (new_handle) {
+            // Destroy handle and re-create new one
+            handle_rank1.reset();
+            handle_rank1 = std::make_shared<HandleRank1>();
+          }
+          KokkosSparse::spmv(space, handle_rank1.get(), &mode, 1.0, A, x0, beta, y0);
+        }
       } else {
         // rank-2
         if (non_reuse)
           KokkosSparse::spmv(space, &mode, 1.0, A, x, beta, y);
-        else
-          KokkosSparse::spmv(space, &handle_rank2, &mode, 1.0, A, x, beta, y);
+        else {
+          if (new_handle) {
+            // Destroy handle and re-create new one
+            handle_rank2.reset();
+            handle_rank2 = std::make_shared<HandleRank2>();
+          }
+          KokkosSparse::spmv(space, handle_rank2.get(), &mode, 1.0, A, x, beta, y);
+        }
       }
       space.fence();
       totalTime += timer.seconds();
@@ -192,9 +195,8 @@ void print_help() {
   printf(
       "  --flush               : Flush the cache between each spmv call "
       "(slow!)\n");
-  printf(
-      "  --non-reuse           : Use non-reuse interface (without "
-      "SPMVHandle)\n");
+  printf("  --non-reuse           : Use non-reuse interface (without SPMVHandle)\n");
+  printf("  --new-handle          : Run each spmv with a new handle to measure first-time setup cost\n");
 }
 
 int main(int argc, char** argv) {
@@ -255,6 +257,10 @@ int main(int argc, char** argv) {
     }
     if ((strcmp(argv[i], "--non-reuse") == 0)) {
       sb.non_reuse = true;
+      continue;
+    }
+    if ((strcmp(argv[i], "--new-handle") == 0)) {
+      sb.new_handle = true;
       continue;
     }
     if ((strcmp(argv[i], "--help") == 0) || (strcmp(argv[i], "-h") == 0)) {

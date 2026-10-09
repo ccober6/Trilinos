@@ -72,170 +72,15 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
     find_2D_convert(A);
     
     //Fill 2D structure
-    #ifdef BASKER_KOKKOS
     kokkos_order_init_2D<Int,Entry,Exe_Space> iO(this);
     Kokkos::parallel_for(TeamPolicy(num_threads,1), iO);
     Kokkos::fence();
-    #else
-    //Comeback
-    #endif
-   
   }//end user_order
 
-
-  //Need to completely reorganize
 
   template <class Int, class Entry, class Exe_Space>
   BASKER_INLINE
   int Basker<Int,Entry,Exe_Space>::btf_order()
-  {
-    //1. Matching ordering on whole matrix
-    //currently finds matching and permutes
-    //found bottle-neck to work best with circuit problems
-    sort_matrix(A);
-    //printMTX("A_nonmatch.mtx", A);
-    match_ordering(1);
-    //printf("DEBUG1: done match\n");
-    //for debuging
-    sort_matrix(A);
-    //printMTX("A_match.mtx", A);
-   
-    //2. BTF ordering on whole matrix
-    // Gets estimate of work on all blocks
-    //currently finds btf-hybrid and permutes
-    //A -> [BTF_A, BTF_C; 0 , BTF B]
-
-    MALLOC_INT_1DARRAY(btf_schedule, num_threads+1);
-    init_value(btf_schedule, num_threads+1, 0);
-    find_btf(A); 
-   
-    printf("Basker outer num_threads:%d, btf_tabs_offset:%d \n", num_threads, btf_tabs_offset);
-    if(btf_tabs_offset != 0)
-    {
-      //  printf("A/B block stuff called\n");
-      //3. ND on BTF_A
-      //currently finds ND and permute BTF_A
-      //Would like to change so finds permuation, 
-      //and move into 2D-Structure
-      //printMTX("A_BTF_FROM_A.mtx", BTF_A);
-      sort_matrix(BTF_A);
-      MALLOC_INT_1DARRAY(vals_order_scotch_array, BTF_A.nnz);
-      scotch_partition(BTF_A);
-
-      //need to do a row perm on BTF_B too
-      if(btf_nblks > 1)
-      {
-        permute_row(BTF_B, part_tree.permtab);
-      }
-      //needed because  moving into 2D-Structure,
-      //assumes sorted columns
-      sort_matrix(BTF_A);
-      if(btf_nblks > 1)
-      {
-        sort_matrix(BTF_B);
-        sort_matrix(BTF_C);
-      }
-      //For debug
-      //printMTX("A_BTF_PART_AFTER.mtx", BTF_A);
-
-      //4. Init tree structure
-      //This reduces the ND ordering into that fits,
-      //thread counts
-      init_tree_thread();
-
-      //5. Permute BTF_A
-      //Constrained symamd on A
-      INT_1DARRAY cmember;
-      MALLOC_INT_1DARRAY(cmember, BTF_A.ncol+1);
-      init_value(cmember,BTF_A.ncol+1,(Int) 0);
-      for(Int i = 0; i < tree.nblks; ++i)
-      {
-        for(Int j = tree.col_tabs(i); j < tree.col_tabs(i+1); ++j)
-        {
-          cmember(j) = i;
-        }
-      }
-      MALLOC_INT_1DARRAY(order_csym_array, BTF_A.ncol);
-      init_value(order_csym_array, BTF_A.ncol, (Int)0);
-      csymamd_order(BTF_A, order_csym_array, cmember);
-
-      permute_col(BTF_A, order_csym_array);
-      sort_matrix(BTF_A);
-      permute_row(BTF_A, order_csym_array);
-      sort_matrix(BTF_A);
-      //printMTX("A_BTF_AMD.mtx", BTF_A);
-
-      if(btf_nblks > 1)
-      {
-        permute_row(BTF_B, order_csym_array);
-        sort_matrix(BTF_B);
-        //printMTX("B_BTF_AMD.mtx", BTF_B);
-        sort_matrix(BTF_C);
-        //printMTX("C_BTF_AMD.mtx", BTF_C);
-      }
-
-      //6. Move to 2D Structure
-      //finds the shapes for both view and submatrices,
-      //need to be changed over to just submatrices
-      matrix_to_views_2D(BTF_A);
-
-      //finds the starting point of A for submatrices
-      find_2D_convert(BTF_A);
-
-      //now we can fill submatrices 
-      //(strictly-lower blocks in ALM, and upper blocks in AVM)
-#ifdef BASKER_KOKKOS
-      kokkos_order_init_2D<Int,Entry,Exe_Space> iO(this);
-      Kokkos::parallel_for(TeamPolicy(num_threads,1), iO);
-      Kokkos::fence();
-#else
-      //Comeback
-#endif
-      //printMTX("BTF_A.mtx", BTF_A); 
-
-    }//if btf_tab_offset == 0
-    
-    if(btf_nblks > 1)
-    {
-      sort_matrix(BTF_C);
-      //printMTX("C_TEST.mtx", BTF_C);
-      //Permute C
-
-      MALLOC_INT_1DARRAY(order_c_csym_array, BTF_C.ncol+1);
-      init_value(order_c_csym_array, BTF_C.ncol+1,(Int) 0);
-
-      printf("BEFORE \n");
-
-      //csymamd_order(BTF_C, order_c_csym_array, cmember);
-
-      blk_amd(BTF_C, order_c_csym_array);
-
-      printf("After perm\n");
-
-      permute_col(BTF_C, order_c_csym_array);
-      sort_matrix(BTF_C);
-      permute_row(BTF_C, order_c_csym_array);
-      sort_matrix(BTF_C);
-
-      if(BTF_E.ncol > 0)
-      {
-        permute_col(BTF_E, order_c_csym_array, BTF_A.ncol);
-      }
-      if(BTF_B.ncol > 0)
-      {
-        permute_col(BTF_B, order_c_csym_array);
-        sort_matrix(BTF_B);
-        //printMTX("BTF_B.mtx", BTF_B);
-      }
-      //printMTX("BTF_C.mtx", BTF_C);
-    }
-    return 0;
-  }//end btf_order
-
-
-  template <class Int, class Entry, class Exe_Space>
-  BASKER_INLINE
-  int Basker<Int,Entry,Exe_Space>::btf_order2()
   {
     #ifdef BASKER_TIMER
     double order_time = 0.0;
@@ -302,9 +147,9 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
     // where A is one "large" diagonal block for threaded factorization, and
     //       B contains "small" diagonabl blocks for sequential factorization
     //printf("outer num_threads:%d \n", num_threads);
-    if (find_btf2(A) != BASKER_SUCCESS) {
+    if (find_btf(A) != BASKER_SUCCESS) {
         if(Options.verbose == BASKER_TRUE) {
-            std::cout << " ++ find_btf2 failed ++ " << std::endl;
+            std::cout << " ++ find_btf failed ++ " << std::endl;
         }
         return BASKER_ERROR;
     }
@@ -398,7 +243,7 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
         BASKER_BOOL keep_zeros = true;
         BASKER_BOOL compute_nd = true;
         BASKER_BOOL apply_nd   = true; //!(Options.static_delayed_pivot);
-        int info_scotch = apply_scotch_partition(keep_zeros, compute_nd, apply_nd);
+        int info_scotch = compute_partition(keep_zeros, compute_nd, apply_nd);
         if (info_scotch != BASKER_SUCCESS) {
           return info_scotch;
         }
@@ -438,108 +283,7 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
     #endif
     
     return BASKER_SUCCESS;
-  }//end btf_order2
-
-  template <class Int, class Entry, class Exe_Space>
-  BASKER_INLINE
-  void Basker<Int,Entry,Exe_Space>::order_incomplete()
-  {
-
-    Kokkos::Timer timer_one;
-
-    if(Options.matching == BASKER_TRUE)
-    {
-      match_ordering(1);
-    }
-    else
-    {
-      match_flag = BASKER_FALSE;
-    }
-
-    if(Options.btf == BASKER_TRUE)
-    {
-      //2. BTF ordering on whole matrix
-      //currently finds btf-hybrid and permutes
-      //A -> [BTF_A, BTF_C; 0 , BTF B]
-      //printf("outter num_threads:%d \n", num_threads);
-      MALLOC_INT_1DARRAY(btf_schedule, num_threads+1);
-      init_value(btf_schedule, num_threads+1, (Int)0);
-      find_btf2(A);
-    }
-    else
-    {
-      btf_flag = BASKER_FALSE;
-    }
-
-    std::cout << "Order Timer 1: "
-      << timer_one.seconds()
-      << std::endl;
-
-    timer_one.reset();
-
-    //ND Order (We should always do this for use)
-    if(Options.btf == BASKER_TRUE && btf_tabs_offset != 0)
-    {
-      MALLOC_INT_1DARRAY(vals_order_scotch_array, BTF_A.nnz);
-      scotch_partition(BTF_A);
-      if(btf_nblks > 1)
-      {
-        permute_row(BTF_B, part_tree.permtab);
-      }
-      init_tree_thread();
-      if(Options.amd_domains == BASKER_TRUE)
-      {
-        INT_1DARRAY cmember;
-        MALLOC_INT_1DARRAY(cmember, BTF_A.ncol+1);
-        init_value(cmember,BTF_A.ncol+1,(Int) 0);
-        for(Int i = 0; i < tree.nblks; ++i)
-        {
-          for(Int j = tree.col_tabs(i); 
-              j < tree.col_tabs(i+1); ++j)
-          {
-            cmember(j) = i;
-          }
-        }
-        MALLOC_INT_1DARRAY(order_csym_array, BTF_A.ncol);
-        init_value(order_csym_array, BTF_A.ncol, (Int)0);
-        csymamd_order(BTF_A, order_csym_array, cmember, Options.verbose);
-
-        permute_col(BTF_A, order_csym_array);
-        sort_matrix(BTF_A);
-        permute_row(BTF_A, order_csym_array);
-        sort_matrix(BTF_A);
-
-        if(btf_nblks > 1)
-        {
-          permute_row(BTF_B, order_csym_array);
-          sort_matrix(BTF_B);
-        }
-      }//If amd order domains
-      matrix_to_views_2D(BTF_A);
-      find_2D_convert(BTF_A);
-      kokkos_order_init_2D<Int,Entry,Exe_Space> iO(this);
-      Kokkos::parallel_for(TeamPolicy(num_threads,1), iO);
-      Kokkos::fence();
-    }
-    else
-    {
-      MALLOC_INT_1DARRAY(vals_order_scotch_array, A.nnz);
-      scotch_partition(A);
-      init_tree_thread();
-      //Add domain order options
-      matrix_to_views_2D(A);
-      find_2D_convert(A);
-      kokkos_order_init_2D<Int,Entry,Exe_Space> iO(this);
-      Kokkos::parallel_for(TeamPolicy(num_threads,1), iO);
-      Kokkos::fence();
-    }
-
-    std::cout << "Order Timer 2: "
-      << timer_one.seconds()
-      << std::endl;
-
-    return;
-  }
+  }//end btf_order
 
 
   template <class Int, class Entry, class Exe_Space>
@@ -550,12 +294,12 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
     if(Options.btf == BASKER_FALSE)
     {
       MALLOC_INT_1DARRAY(vals_order_scotch_array, A.nnz);
-      scotch_partition(A);
+      partition(A);
     }
     else
     {
       MALLOC_INT_1DARRAY(vals_order_scotch_array, BTF_A.nnz);
-      scotch_partition(BTF_A);
+      partition(BTF_A);
     }
     return 0;
   }//end partition()
@@ -609,76 +353,77 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
         scale_row_array(i) = one;
         scale_col_array(i) = one;
       }
-      if(Options.incomplete == BASKER_FALSE)
-      {
-        if (option == 0) {
-          if(Options.verbose == BASKER_TRUE) {
-            std::cout << " ++ no BTF matching ++ " << std::endl;
-          }
+      if (option == 0) {
+        if(Options.verbose == BASKER_TRUE) {
+          std::cout << " ++ no BTF matching ++ " << std::endl;
         }
-        else if (option == 1) {
-          if(Options.verbose == BASKER_TRUE) {
-            std::cout << " ++ calling ShyLUBasker::MWM (" << A.nrow << " x " << A.ncol << ") ++ " << std::endl;
+      }
+      else if (option == 1) {
+        if(Options.verbose == BASKER_TRUE) {
+          std::cout << " ++ calling ShyLUBasker::MWM (" << A.nrow << " x " << A.ncol << ") ++ " << std::endl;
+        }
+        num_match = mwm(A, order_match_array);
+      } 
+      #if defined(BASKER_MC64) || defined(BASKER_SUPERLUDIS_MC64)
+      else if (option == 3) {
+        Int job = 5; //2 is the default for SuperLU_DIST
+        // call mc64
+        if(Options.verbose == BASKER_TRUE) {
+          std::cout << " ++ calling MC64 ++ " << std::endl;
+        }
+        mc64(job, order_match_array, scale_row_array, scale_col_array);
+        #if 0
+        for(Int j = 0; j < A.ncol; j++) {
+          for(Int k = A.col_ptr[j]; k < A.col_ptr[j+1]; k++) {
+            A.val[k] *= (scale_col_array(j) * scale_row_array(A.row_idx[k]));
           }
-          num_match = mwm(A, order_match_array);
-        } 
-        #if defined(BASKER_MC64) || defined(BASKER_SUPERLUDIS_MC64)
-        else if (option == 3) {
-          Int job = 5; //2 is the default for SuperLU_DIST
-          // call mc64
-          if(Options.verbose == BASKER_TRUE) {
-            std::cout << " ++ calling MC64 ++ " << std::endl;
-          }
-          mc64(job, order_match_array, scale_row_array, scale_col_array);
-          #if 0
-          for(Int j = 0; j < A.ncol; j++) {
-            for(Int k = A.col_ptr[j]; k < A.col_ptr[j+1]; k++) {
-              A.val[k] *= (scale_col_array(j) * scale_row_array(A.row_idx[k]));
-            }
-          }
-          #endif
         }
         #endif
-        else { // if (option == 2 or default)
-          double maxwork = 0.0;
-          double work;
-          INT_1DARRAY WORK;
-          MALLOC_INT_1DARRAY(WORK, 5 * (A.ncol));
-          if(Options.verbose == BASKER_TRUE) {
-            std::cout << " ++ calling TRILINOS_BTF_MAXTRANS (" << A.nrow << " x " << A.ncol << ") ++ " << std::endl;
-          }
-          if (std::is_same<Int, int>::value) {
-            int *col_ptr = reinterpret_cast <int*> (&(A.col_ptr(0)));
-            int *row_idx = reinterpret_cast <int*> (&(A.row_idx(0)));
-            int *order   = reinterpret_cast <int*> (&(order_match_array(0)));
-            int *iwork   = reinterpret_cast <int*> (&(WORK(0)));
-            num_match = trilinos_btf_maxtrans ((int)A.nrow, (int)A.ncol, col_ptr, row_idx, maxwork, &work, order, iwork);
-          } else {
-            long int *col_ptr = reinterpret_cast <long int*> (&(A.col_ptr(0)));
-            long int *row_idx = reinterpret_cast <long int*> (&(A.row_idx(0)));
-            long int *order   = reinterpret_cast <long int*> (&(order_match_array(0)));
-            long int *iwork   = reinterpret_cast <long int*> (&(WORK(0)));
-            num_match = trilinos_btf_l_maxtrans ((long int)A.nrow, (long int)A.ncol, col_ptr, row_idx, maxwork, &work, order, iwork);
-          }
-          #if 0
-          printf( " >> debug: set order_match to identity <<\n" );
-          for(Int i = 0; i < A.nrow; i++)
-          {
-            order_match_array(i) = i;
-          }
-          #endif
-          FREE_INT_1DARRAY(WORK);
-        }
-        // apply matching to the rows of A
-        permute_row(A, order_match_array);
       }
-      else
-      {
+      #endif
+      else { // if (option == 2 or default)
+        double maxwork = 0.0;
+        double work;
+        INT_1DARRAY WORK;
+        MALLOC_INT_1DARRAY(WORK, 5 * (A.ncol));
+        if(Options.verbose == BASKER_TRUE) {
+          std::cout << " ++ calling TRILINOS_BTF_MAXTRANS (" << A.nrow << " x " << A.ncol << ") ++ " << std::endl;
+        }
+        if constexpr (std::is_same_v<Int, int>) {
+          int *col_ptr = &(A.col_ptr(0));
+          int *row_idx = &(A.row_idx(0));
+          int *order   = &(order_match_array(0));
+          int *iwork   = &(WORK(0));
+          num_match = trilinos_btf_maxtrans ((int)A.nrow, (int)A.ncol, col_ptr, row_idx, maxwork, &work, order, iwork);
+        } else if constexpr (std::is_same_v<Int, UF_long>) {
+          // Int is exactly UF_long here (e.g. long long == __int64 on Win64), so no
+          // cast is needed: the pointers already have the right type. A reinterpret_cast
+          // to bridge a different Int (e.g. 32-bit `long` on LLP64) would be UB even
+          // when sizeof matches - [basic.lval]/11 (https://eel.is/c++draft/basic.lval#11) 
+          // only allows access through a similar type (same type, its signed/unsigned counterpart, 
+          // or a char type), and `long`/`long long` are not "similar" to each other
+          // regardless of width.
+          UF_long *col_ptr = &(A.col_ptr(0));
+          UF_long *row_idx = &(A.row_idx(0));
+          UF_long *order   = &(order_match_array(0));
+          UF_long *iwork   = &(WORK(0));
+          num_match = trilinos_btf_l_maxtrans ((UF_long)A.nrow, (UF_long)A.ncol, col_ptr, row_idx, maxwork, &work, order, iwork);
+        } else {
+          // Unsupported ordinal type for this SuiteSparse bridge: fail explicitly
+          // instead of silently reinterpreting memory of the wrong width/type.
+          return BASKER_ERROR;
+        }
+        #if 0
+        printf( " >> debug: set order_match to identity <<\n" );
         for(Int i = 0; i < A.nrow; i++)
         {
           order_match_array(i) = i;
         }
+        #endif
+        FREE_INT_1DARRAY(WORK);
       }
+      // apply matching to the rows of A
+      permute_row(A, order_match_array);
       //printf( " match_array\n" );
       //for(Int j = 0; j < A.ncol; j++) printf( " > %d\n",order_match_array(j) );
       //A.print_matrix("B.dat");
@@ -796,7 +541,7 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
 
   template <class Int, class Entry, class Exe_Space>
   BASKER_INLINE
-  int Basker<Int, Entry, Exe_Space>::apply_scotch_partition(BASKER_BOOL keep_zeros, BASKER_BOOL compute_nd, BASKER_BOOL apply_nd)
+  int Basker<Int, Entry, Exe_Space>::compute_partition(BASKER_BOOL keep_zeros, BASKER_BOOL compute_nd, BASKER_BOOL apply_nd)
   {
     #if 1//def BASKER_TIMER
     Kokkos::Timer scotch_timer;
@@ -807,7 +552,7 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
     //currently finds ND and permute BTF_A
     //Would like to change so finds permuation, 
     //and move into 2D-Structure
-    //printf(" in apply_scotch_partition\n" );
+    //printf(" in compute_partition\n" );
     //AAT.print_matrix("T.dat");
     BASKER_MATRIX AAT;
     if(Options.symmetric == BASKER_TRUE) {
@@ -831,12 +576,12 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
     int info_scotch = 0;
     if (compute_nd) {
       if (Options.symmetric == BASKER_TRUE) {
-        info_scotch = scotch_partition(BTF_A, apply_nd);
+        info_scotch = partition(BTF_A, apply_nd);
       } else {
-        info_scotch = scotch_partition(BTF_A, AAT, apply_nd);
+        info_scotch = partition(BTF_A, AAT, apply_nd);
       }
     } else if (apply_nd) {
-      // permtab is applied inside scotch_partition (also stored in vals_order_scotch_array, which is not needed) if compute_nd
+      // permtab is applied inside partition (also stored in vals_order_scotch_array, which is not needed) if compute_nd
       permute_row(BTF_A, part_tree.permtab);
       permute_col(BTF_A, part_tree.permtab);
     }
@@ -846,12 +591,12 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
 
     if (info_scotch != BASKER_SUCCESS || !apply_nd) {
       if(Options.verbose == BASKER_TRUE) {
-        std::cout << " > scotch_partition returned info = " << info_scotch << " with apply_nd = " << apply_nd << std::endl;
+        std::cout << " > partition returned info = " << info_scotch << " with apply_nd = " << apply_nd << std::endl;
       }
       return info_scotch;
     }
     if (Options.symmetric != BASKER_TRUE) {
-      // apply ND to AAT (scotch_partition applies to BTF_A, only)
+      // apply ND to AAT (partition applies to BTF_A, only)
       // TODO: just call permute_row & permute_col?
       INT_1DARRAY col_ptr;
       INT_1DARRAY row_idx;
@@ -1095,20 +840,16 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
     //finds the starting point of A for submatrices
     find_2D_convert(BTF_A);
     //now we can fill submatrices
-    #ifdef BASKER_KOKKOS
-     #ifdef BASKER_PARALLEL_INIT_2D
+    #ifdef BASKER_PARALLEL_INIT_2D
      kokkos_order_init_2D<Int,Entry,Exe_Space> iO(this);
      Kokkos::parallel_for(TeamPolicy(num_threads,1), iO);
      Kokkos::fence();
-     #else
+    #else
      bool alloc = true;
      //bool keep_zeros = true;
      for (Int p = 0; p < num_threads; p++) {
        this->t_init_2DA(p, alloc, keep_zeros);
      }
-     #endif
-    #else
-     //Comeback
     #endif
     #ifdef BASKER_TIMER
     double init_2d_time = scotch_timer.seconds();
@@ -1134,15 +875,15 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
 
   template <class Int, class Entry, class Exe_Space>
   BASKER_INLINE
-  int Basker<Int, Entry, Exe_Space>::scotch_partition(BASKER_MATRIX &M, BASKER_BOOL apply_nd)
+  int Basker<Int, Entry, Exe_Space>::partition(BASKER_MATRIX &M, BASKER_BOOL apply_nd)
   {
     int info_scotch = 0;
     if(Options.symmetric == BASKER_TRUE) {
-      info_scotch = scotch_partition(M, M, apply_nd);
+      info_scotch = partition(M, M, apply_nd);
     } else {
       BASKER_MATRIX MMT;
       AplusAT(M,MMT);
-      info_scotch = scotch_partition(M, MMT, apply_nd);
+      info_scotch = partition(M, MMT, apply_nd);
       FREE(MMT);
     }
     return info_scotch;
@@ -1150,18 +891,18 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
 
   template <class Int, class Entry, class Exe_Space>
   BASKER_INLINE
-  int Basker<Int, Entry, Exe_Space>::scotch_partition(BASKER_MATRIX &M, BASKER_MATRIX &MMT, BASKER_BOOL apply_nd)
+  int Basker<Int, Entry, Exe_Space>::partition(BASKER_MATRIX &M, BASKER_MATRIX &MMT, BASKER_BOOL apply_nd)
   {
     nd_flag = BASKER_FALSE;
 
-    int info_scotch = part_scotch(MMT, part_tree);
+    int info_scotch = nested_dissect(MMT, part_tree);
     if (info_scotch != BASKER_SUCCESS || !apply_nd) {
       if(Options.verbose == BASKER_TRUE) {
-        std::cout << " > scotch_partition returned with info = " << info_scotch << " and apply_nd = " << apply_nd << std::endl;
+        std::cout << " > partition returned with info = " << info_scotch << " and apply_nd = " << apply_nd << std::endl;
       }
       return info_scotch;
     } else if(Options.verbose == BASKER_TRUE) {
-      printf( "\n part_scotch done (num_threads = %d,%lu)\n",int(num_threads),part_tree.leaf_nnz.extent(0) );
+      printf( "\n nested_dissect done (num_threads = %d,%lu)\n",int(num_threads),part_tree.leaf_nnz.extent(0) );
       //for (Int i = 0; i < num_threads; i++) printf( " nnz_leaf[%d] = %d\n",i,part_tree.leaf_nnz[i] ); printf( "\n" );
     }
     nd_flag = BASKER_TRUE;
@@ -1182,7 +923,7 @@ static int basker_sort_matrix_col(const void *arg1, const void *arg2)
 
     //May need to sort row_idx
     return BASKER_SUCCESS; 
-  }//end scotch_partition()
+  }//end partition()
 
 
   template <class Int, class Entry, class Exe_Space>

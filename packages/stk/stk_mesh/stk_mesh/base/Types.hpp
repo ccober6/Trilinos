@@ -127,25 +127,25 @@ enum class Operation
 
 enum FieldAccessTag : uint8_t
 {
-  ReadWrite    = 0, // Sync values to memory space and mark as modified; Allow modification
-  ReadOnly     = 1, // Sync values to memory space and do not mark as modified; Disallow modification
+  ReadOnly     = 0, // Sync values to memory space and do not mark as modified; Disallow modification
+  ReadWrite    = 1, // Sync values to memory space and mark as modified; Allow modification
   OverwriteAll = 2, // Do not sync values to memory space and mark as modified; Allow modification
 
   Unsynchronized,      // Do not sync values to memory space and do not mark as modified; Allow modification
   ConstUnsynchronized, // Do not sync values to memory space and do not mark as modified; Disallow modification
 
-  InvalidAccess,
+  InvalidAccess     // For internal use only.  Not valid for accessing data.
 };
 
 constexpr int NumTrackedFieldAccessTags = 3;
 
 inline std::ostream& operator<<(std::ostream& os, FieldAccessTag accessTag) {
     switch (accessTag) {
-        case ReadWrite:
-            os << "ReadWrite";
-            break;
         case ReadOnly:
             os << "ReadOnly";
+            break;
+        case ReadWrite:
+            os << "ReadWrite";
             break;
         case OverwriteAll:
             os << "OverwriteAll";
@@ -199,14 +199,22 @@ struct FastMeshIndex
   unsigned bucket_ord;
 };
 
+KOKKOS_INLINE_FUNCTION
 constexpr bool operator<(const FastMeshIndex& lhs, const FastMeshIndex& rhs)
 {
   return lhs.bucket_id == rhs.bucket_id ? lhs.bucket_ord < rhs.bucket_ord : lhs.bucket_id < rhs.bucket_id;
 }
 
+KOKKOS_INLINE_FUNCTION
 constexpr bool operator==(const FastMeshIndex& lhs, const FastMeshIndex& rhs)
 {
   return lhs.bucket_id == rhs.bucket_id && lhs.bucket_ord == rhs.bucket_ord;
+}
+
+KOKKOS_INLINE_FUNCTION
+constexpr bool operator!=(const FastMeshIndex& lhs, const FastMeshIndex& rhs)
+{
+  return lhs.bucket_id != rhs.bucket_id || lhs.bucket_ord != rhs.bucket_ord;
 }
 
 typedef stk::topology::rank_t EntityRank ;
@@ -274,9 +282,6 @@ using EntityIdProcMap = std::map<EntityId, int>;
 
 using EntityKeyProc    = std::pair<EntityKey, int>;
 using EntityKeyProcVec = std::vector<EntityKeyProc>;
-#ifndef STK_HIDE_DEPRECATED_CODE // Delete after Aug 2025
-using EntityKeyProcMap STK_DEPRECATED = std::map<EntityKey, int>;
-#endif
 
 /** \brief  Spans of a vector of entity-processor pairs are common.
  *
@@ -325,8 +330,8 @@ enum ConnectivityType
   INVALID_CONNECTIVITY_TYPE
 };
 
-constexpr unsigned INVALID_BUCKET_ID = std::numeric_limits<int>::max();
-constexpr unsigned INVALID_PARTITION_ID = std::numeric_limits<int>::max();
+constexpr unsigned INVALID_BUCKET_ID = std::numeric_limits<unsigned>::max();
+constexpr unsigned INVALID_PARTITION_ID = std::numeric_limits<unsigned>::max();
 
 #define STK_16BIT_CONNECTIVITY_ORDINAL
 #ifdef STK_16BIT_CONNECTIVITY_ORDINAL

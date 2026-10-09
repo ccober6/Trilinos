@@ -15,12 +15,13 @@
 #include <string>
 
 #include <stk_math/StkVector.hpp>
+#include <Akri_Surface_Identifier.hpp>
+
 namespace krino {
 
 class InterfaceID;
 class PhaseTag;
 class SnapInfo;
-class Surface_Identifier;
 
 class ElementCutter
 {
@@ -92,6 +93,10 @@ public:
   virtual PhaseTag get_starting_phase(const ElementCutter * cutter) const = 0;
 
   virtual void set_do_update_geometry_when_mesh_changes(const bool /*flag*/) const {}
+
+  virtual double estimate_curvature_times_element_size(const stk::mesh::BulkData & mesh, stk::mesh::Entity element) const { return 0.; }
+
+  virtual stk::math::Vector3d compute_interface_normal(const stk::mesh::BulkData & mesh, const Surface_Identifier surfaceIdentifier, const stk::mesh::Entity element) const { return stk::math::Vector3d::ZERO; }
 };
 
 inline bool InterfaceGeometry::element_with_nodal_distance_intersects_distance_interval(const std::vector<double> & elemNodeDist, const std::array<double,2> & loAndHi)

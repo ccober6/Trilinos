@@ -12,13 +12,13 @@
 #include "Teuchos_GlobalMPISession.hpp"
 
 // Re-test cuda with hierarchical cuda parallelism turned on (experimental)
-#define SACADO_VIEW_CUDA_HIERARCHICAL_DFAD 1
+#define SACADO_GPU_HIERARCHICAL_DFAD 1
 #define SACADO_KOKKOS_USE_MEMORY_POOL 1
 
 #include "Fad_KokkosTests.hpp"
 
-typedef Kokkos::LayoutContiguous<Kokkos::LayoutLeft,32> LeftContiguous32;
-typedef Kokkos::LayoutContiguous<Kokkos::LayoutRight,32> RightContiguous32;
+typedef Sacado::LayoutContiguous<Kokkos::LayoutLeft,32> LeftContiguous32;
+typedef Sacado::LayoutContiguous<Kokkos::LayoutRight,32> RightContiguous32;
 #undef VIEW_FAD_TESTS_FDC
 #define VIEW_FAD_TESTS_FDC( F, D )                                      \
   VIEW_FAD_TESTS_FLD( F, LeftContiguous32, D )                          \
@@ -30,6 +30,7 @@ typedef Kokkos::LayoutContiguous<Kokkos::LayoutRight,32> RightContiguous32;
   VIEW_FAD_TESTS_SFLD( F, RightContiguous32, D )
 
 // Instantiate tests for Cuda device
+// We need to fix this because UVM is going away in Kokkos and we need some basic testing of Hierarchical-DFad
 #if defined(KOKKOS_ENABLE_CUDA_UVM)
 using Kokkos::Cuda;
 VIEW_FAD_TESTS_FDC(  DFadType , Cuda )

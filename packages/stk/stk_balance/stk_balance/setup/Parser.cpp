@@ -35,29 +35,10 @@
 #include "stk_balance/search_tolerance_algs/SecondShortestEdgeFaceSearchTolerance.hpp"
 #include "stk_util/command_line/CommandLineParserUtils.hpp"
 #include "stk_util/util/string_utils.hpp"
+#include "stk_io/FileValidator.hpp"
 
 namespace stk {
 namespace balance {
-
-std::string construct_output_file_name(const std::string& outputDirectory, const std::string& inputFile)
-{
-  if (outputDirectory == DefaultSettings::outputDirectory) {
-    return inputFile;
-  }
-  else {
-    std::size_t found = inputFile.find_last_of("/");
-    std::string filename = inputFile;
-    if (found != std::string::npos) {
-      filename = inputFile.substr(found + 1);
-    }
-    return outputDirectory + "/" + filename;
-  }
-}
-
-std::string construct_generic_parallel_file_name(const std::string& inputFile, unsigned numProcs)
-{
-  return (numProcs > 1) ? inputFile + "." + std::to_string(numProcs) + ".*" : inputFile;
-}
 
 std::string Examples::get_quick_example()
 {
@@ -106,7 +87,11 @@ void Parser::parse_command_line_options(int argc, const char** argv, BalanceSett
 {
   setup_messages(argv);
 
+  stk::ErrorHandler orig = stk::set_assert_handler(stk::clean_error_handler);
+
   stk::parse_command_line(argc, argv, m_quickExample, m_longExamples, m_commandLineParser, m_comm);
+
+  stk::set_assert_handler(orig);
 
   set_filenames(settings);
   set_processors(settings);
@@ -114,6 +99,7 @@ void Parser::parse_command_line_options(int argc, const char** argv, BalanceSett
   set_contact_search(settings);
   set_contact_search_tolerance(settings);
   set_fix_spiders(settings);
+  set_group_spider_legs(settings);
   set_fix_mechanisms(settings);
   set_decomp_method(settings);
   set_vertex_weight_block_multiplier(settings);
@@ -185,8 +171,12 @@ void Parser::add_options_to_parser()
   stk::CommandLineOption contactSearch{m_optionNames.contactSearch, "",
                            "Use proximity search for contact [on|off]"};
   stk::CommandLineOption fixSpiders{m_optionNames.fixSpiders, "",
-                           "Correct the decomp to group spider legs (large collection of beam "
-                           "elements connected to a single node) onto fewer processors [on|off]"};
+                           "Correct the decomp to place spider legs (large collection of beam "
+                           "elements connected to a single node) on the same processor as the "
+                           "volume elements at the end of each leg [on|off]"};
+  stk::CommandLineOption groupSpiderLegs{m_optionNames.groupSpiderLegs, "",
+                           "If fixing spider elements, group all legs and the volume elements at the "
+                           "ends of the legs onto a single processor for each spider [on|off]"};
   stk::CommandLineOption fixMechanisms{m_optionNames.fixMechanisms, "",
                            "Remove mechanisms (partition components connected by a hinge) in "
                            "the decomp by reassigning element ownership [on|off]"};
@@ -239,6 +229,7 @@ void Parser::add_options_to_parser()
   m_commandLineParser.add_optional_implicit(faceSearchRelTol, DefaultSettings::faceSearchRelTol);
   m_commandLineParser.add_optional(contactSearch, (DefaultSettings::useContactSearch) ? "on" : "off");
   m_commandLineParser.add_optional(fixSpiders, (DefaultSettings::fixSpiders) ? "on" : "off");
+  m_commandLineParser.add_optional(groupSpiderLegs, (DefaultSettings::groupSpiderLegs) ? "on" : "off");
   m_commandLineParser.add_optional(fixMechanisms, (DefaultSettings::fixMechanisms) ? "on" : "off");
   m_commandLineParser.add_optional(decompMethod, DefaultSettings::decompMethod);
   m_commandLineParser.add_optional(vertexWeightBlockMultiplier, DefaultSettings::vertexWeightBlockMultiplier);
@@ -269,7 +260,7 @@ void Parser::set_filenames(BalanceSettings& settings) const
 {
   std::string outputDirectory = m_commandLineParser.get_option_value<std::string>(m_optionNames.outputDirectory);
   const std::string inputFilename = m_commandLineParser.get_option_value<std::string>(m_optionNames.infile);
-  const std::string outputFilename = construct_output_file_name(outputDirectory, inputFilename);
+  const std::string outputFilename = stk::io::construct_output_file_name(outputDirectory, inputFilename);
 
   settings.set_input_filename(inputFilename);
   settings.set_output_filename(outputFilename);
@@ -353,6 +344,19 @@ void Parser::set_fix_spiders(BalanceSettings& settings) const
         "Invalid spider fixing argument (" + fixSpiders + ").  Must be one of: [on|off]");
 
     settings.setShouldFixSpiders(fixSpiders == "on");
+  }
+}
+
+void Parser::set_group_spider_legs(BalanceSettings& settings) const
+{
+  if (m_commandLineParser.is_option_parsed(m_optionNames.groupSpiderLegs)) {
+    std::string groupSpiderLegs = m_commandLineParser.get_option_value<std::string>(m_optionNames.groupSpiderLegs);
+    std::transform(groupSpiderLegs.begin(), groupSpiderLegs.end(), groupSpiderLegs.begin(), ::tolower);
+
+    STK_ThrowRequireMsg(groupSpiderLegs == "on" || groupSpiderLegs == "off",
+        "Invalid spider leg grouping argument (" + groupSpiderLegs + ").  Must be one of: [on|off]");
+
+    settings.setShouldGroupSpiderLegs(groupSpiderLegs == "on");
   }
 }
 

@@ -10,9 +10,11 @@
 #ifndef MUELU_DROPPINGCOMMON_HPP
 #define MUELU_DROPPINGCOMMON_HPP
 
+// #define MUELU_COALESCE_DROP_DEBUG 1
+
 #include "Kokkos_Core.hpp"
-#include "Kokkos_ArithTraits.hpp"
-#include "Xpetra_Access.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
+#include "Tpetra_Access.hpp"
 #include "Xpetra_Matrix.hpp"
 #include "Xpetra_VectorFactory.hpp"
 #include "MueLu_Utilities.hpp"
@@ -21,13 +23,14 @@ namespace MueLu {
 
 /*! Possible decision for a single entry.
   Once we are done with dropping, we should have no UNDECIDED entries left.
-  Normally, both DROP and BOUNDARY entries will be dropped, but we distinguish them in case we want to keep boundaries.
+  Normally, both DROP and BOUNDARY_ENTRY entries will be dropped, but we distinguish them in case we want to keep boundaries.
  */
 enum DecisionType : char {
-  UNDECIDED = 0,  // no decision has been taken yet, used for initialization
-  KEEP      = 1,  // keeep the entry
-  DROP      = 2,  // drop it
-  BOUNDARY  = 3   // entry is a boundary
+  UNDECIDED      = 0,  // no decision has been taken yet, used for initialization
+  KEEP           = 1,  // keeep the entry
+  DROP           = 2,  // drop it
+  SYMDROP        = 3,  // drop if doesn't create Dirichlet
+  BOUNDARY_ENTRY = 4   // entry is a boundary
 };
 
 namespace Misc {
@@ -87,7 +90,7 @@ class PointwiseDropBoundaryFunctor {
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 class PointwiseSymmetricDropBoundaryFunctor {
  private:
-  using local_matrix_type   = typename Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_type;
+  using local_matrix_type   = typename Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_device_type;
   using scalar_type         = typename local_matrix_type::value_type;
   using local_ordinal_type  = typename local_matrix_type::ordinal_type;
   using memory_space        = typename local_matrix_type::memory_space;
@@ -172,7 +175,7 @@ class VectorDropBoundaryFunctor {
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 class VectorSymmetricDropBoundaryFunctor {
  private:
-  using local_matrix_type       = typename Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_type;
+  using local_matrix_type       = typename Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_device_type;
   using scalar_type             = typename local_matrix_type::value_type;
   using local_ordinal_type      = typename local_matrix_type::ordinal_type;
   using memory_space            = typename local_matrix_type::memory_space;
@@ -241,7 +244,7 @@ class KeepDiagonalFunctor {
     const size_t offset = A.graph.row_map(rlid);
     for (local_ordinal_type k = 0; k < row.length; ++k) {
       auto clid = row.colidx(k);
-      if ((rlid == clid) && (results(offset + k) != BOUNDARY)) {
+      if ((rlid == clid) && (results(offset + k) != BOUNDARY_ENTRY)) {
         results(offset + k) = KEEP;
         break;
       }
@@ -321,7 +324,7 @@ class MarkSingletonFunctor {
       if (rlid == clid)
         results(offset + k) = KEEP;
       else
-        results(offset + k) = BOUNDARY;
+        results(offset + k) = BOUNDARY_ENTRY;
     }
   }
 };
@@ -369,7 +372,7 @@ class MarkSingletonVectorFunctor {
       if (rlid == clid)
         results(offset + k) = KEEP;
       else
-        results(offset + k) = BOUNDARY;
+        results(offset + k) = BOUNDARY_ENTRY;
     }
   }
 };
@@ -382,7 +385,7 @@ template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 class BlockDiagonalizeFunctor {
  private:
   using matrix_type       = Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
-  using local_matrix_type = typename matrix_type::local_matrix_type;
+  using local_matrix_type = typename matrix_type::local_matrix_device_type;
 
   using scalar_type        = typename local_matrix_type::value_type;
   using local_ordinal_type = typename local_matrix_type::ordinal_type;
@@ -394,20 +397,21 @@ class BlockDiagonalizeFunctor {
 
   local_matrix_type A;
   local_block_indices_view_type point_to_block;
+  Teuchos::RCP<block_indices_type> ghosted_point_to_blockMV;
   local_block_indices_view_type ghosted_point_to_block;
   results_view results;
 
  public:
   BlockDiagonalizeFunctor(matrix_type& A_, block_indices_type& point_to_block_, results_view& results_)
     : A(A_.getLocalMatrixDevice())
-    , point_to_block(point_to_block_.getLocalViewDevice(Xpetra::Access::ReadOnly))
+    , point_to_block(point_to_block_.getLocalViewDevice(Tpetra::Access::ReadOnly))
     , results(results_) {
     auto importer = A_.getCrsGraph()->getImporter();
 
     if (!importer.is_null()) {
-      auto ghosted_point_to_blockMV = Xpetra::VectorFactory<LocalOrdinal, LocalOrdinal, GlobalOrdinal, Node>::Build(importer->getTargetMap());
+      ghosted_point_to_blockMV = Xpetra::VectorFactory<LocalOrdinal, LocalOrdinal, GlobalOrdinal, Node>::Build(importer->getTargetMap(), false);
       ghosted_point_to_blockMV->doImport(point_to_block_, *importer, Xpetra::INSERT);
-      ghosted_point_to_block = ghosted_point_to_blockMV->getLocalViewDevice(Xpetra::Access::ReadOnly);
+      ghosted_point_to_block = ghosted_point_to_blockMV->getLocalViewDevice(Tpetra::Access::ReadOnly);
     } else
       ghosted_point_to_block = point_to_block;
   }
@@ -435,7 +439,7 @@ template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 class BlockDiagonalizeVectorFunctor {
  private:
   using matrix_type       = Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
-  using local_matrix_type = typename matrix_type::local_matrix_type;
+  using local_matrix_type = typename matrix_type::local_matrix_device_type;
 
   using scalar_type        = typename local_matrix_type::value_type;
   using local_ordinal_type = typename local_matrix_type::ordinal_type;
@@ -458,14 +462,14 @@ class BlockDiagonalizeVectorFunctor {
  public:
   BlockDiagonalizeVectorFunctor(matrix_type& A_, block_indices_type& point_to_block_, const RCP<const importer_type>& importer, results_view& results_, id_translation_type row_translation_, id_translation_type col_translation_)
     : A(A_.getLocalMatrixDevice())
-    , point_to_block(point_to_block_.getLocalViewDevice(Xpetra::Access::ReadOnly))
+    , point_to_block(point_to_block_.getLocalViewDevice(Tpetra::Access::ReadOnly))
     , results(results_)
     , row_translation(row_translation_)
     , col_translation(col_translation_) {
     if (!importer.is_null()) {
-      ghosted_point_to_blockMV = Xpetra::VectorFactory<LocalOrdinal, LocalOrdinal, GlobalOrdinal, Node>::Build(importer->getTargetMap());
+      ghosted_point_to_blockMV = Xpetra::VectorFactory<LocalOrdinal, LocalOrdinal, GlobalOrdinal, Node>::Build(importer->getTargetMap(), false);
       ghosted_point_to_blockMV->doImport(point_to_block_, *importer, Xpetra::INSERT);
-      ghosted_point_to_block = ghosted_point_to_blockMV->getLocalViewDevice(Xpetra::Access::ReadOnly);
+      ghosted_point_to_block = ghosted_point_to_blockMV->getLocalViewDevice(Tpetra::Access::ReadOnly);
     } else
       ghosted_point_to_block = point_to_block;
   }
@@ -526,13 +530,17 @@ class DebugFunctor {
 @class SymmetrizeFunctor
 @brief Functor that symmetrizes the dropping decisions.
 */
-template <class local_matrix_type>
+template <class local_matrix_type, bool weakWins = false, bool offdiagNnzsCanBeReducedToZero = false>
 class SymmetrizeFunctor {
  private:
   using scalar_type        = typename local_matrix_type::value_type;
   using local_ordinal_type = typename local_matrix_type::ordinal_type;
   using memory_space       = typename local_matrix_type::memory_space;
   using results_view       = Kokkos::View<DecisionType*, memory_space>;
+  using ATS                = KokkosKernels::ArithTraits<scalar_type>;
+  using impl_SC            = typename ATS::val_type;
+  using impl_ATS           = KokkosKernels::ArithTraits<impl_SC>;
+  using magATS             = KokkosKernels::ArithTraits<typename impl_ATS::magnitudeType>;
 
   local_matrix_type A;
   results_view results;
@@ -546,9 +554,17 @@ class SymmetrizeFunctor {
   void operator()(local_ordinal_type rlid) const {
     auto row            = A.rowConst(rlid);
     const size_t offset = A.graph.row_map(rlid);
+
+    bool hadOffdiagKeep = false;
     for (local_ordinal_type k = 0; k < row.length; ++k) {
       if (results(offset + k) == KEEP) {
         auto clid = row.colidx(k);
+        // record whether or not original row had a nonzero off-diagonal
+        if constexpr (weakWins && !offdiagNnzsCanBeReducedToZero) {
+          if (!hadOffdiagKeep && clid != rlid && results(offset + k) == KEEP) {
+            hadOffdiagKeep = true;
+          }
+        }
         if (clid >= A.numRows())
           continue;
         auto row2            = A.rowConst(clid);
@@ -556,11 +572,55 @@ class SymmetrizeFunctor {
         for (local_ordinal_type k2 = 0; k2 < row2.length; ++k2) {
           auto clid2 = row2.colidx(k2);
           if (clid2 == rlid) {
-            if (results(offset2 + k2) == DROP)
-              results(offset2 + k2) = KEEP;
+            if (results(offset2 + k2) == DROP) {
+              if constexpr (weakWins) {
+                if constexpr (!offdiagNnzsCanBeReducedToZero) {
+                  results(offset + k) = SYMDROP;
+                } else {
+                  results(offset + k) = DROP;
+                }
+              } else {
+                results(offset2 + k2) = KEEP;
+              }
+            }
             break;
           }
         }
+      }
+    }
+    // for weak wins, check that symmetrization did not create a Dirichlet row
+    if constexpr (weakWins && !offdiagNnzsCanBeReducedToZero) {
+      if (hadOffdiagKeep) {
+        bool hasOffdiagKeepNow                     = false;
+        local_ordinal_type rescueK                 = -1;  // index within row
+        typename impl_ATS::magnitudeType rescueVal = magATS::zero();
+
+        for (local_ordinal_type k = 0; k < row.length; ++k) {
+          const auto clid = row.colidx(k);
+          if (clid == rlid) continue;
+
+          const auto d = results(offset + k);
+          if (d == KEEP) {
+            hasOffdiagKeepNow = true;
+            break;
+          }
+
+          if (d == SYMDROP) {
+            auto temp = impl_ATS::magnitude(row.value(k));
+            if (temp >= rescueVal) {
+              rescueK   = k;
+              rescueVal = temp;
+            }
+          }
+        }
+
+        // If none left, flip one SYMDROP back to KEEP
+        if (!hasOffdiagKeepNow && rescueK >= 0) {
+          results(offset + rescueK) = KEEP;
+        }
+      }
+      for (local_ordinal_type k = 0; k < row.length; ++k) {
+        if (results(offset + k) == SYMDROP) results(offset + k) = DROP;
       }
     }
   }

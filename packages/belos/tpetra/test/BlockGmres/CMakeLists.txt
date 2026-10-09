@@ -6,22 +6,20 @@ TRIBITS_ADD_EXECUTABLE_AND_TEST(
   STANDARD_PASS_OUTPUT
 )
 
-ASSERT_DEFINED(${PACKAGE_NAME}_ENABLE_Triutils)
 ASSERT_DEFINED(Tpetra_INST_FLOAT)
 
-IF (${PACKAGE_NAME}_ENABLE_Triutils)
-  IF (Tpetra_INST_FLOAT)
+IF (Tpetra_INST_FLOAT)
 
-   TRIBITS_ADD_EXECUTABLE_AND_TEST(
-     Tpetra_BlockGMRES_hb_DoubleFloat_test
-     SOURCES test_bl_gmres_hb_df.cpp
-     ARGS "--verbose"
-     COMM serial mpi
-     )
+ TRIBITS_ADD_EXECUTABLE_AND_TEST(
+   Tpetra_BlockGMRES_hb_DoubleFloat_test
+   SOURCES test_bl_gmres_hb_df.cpp
+   ARGS "--verbose"
+   COMM serial mpi
+   )
 
-  ENDIF()
+ENDIF()
 
-TRIBITS_ADD_EXECUTABLE_AND_TEST(
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
   Tpetra_resolve_gmres_hb
   SOURCES test_resolve_gmres_hb.cpp
   COMM serial mpi
@@ -31,19 +29,18 @@ TRIBITS_ADD_EXECUTABLE_AND_TEST(
   STANDARD_PASS_OUTPUT
   )
 
-TRIBITS_ADD_EXECUTABLE_AND_TEST(
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
   Tpetra_pseudo_gmres_hb
   SOURCES test_pseudo_gmres_hb.cpp
   COMM serial mpi
   ARGS "--verbose --filename=orsirr1.hb"
   STANDARD_PASS_OUTPUT
   )
-ENDIF()
 
-TRIBITS_ADD_EXECUTABLE_AND_TEST(
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
   Tpetra_BlockGMRES_hb_test
   SOURCES test_bl_gmres_hb.cpp
-  ARGS 
+  ARGS
     "--verbose --ortho-type=DGKS"
     "--verbose --ortho-type=ICGS"
     "--verbose --ortho-type=IMGS"
@@ -61,7 +58,7 @@ TRIBITS_ADD_EXECUTABLE_AND_TEST(
 ENDIF()
 
 
-TRIBITS_ADD_EXECUTABLE_AND_TEST(
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
   Tpetra_BlockFGMRES_hb_test
   SOURCES test_bl_fgmres_hb.cpp
   ARGS "--verbose"
@@ -69,6 +66,14 @@ TRIBITS_ADD_EXECUTABLE_AND_TEST(
   )
 
 TRIBITS_ADD_EXECUTABLE_AND_TEST(
+  Tpetra_BlockFGMRES_keep_hessenberg_test
+  SOURCES test_bl_fgmres_keep_hessenberg.cpp
+  ARGS "--verbose"
+  COMM serial mpi
+  STANDARD_PASS_OUTPUT
+  )
+
+BELOS_ADD_EXECUTABLE_AND_TEUCHOS_AND_KOKKOS_TESTS(
   Tpetra_HybridGMRES_hb_test
   SOURCES test_hybrid_gmres_hb.cpp
   ARGS "--verbose --max-degree=10 --poly-type=Arnoldi"

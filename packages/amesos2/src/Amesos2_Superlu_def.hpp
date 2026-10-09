@@ -310,6 +310,11 @@ Superlu<Matrix,Vector>::numericFactorization_impl()
 #endif
 
     if( data_.options.Equil == SLU::YES ){
+#ifdef HAVE_AMESOS2_TIMERS
+    Teuchos::RCP< Teuchos::Time > Amesos2SLU_EQL = Teuchos::TimeMonitor::getNewCounter ("Time to scale matrix");
+    Teuchos::TimeMonitor equilTimer(*Amesos2SLU_EQL);
+#endif
+
       magnitude_type rowcnd, colcnd, amax;
 
       // calculate row and column scalings
@@ -474,11 +479,6 @@ Superlu<Matrix,Vector>::solve_impl(const Teuchos::Ptr<MultiVecAdapter<Vector> > 
                                    const Teuchos::Ptr<const MultiVecAdapter<Vector> > B) const
 {
   using Teuchos::as;
-#ifdef HAVE_AMESOS2_TIMERS
-    Teuchos::RCP< Teuchos::Time > Amesos2SolveTimer_ = Teuchos::TimeMonitor::getNewCounter ("Time for Amesos2");
-    Teuchos::TimeMonitor solveTimer(*Amesos2SolveTimer_);
-#endif
-
   const global_size_type ld_rhs = this->root_ ? X->getGlobalLength() : 0;
   const size_t nrhs = X->getGlobalNumVectors();
 
@@ -996,6 +996,23 @@ Superlu<Matrix,Vector>::loadA_impl(EPhase current_phase)
   }
 
   return true;
+}
+
+template <class Matrix, class Vector>
+void
+Superlu<Matrix,Vector>::describe_impl(Teuchos::FancyOStream &out,
+                                      const Teuchos::EVerbosityLevel verbLevel) const
+{
+  out << " SuperLU current parameters:" << std::endl;
+  out << "  > IsContiguous = " << (is_contiguous_ ? "YES" : "NO") << std::endl;
+  out << "  > Trans        = " << data_.options.Trans << std::endl;
+  out << "  > IterRefine   = " << data_.options.IterRefine << std::endl;
+  out << "  > ColPerm      = " << data_.options.ColPerm << std::endl;
+  out << "  > Equil        = " << data_.options.Equil << std::endl;
+  out << "  > SymmetricMode   = " << data_.options.SymmetricMode << std::endl;
+  out << "  > ConditionNumber = " << data_.options.ConditionNumber << std::endl;
+  out << "  > DiagPivotThresh = " << data_.options.DiagPivotThresh << std::endl;
+  out << std::endl;
 }
 
 template <class Matrix, class Vector>

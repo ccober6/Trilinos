@@ -151,17 +151,16 @@ public:
 
   Field(MetaData* meta,
         stk::topology::rank_t entityRank,
-        unsigned fieldOrdinal,
+        unsigned ordinal,
+        unsigned rankedOrdinal,
         const std::string& name,
         const DataTraits& dataTraits,
         unsigned numberOfStates,
         FieldState thisState)
-    : FieldBase(meta, entityRank, fieldOrdinal, name, dataTraits, numberOfStates, thisState, host_layout, device_layout,
-                new FieldData<T, stk::ngp::HostMemSpace, HostLayout>(entityRank, fieldOrdinal, name, dataTraits))
+    : FieldBase(meta, entityRank, ordinal, rankedOrdinal, name, dataTraits, numberOfStates, thisState,
+                host_layout, device_layout,
+                new FieldData<T, stk::ngp::HostSpace, HostLayout>(entityRank, ordinal, dataTraits))
   {
-    if constexpr (HostLayout != Layout::Right) {
-      std::cout << "WARNING: Host Fields with non-standard layout are not yet fully-supported by STK Mesh." << std::endl;
-    }
   }
 
   /** \brief  Query this field for a given field state. */
@@ -206,7 +205,8 @@ public:
     return out;
   }
 
-  virtual FieldBase * clone(stk::mesh::impl::FieldRepository & fieldRepo) const override
+  virtual FieldBase * clone(stk::mesh::impl::FieldRepository & fieldRepo, const std::string fieldName = "",
+                            const EntityRank fieldRank = InvalidEntityRank) const override
   {
     FieldBase * f[MaximumFieldStates] {nullptr};
 
@@ -219,12 +219,15 @@ public:
       "_STKFS_NM4"
     };
 
+    std::string clonedFieldName = (fieldName == "") ? name() : fieldName;
+    EntityRank  clonedFieldRank = (fieldRank == InvalidEntityRank) ? entity_rank() : fieldRank;
+
     for (unsigned i = 0 ; i < 6 ; ++i) {
-      const int len_name   = name().size();
+      const int len_name   = clonedFieldName.size();
       const int len_suffix = std::strlen(reserved_state_suffix[i]);
       const int offset     = len_name - len_suffix ;
       if ( 0 <= offset ) {
-        [[maybe_unused]] const char * const name_suffix = name().c_str() + offset;
+        [[maybe_unused]] const char * const name_suffix = clonedFieldName.c_str() + offset;
         STK_ThrowErrorMsgIf(equal_case(name_suffix , reserved_state_suffix[i]),
                         "For name = \"" << name_suffix << "\" CANNOT HAVE THE RESERVED STATE SUFFIX \"" <<
                         reserved_state_suffix[i] << "\"");
@@ -233,28 +236,37 @@ public:
 
     std::string fieldNames[MaximumFieldStates];
 
-    fieldNames[0] = name();
+    fieldNames[0] = clonedFieldName;
 
     if (number_of_states() == 2) {
-      fieldNames[1] = name();
+      fieldNames[1] = clonedFieldName;
       fieldNames[1].append(reserved_state_suffix[0]);
     }
     else {
       for (unsigned i = 1; i < number_of_states(); ++i) {
-        fieldNames[i] = name();
+        fieldNames[i] = clonedFieldName;
         fieldNames[i].append(reserved_state_suffix[i]);
       }
     }
 
     for (unsigned i = 0; i < number_of_states(); ++i) {
       f[i] = new Field(&fieldRepo.mesh_meta_data(),
-                       entity_rank(),
+                       clonedFieldRank,
                        fieldRepo.get_fields().size(),
+                       fieldRepo.get_fields(clonedFieldRank).size(),
                        fieldNames[i],
                        data_traits(),
                        number_of_states(),
                        static_cast<FieldState>(i));
+
       fieldRepo.add_field(f[i]);
+    }
+
+    const InitValsViewType& initVals = get_initial_value_bytes();
+    f[0]->m_initial_value = FieldBase::InitValsViewType("Init-Vals-"+name(), initVals.extent(0));
+
+    for(unsigned j=0; j<initVals.extent(0); ++j) {
+      f[0]->m_initial_value(j) = initVals(j);
     }
 
     for (unsigned i = 0 ; i < number_of_states() ; ++i) {
@@ -264,13 +276,13 @@ public:
     return f[0];
   }
 
-  template <typename MemSpace, typename Enable = void>
+  template <typename Space, typename Enable = void>
   struct LayoutSelector {
     static constexpr Layout layout = device_layout;
   };
 
   template <typename Enable>
-  struct LayoutSelector<stk::ngp::HostMemSpace, Enable> {
+  struct LayoutSelector<stk::ngp::HostSpace, Enable> {
     static constexpr Layout layout = host_layout;
   };
 
@@ -284,8 +296,8 @@ public:
   //
   //   FieldAccessTag : Optional tag indicating how you will access the data.  Options are:
 
-  //     - stk::mesh::ReadWrite     : Sync data to memory space and mark modified; Allow modification [default]
-  //     - stk::mesh::ReadOnly      : Sync data to memory space and do not mark modified; Disallow modification
+  //     - stk::mesh::ReadOnly      : Sync data to memory space and do not mark modified; Disallow modification [default]
+  //     - stk::mesh::ReadWrite     : Sync data to memory space and mark modified; Allow modification
   //     - stk::mesh::OverwriteAll  : Do not sync data and mark modified; Allow modification
 
   //     - stk::mesh::Unsynchronized       : Do not sync data and do not mark modified; Allow modification
@@ -298,25 +310,25 @@ public:
   //     same access tag and memory space that you would otherwise have used, to get the data movement
   //     correct.  Do not use the Unsynchronized access tags for normal workflows.
   //
-  //   MemSpace : Optional Kokkos memory space of the data that you want to access.  It can be either
-  //     a Kokkos host space or a device space.  You can use the aliases "stk::ngp::HostMemSpace" and
-  //     "stk::ngp::MemSpace" as convenient shortcuts.  The HostMemSpace alias is always the host space
-  //     and the MemSpace alias is the default device space in a device build or the host space in
-  //     a host build.  The default is "stk::ngp::HostMemSpace".
+  //   Space : Optional struct that defines the Kokkos memory space and execution space that you want
+  //     to access.  It can be either a stk::ngp::HostSpace or an arbitrary device-space struct of your
+  //     choosing.  STK provides a stk::ngp::DeviceSpace struct for you if you want to use it on device.
+  //     The default template parameter is stk::ngp::HostSpace.
   //
   // Some sample usage for a Field<double> instance:
   //
-  //   auto fieldData = myField.data();                       <-- Read-write access to host data
-  //   auto fieldData = myField.data<stk::mesh::ReadOnly>();  <-- Read-only access to host access
-  //   auto fieldData = myField.data<stk::mesh::ReadWrite, stk::ngp::MemSpace>(); <-- Read-write access to device data
-  //   auto fieldData = myField.data<stk::mesh::ReadOnly, stk::ngp::MemSpace>();  <-- Read-only access to device data
+  //   auto fieldData = myField.data();                       <-- Read-only access to host data
+  //   auto fieldData = myField.data<stk::mesh::ReadWrite>(); <-- Read-write access to host data
+  //   auto fieldData = myField.data<stk::mesh::ReadOnly, stk::ngp::DeviceSpace>();  <-- Read-only access to device data
+  //   auto fieldData = myField.data<stk::mesh::ReadWrite, stk::ngp::DeviceSpace>(); <-- Read-write access to device data
 
-  template <FieldAccessTag FieldAccess = ReadWrite,
-            typename MemSpace = stk::ngp::HostMemSpace>
-  typename FieldDataHelper<T, FieldAccess, MemSpace, LayoutSelector<MemSpace>::layout>::FieldDataType
-  data() const
+  template <FieldAccessTag FieldAccess = ReadOnly,
+            typename Space = stk::ngp::HostSpace>
+  typename FieldDataHelper<T, FieldAccess, Space, LayoutSelector<Space>::layout>::FieldDataType
+  data(
+       const char* file = STK_HOST_FILE, int line = STK_HOST_LINE) const
   {
-    return FieldBase::data<T, FieldAccess, MemSpace, LayoutSelector<MemSpace>::layout>();
+    return FieldBase::data<T, FieldAccess, Space, LayoutSelector<Space>::layout>(file, line);
   }
 
 
@@ -324,13 +336,14 @@ public:
   // that will be used to run any data syncing or updating after a mesh modification that may
   // be necessary.  This is intended for asynchronous execution.
 
-  template <FieldAccessTag FieldAccess = ReadWrite,
-            typename MemSpace = stk::ngp::HostMemSpace,
+  template <FieldAccessTag FieldAccess = ReadOnly,
+            typename Space = stk::ngp::HostSpace,
             typename ExecSpace = stk::ngp::ExecSpace>
-  typename AsyncFieldDataHelper<T, FieldAccess, MemSpace, LayoutSelector<MemSpace>::layout, ExecSpace>::FieldDataType
-  data(const ExecSpace& execSpace) const
+  typename AsyncFieldDataHelper<T, FieldAccess, Space, LayoutSelector<Space>::layout, ExecSpace>::FieldDataType
+  data(const ExecSpace& execSpace,
+       const char* file = STK_HOST_FILE, int line = STK_HOST_LINE) const
   {
-    return FieldBase::data<T, FieldAccess, MemSpace, LayoutSelector<MemSpace>::layout, ExecSpace>(execSpace);
+    return FieldBase::data<T, FieldAccess, Space, LayoutSelector<Space>::layout, ExecSpace>(execSpace, file, line);
   }
 
 private:

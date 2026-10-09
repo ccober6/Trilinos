@@ -12,9 +12,9 @@
 
 #include <Akri_Edge.hpp>
 #include <Akri_Intersection_Points.hpp>
-#include <Akri_LevelSet.hpp>
 #include <Akri_MeshSpecs.hpp>
 #include <Akri_Phase_Support.hpp>
+#include <Akri_Sign.hpp>
 #include <Akri_StkMeshFixture.hpp>
 #include <gtest/gtest.h>
 
@@ -47,7 +47,7 @@ void IntersectionPointFromNodalLevelsetInterfaceGeometry::append_element_interse
 
     const double ls0 = nodeLSValues.at(edgeNodes[0]);
     const double ls1 = nodeLSValues.at(edgeNodes[1]);
-    if (LevelSet::sign_change(ls0, ls1))
+    if (sign_change(ls0, ls1))
     {
       const std::vector<stk::mesh::Entity> intersectionPointNodes{edgeNodes[0], edgeNodes[1]};
       const std::vector<int> intersectionPointSortedDomains{0};
@@ -66,6 +66,17 @@ void IntersectionPointFromNodalLevelsetInterfaceGeometry::set_nodal_levelset(con
     stk::mesh::Entity node = mesh.get_entity(stk::topology::NODE_RANK, nodeIds[n]);
     if (mesh.is_valid(node))
       nodeLSValues[node] = nodeLs[n];
+  }
+}
+
+void PhasePerElementInterfaceGeometry::set_element_phases(const stk::mesh::BulkData & mesh, const std::vector<stk::mesh::EntityId> & elemIds, const std::vector<int> & elemPhases)
+{
+  STK_ThrowRequire(elemIds.size() == elemPhases.size());
+  for (size_t n=0; n<elemIds.size(); ++n)
+  {
+    stk::mesh::Entity elem = mesh.get_entity(stk::topology::ELEMENT_RANK, elemIds[n]);
+    if (mesh.is_valid(elem))
+      myUncutElementPhases[elem] = elemPhases[n];
   }
 }
 

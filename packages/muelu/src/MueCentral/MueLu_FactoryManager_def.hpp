@@ -103,6 +103,8 @@ const RCP<const FactoryBase> FactoryManager<Scalar, LocalOrdinal, GlobalOrdinal,
   } else {
     // No factory was created for this name, but we may know which one to create
     if (varName == "A") return SetAndReturnDefaultFactory(varName, rcp(new RAPFactory()));
+    if (varName == "MinvA") return NoFactory::getRCP();
+    if (varName == "Minv") return NoFactory::getRCP();
     if (varName == "Ainv") return SetAndReturnDefaultFactory(varName, rcp(new InverseApproximationFactory()));
     if (varName == "RAP Pattern") return GetFactory("A");
     if (varName == "AP Pattern") return GetFactory("A");
@@ -197,7 +199,7 @@ const RCP<const FactoryBase> FactoryManager<Scalar, LocalOrdinal, GlobalOrdinal,
 
     if (varName == "DualNodeID2PrimalNodeID") return SetAndReturnDefaultFactory(varName, rcp(new InterfaceMappingTransferFactory()));
     if (varName == "CoarseDualNodeID2PrimalNodeID") return SetAndReturnDefaultFactory(varName, rcp(new InterfaceAggregationFactory()));
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
     // If we're asking for it, find who made P
     if (varName == "pcoarsen: element to node map") return GetFactory("P");
 #endif

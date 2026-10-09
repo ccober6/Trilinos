@@ -11,7 +11,7 @@
 #define MUELU_MATRIXCONSTRUCTION_HPP
 
 #include "Kokkos_Core.hpp"
-#include "Kokkos_ArithTraits.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 
 #include "MueLu_DroppingCommon.hpp"
 
@@ -210,7 +210,7 @@ class PointwiseCountingFunctor<local_matrix_type, functor_type> {
     functor(rlid);
 
 #ifdef MUELU_COALESCE_DROP_DEBUG
-    Kokkos::printf("%s\n", functorName);
+    Kokkos::printf("%s\n", functorName.c_str());
 
     auto row            = A.rowConst(rlid);
     const size_t offset = A.graph.row_map(rlid);
@@ -251,7 +251,7 @@ class PointwiseFillReuseFunctor {
   using local_ordinal_type = typename local_matrix_type::ordinal_type;
   using memory_space       = typename local_matrix_type::memory_space;
   using results_view       = Kokkos::View<DecisionType*, memory_space>;
-  using ATS                = Kokkos::ArithTraits<scalar_type>;
+  using ATS                = KokkosKernels::ArithTraits<scalar_type>;
   using magnitudeType      = typename ATS::magnitudeType;
 
   local_matrix_type A;
@@ -311,9 +311,9 @@ class PointwiseFillReuseFunctor {
     }
   }
 };
-enum lumpingType { no_lumping,
-                   diag_lumping,
-                   distributed_lumping };
+enum lumpingType : int { no_lumping,
+                         diag_lumping,
+                         distributed_lumping };
 
 /*!
   @class PointwiseFillNoReuseFunctor
@@ -323,36 +323,40 @@ enum lumpingType { no_lumping,
   Lumps dropped entries to the diagonal if lumpingChoice==diag_lumping.
   Lumps dropped entries across all kept entries (proportional to their magnitude) if lumpingChoice==ddistributed_lumping.
 */
-template <class local_matrix_type, lumpingType lumpingChoice>
+template <class local_matrix_type, lumpingType lumpingChoice, bool constructFilteredA = true>
 class PointwiseFillNoReuseFunctor {
  private:
   using scalar_type        = typename local_matrix_type::value_type;
   using local_ordinal_type = typename local_matrix_type::ordinal_type;
   using memory_space       = typename local_matrix_type::memory_space;
+  using local_graph_type   = typename local_matrix_type::staticcrsgraph_type;
   using results_view       = Kokkos::View<DecisionType*, memory_space>;
-  using ATS                = Kokkos::ArithTraits<scalar_type>;
+  using ATS                = KokkosKernels::ArithTraits<scalar_type>;
   using magnitudeType      = typename ATS::magnitudeType;
 
   local_matrix_type A;
   results_view results;
+  local_graph_type graph;
   local_matrix_type filteredA;
   magnitudeType dirichletThreshold;
   const scalar_type zero = ATS::zero();
   const scalar_type one  = ATS::one();
 
  public:
-  PointwiseFillNoReuseFunctor(local_matrix_type& A_, results_view& results_, local_matrix_type& filteredA_, magnitudeType dirichletThreshold_)
+  PointwiseFillNoReuseFunctor(local_matrix_type& A_, results_view& results_, local_graph_type& graph_, local_matrix_type& filteredA_, magnitudeType dirichletThreshold_)
     : A(A_)
     , results(results_)
+    , graph(graph_)
     , filteredA(filteredA_)
-    , dirichletThreshold(dirichletThreshold_) {}
+    , dirichletThreshold(dirichletThreshold_) {
+    static_assert(constructFilteredA || (lumpingChoice == no_lumping));
+  }
 
   KOKKOS_INLINE_FUNCTION
   void operator()(const local_ordinal_type rlid) const {
     auto rowA                     = A.row(rlid);
     size_t K                      = A.graph.row_map(rlid);
-    auto rowFilteredA             = filteredA.row(rlid);
-    local_ordinal_type j          = 0;
+    local_ordinal_type j          = graph.row_map(rlid);
     scalar_type droppedSum        = zero;
     scalar_type keptRowSumAbs     = zero;
     local_ordinal_type diagOffset = -1;
@@ -364,10 +368,11 @@ class PointwiseFillNoReuseFunctor {
         }
       }
       if (results(K + k) == KEEP) {
-        rowFilteredA.colidx(j) = rowA.colidx(k);
-        rowFilteredA.value(j)  = rowA.value(k);
+        graph.entries(j) = rowA.colidx(k);
+        if constexpr (constructFilteredA)
+          filteredA.values(j) = rowA.value(k);
         if constexpr (lumpingChoice == distributed_lumping) {
-          keptRowSumAbs += ATS::magnitude(rowFilteredA.value(j));
+          keptRowSumAbs += ATS::magnitude(filteredA.values(j));
         }
         ++j;
       } else if constexpr (lumpingChoice != no_lumping) {
@@ -375,16 +380,15 @@ class PointwiseFillNoReuseFunctor {
       }
     }
     if constexpr (lumpingChoice == diag_lumping) {
-      rowFilteredA.value(diagOffset) += droppedSum;
-      if ((dirichletThreshold >= 0.0) && (ATS::real(rowFilteredA.value(diagOffset)) <= dirichletThreshold))
-        rowFilteredA.value(diagOffset) = one;
+      filteredA.values(diagOffset) += droppedSum;
+      if ((dirichletThreshold >= 0.0) && (ATS::real(filteredA.values(diagOffset)) <= dirichletThreshold))
+        filteredA.values(diagOffset) = one;
     } else if constexpr (lumpingChoice == distributed_lumping) {
       if (ATS::real(droppedSum) >= ATS::real(zero)) {
-        rowFilteredA.value(diagOffset) += droppedSum;
-
+        filteredA.values(diagOffset) += droppedSum;
       } else {
-        for (local_ordinal_type k = 0; k < j; ++k) {
-          rowFilteredA.value(k) += droppedSum * ATS::magnitude(rowFilteredA.value(k)) / keptRowSumAbs;
+        for (local_ordinal_type k = graph.row_map(rlid); k < j; ++k) {
+          filteredA.values(k) += droppedSum * ATS::magnitude(filteredA.values(k)) / keptRowSumAbs;
         }
       }
     }
@@ -463,7 +467,7 @@ class VectorCountingFunctor {
   using permutation_type        = Kokkos::View<local_ordinal_type*, memory_space>;
 
   using rowptr_type = typename local_matrix_type::row_map_type::non_const_type;
-  using ATS         = Kokkos::ArithTraits<local_ordinal_type>;
+  using ATS         = KokkosKernels::ArithTraits<local_ordinal_type>;
 
   local_matrix_type A;
   local_ordinal_type blockSize;
@@ -640,7 +644,7 @@ class VectorCountingFunctor<local_matrix_type, functor_type> {
   using permutation_type        = Kokkos::View<local_ordinal_type*, memory_space>;
 
   using rowptr_type = typename local_matrix_type::row_map_type::non_const_type;
-  using ATS         = Kokkos::ArithTraits<local_ordinal_type>;
+  using ATS         = KokkosKernels::ArithTraits<local_ordinal_type>;
 
   local_matrix_type A;
   local_ordinal_type blockSize;
@@ -649,7 +653,6 @@ class VectorCountingFunctor<local_matrix_type, functor_type> {
   rowptr_type filtered_rowptr;
   rowptr_type graph_rowptr;
 
-  bool firstFunctor;
   functor_type functor;
 
 #ifdef MUELU_COALESCE_DROP_DEBUG
@@ -808,7 +811,7 @@ class VectorCountingFunctor<local_matrix_type, functor_type> {
   The dropped graph and the filtered matrix are built from scratch.
   Lumps dropped entries to the diagonal if lumping==true.
 */
-template <class local_matrix_type, bool lumping, bool reuse>
+template <class local_matrix_type, bool lumping, bool reuse, bool constructFilteredA = true>
 class VectorFillFunctor {
  private:
   using scalar_type             = typename local_matrix_type::value_type;
@@ -816,8 +819,8 @@ class VectorFillFunctor {
   using local_graph_type        = typename local_matrix_type::staticcrsgraph_type;
   using memory_space            = typename local_matrix_type::memory_space;
   using results_view            = Kokkos::View<DecisionType*, memory_space>;
-  using ATS                     = Kokkos::ArithTraits<scalar_type>;
-  using OTS                     = Kokkos::ArithTraits<local_ordinal_type>;
+  using ATS                     = KokkosKernels::ArithTraits<scalar_type>;
+  using OTS                     = KokkosKernels::ArithTraits<local_ordinal_type>;
   using block_indices_view_type = Kokkos::View<local_ordinal_type*, memory_space>;
   using permutation_type        = Kokkos::View<local_ordinal_type*, memory_space>;
   using magnitudeType           = typename ATS::magnitudeType;
@@ -850,41 +853,43 @@ class VectorFillFunctor {
 
   KOKKOS_INLINE_FUNCTION
   void operator()(const local_ordinal_type brlid) const {
-    for (local_ordinal_type rlid = blockSize * brlid; rlid < blockSize * (brlid + 1); ++rlid) {
-      auto rowA                     = A.row(rlid);
-      size_t row_start              = A.graph.row_map(rlid);
-      auto rowFilteredA             = filteredA.row(rlid);
-      local_ordinal_type j          = 0;
-      scalar_type diagCorrection    = zero;
-      local_ordinal_type diagOffset = -1;
-      for (local_ordinal_type k = 0; k < rowA.length; ++k) {
-        if constexpr (lumping) {
-          local_ordinal_type clid = rowA.colidx(k);
-          if (rlid == clid) {
-            diagOffset = j;
+    if constexpr (constructFilteredA) {
+      for (local_ordinal_type rlid = blockSize * brlid; rlid < blockSize * (brlid + 1); ++rlid) {
+        auto rowA                     = A.row(rlid);
+        size_t row_start              = A.graph.row_map(rlid);
+        auto rowFilteredA             = filteredA.row(rlid);
+        local_ordinal_type j          = 0;
+        scalar_type diagCorrection    = zero;
+        local_ordinal_type diagOffset = -1;
+        for (local_ordinal_type k = 0; k < rowA.length; ++k) {
+          if constexpr (lumping) {
+            local_ordinal_type clid = rowA.colidx(k);
+            if (rlid == clid) {
+              diagOffset = j;
+            }
           }
-        }
-        if (results(row_start + k) == KEEP) {
-          rowFilteredA.colidx(j) = rowA.colidx(k);
-          rowFilteredA.value(j)  = rowA.value(k);
-          ++j;
-        } else if constexpr (lumping) {
-          diagCorrection += rowA.value(k);
-          if constexpr (reuse) {
+          if (results(row_start + k) == KEEP) {
+            rowFilteredA.colidx(j) = rowA.colidx(k);
+            rowFilteredA.value(j)  = rowA.value(k);
+            ++j;
+          } else if constexpr (lumping) {
+            diagCorrection += rowA.value(k);
+            if constexpr (reuse) {
+              rowFilteredA.colidx(j) = rowA.colidx(k);
+              rowFilteredA.value(j)  = zero;
+              ++j;
+            }
+          } else if constexpr (reuse) {
             rowFilteredA.colidx(j) = rowA.colidx(k);
             rowFilteredA.value(j)  = zero;
             ++j;
           }
-        } else if constexpr (reuse) {
-          rowFilteredA.colidx(j) = rowA.colidx(k);
-          rowFilteredA.value(j)  = zero;
-          ++j;
         }
-      }
-      if constexpr (lumping) {
-        rowFilteredA.value(diagOffset) += diagCorrection;
-        if ((dirichletThreshold >= 0.0) && (ATS::real(rowFilteredA.value(diagOffset)) <= dirichletThreshold))
-          rowFilteredA.value(diagOffset) = one;
+        if constexpr (lumping) {
+          rowFilteredA.value(diagOffset) += diagCorrection;
+          if ((dirichletThreshold >= 0.0) && (ATS::real(rowFilteredA.value(diagOffset)) <= dirichletThreshold))
+            rowFilteredA.value(diagOffset) = one;
+        }
       }
     }
 
@@ -937,7 +942,7 @@ class MergeCountFunctor {
   using permutation_type        = Kokkos::View<local_ordinal_type*, memory_space>;
 
   using rowptr_type = typename local_matrix_type::row_map_type::non_const_type;
-  using ATS         = Kokkos::ArithTraits<local_ordinal_type>;
+  using ATS         = KokkosKernels::ArithTraits<local_ordinal_type>;
 
   local_matrix_type A;
   local_ordinal_type blockSize;
@@ -1011,8 +1016,8 @@ class MergeFillFunctor {
   using local_graph_type        = typename local_matrix_type::staticcrsgraph_type;
   using memory_space            = typename local_matrix_type::memory_space;
   using results_view            = Kokkos::View<DecisionType*, memory_space>;
-  using ATS                     = Kokkos::ArithTraits<scalar_type>;
-  using OTS                     = Kokkos::ArithTraits<local_ordinal_type>;
+  using ATS                     = KokkosKernels::ArithTraits<scalar_type>;
+  using OTS                     = KokkosKernels::ArithTraits<local_ordinal_type>;
   using block_indices_view_type = Kokkos::View<local_ordinal_type*, memory_space>;
   using permutation_type        = Kokkos::View<local_ordinal_type*, memory_space>;
   using magnitudeType           = typename ATS::magnitudeType;

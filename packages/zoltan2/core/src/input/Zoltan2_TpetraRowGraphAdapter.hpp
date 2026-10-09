@@ -33,7 +33,6 @@ namespace Zoltan2 {
     The template parameter is the user's input object:
      \li Tpetra::CrsGraph
      \li Tpetra::RowGraph
-     \li Epetra_CrsGraph
 
     The \c scalar_t type, representing use data such as matrix values, is
     used by Zoltan2 for weights, coordinates, part sizes and
@@ -426,9 +425,10 @@ void TpetraRowGraphAdapter<User, UserCoord>::setVertexWeightsDevice(
   AssertCondition(vertexWeightsDevice_.extent(0) == weights.extent(0),
                   "Invalid sizes!");
 
+  auto vertexWeightsDevice = this->vertexWeightsDevice_;
   Kokkos::parallel_for(
-      vertexWeightsDevice_.extent(0), KOKKOS_CLASS_LAMBDA(const int vertexID) {
-        vertexWeightsDevice_(vertexID, idx) = weights(vertexID);
+      vertexWeightsDevice.extent(0), KOKKOS_LAMBDA(const int vertexID) {
+        vertexWeightsDevice(vertexID, idx) = weights(vertexID);
       });
 
   Kokkos::fence();
@@ -489,9 +489,10 @@ void TpetraRowGraphAdapter<User, UserCoord>::setEdgeWeightsDevice(
   AssertCondition(edgeWeightsDevice_.extent(0) == weights.extent(0),
                   "Invalid sizes!");
 
+  auto edgeWeightsDevice = this->edgeWeightsDevice_;
   Kokkos::parallel_for(
-      edgeWeightsDevice_.extent(0), KOKKOS_CLASS_LAMBDA(const int vertexID) {
-        edgeWeightsDevice_(vertexID, idx) = weights(vertexID);
+      edgeWeightsDevice.extent(0), KOKKOS_LAMBDA(const int vertexID) {
+        edgeWeightsDevice(vertexID, idx) = weights(vertexID);
       });
 
   Kokkos::fence();
@@ -621,9 +622,10 @@ void TpetraRowGraphAdapter<User, UserCoord>::getVertexWeightsDeviceView(
   const auto size = vertexWeightsDevice_.extent(0);
   weights = typename Base::WeightsDeviceView1D("weights", size);
 
+  auto vertexWeightsDevice = this->vertexWeightsDevice_;
   Kokkos::parallel_for(
-      size, KOKKOS_CLASS_LAMBDA(const int id) {
-        weights(id) = vertexWeightsDevice_(id, idx);
+      size, KOKKOS_LAMBDA(const int id) {
+        weights(id) = vertexWeightsDevice(id, idx);
       });
 
   Kokkos::fence();

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 /// \file KokkosSparse_CooMatrix.hpp
 /// \brief Local sparse matrix interface
@@ -117,11 +104,21 @@ class CooMatrix {
     }
   }
 
+  //! The number of rows in the sparse matrix.
+  KOKKOS_INLINE_FUNCTION size_type numRows() const { return m_num_rows; }
+
   //! The number of columns in the sparse matrix.
   KOKKOS_INLINE_FUNCTION size_type numCols() const { return m_num_cols; }
 
-  //! The number of rows in the sparse matrix.
-  KOKKOS_INLINE_FUNCTION size_type numRows() const { return m_num_rows; }
+  /// \brief Modify the number of rows in the sparse matrix.
+  ///
+  /// This invalidates any algorithm handles which previously used this matrix.
+  void setNumRows(size_type r) { m_num_rows = r; }
+
+  /// \brief Modify the number of columns in the sparse matrix.
+  ///
+  /// This invalidates any algorithm handles which previously used this matrix.
+  void setNumCols(size_type c) { m_num_cols = c; }
 
   //! The number of stored entries in the sparse matrix, including zeros.
   KOKKOS_INLINE_FUNCTION size_type nnz() const { return m_data.extent(0); }

@@ -19,10 +19,8 @@
 #include "Xpetra_CrsGraph.hpp"
 #include "Xpetra_Vector.hpp"
 
-#ifdef HAVE_XPETRA_TPETRA
 #include <KokkosSparse_StaticCrsGraph.hpp>
 #include <KokkosSparse_CrsMatrix.hpp>
-#endif
 
 namespace Xpetra {
 
@@ -272,37 +270,37 @@ class CrsMatrix
 
   //! @name Xpetra-specific routines
   //@{
-#ifdef HAVE_XPETRA_TPETRA
-  using impl_scalar_type = typename Kokkos::ArithTraits<Scalar>::val_type;
+  using impl_scalar_type = typename KokkosKernels::ArithTraits<Scalar>::val_type;
   using execution_space  = typename node_type::device_type;
 
   // that is the local_graph_type in Tpetra::CrsGraph...
-  using local_graph_type = KokkosSparse::StaticCrsGraph<LocalOrdinal,
+  using local_graph_type        = KokkosSparse::StaticCrsGraph<LocalOrdinal,
                                                         Kokkos::LayoutLeft,
                                                         execution_space,
                                                         void,
                                                         size_t>;
+  using local_graph_device_type = KokkosSparse::StaticCrsGraph<LocalOrdinal,
+                                                               Kokkos::LayoutLeft,
+                                                               execution_space,
+                                                               void,
+                                                               size_t>;
+  using local_graph_host_type   = typename local_graph_device_type::host_mirror_type;
+
   /// \brief The specialization of Kokkos::CrsMatrix that represents
   ///   the part of the sparse matrix on each MPI process.
   ///  The same as for Tpetra
-  using local_matrix_type = KokkosSparse::CrsMatrix<impl_scalar_type, LocalOrdinal, execution_space, void,
+  using local_matrix_type        = KokkosSparse::CrsMatrix<impl_scalar_type, LocalOrdinal, execution_space, void,
                                                     typename local_graph_type::size_type>;
+  using local_matrix_device_type = KokkosSparse::CrsMatrix<impl_scalar_type, LocalOrdinal, execution_space, void,
+                                                           typename local_graph_type::size_type>;
+  using local_matrix_host_type   = typename local_matrix_device_type::host_mirror_type;
 
-  virtual local_matrix_type getLocalMatrixDevice() const = 0;
-#if KOKKOS_VERSION >= 40799
-  virtual typename local_matrix_type::host_mirror_type getLocalMatrixHost() const = 0;
-#else
-  virtual typename local_matrix_type::HostMirror getLocalMatrixHost() const = 0;
-#endif
+  virtual local_matrix_device_type getLocalMatrixDevice() const = 0;
+  virtual local_matrix_host_type getLocalMatrixHost() const     = 0;
 
   virtual void setAllValues(const typename local_matrix_type::row_map_type &ptr,
                             const typename local_graph_type::entries_type::non_const_type &ind,
                             const typename local_matrix_type::values_type &val) = 0;
-#else
-#ifdef __GNUC__
-#warning "Xpetra Kokkos interface for CrsMatrix is enabled (HAVE_XPETRA_KOKKOS_REFACTOR) but Tpetra is disabled. The Kokkos interface needs Tpetra to be enabled, too."
-#endif
-#endif
 
   //@}
 

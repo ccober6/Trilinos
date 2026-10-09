@@ -13,8 +13,7 @@
 */
 
 #include "ROL_Stream.hpp"
-#include "Teuchos_GlobalMPISession.hpp"
-#include "Teuchos_LAPACK.hpp"
+#include "ROL_GlobalMPISession.hpp"
 
 #include <iostream>
 #include <algorithm>
@@ -26,9 +25,8 @@
 #include "ROL_Problem.hpp"
 #include "ROL_Solver.hpp"
 #include "ROL_ParameterList.hpp"
-
-#include "Teuchos_SerialDenseVector.hpp"
-#include "Teuchos_SerialDenseSolver.hpp"
+#include "ROL_LAPACK.hpp"
+#include "ROL_LinearAlgebra.hpp"
 
 template<class Real>
 class FEM {
@@ -42,7 +40,7 @@ private:
   int prob_;
   Real E_;
   Real nu_;
-  Teuchos::SerialDenseMatrix<int,Real> KE_;
+  ROL::LA::Matrix<Real> KE_;
 
 public:
 
@@ -169,7 +167,7 @@ public:
     return false;
   }
 
-  void set_boundary_conditions(Teuchos::SerialDenseVector<int, Real> &U) {
+  void set_boundary_conditions(ROL::LA::Vector<Real> &U) {
     for (int i=0; i<U.length(); i++) {
       if ( check_on_boundary(i) ) {
         U(i) = 0.0;
@@ -193,7 +191,7 @@ public:
     }
   }
 
-  void build_force(Teuchos::SerialDenseVector<int, Real> &F) {
+  void build_force(ROL::LA::Vector<Real> &F) {
     F.resize(numU());
     F.putScalar(0.0);
     switch(prob_) {
@@ -202,7 +200,7 @@ public:
     }
   }
 
-  void build_jacobian(Teuchos::SerialDenseMatrix<int, Real> &K, const std::vector<Real> &z,
+  void build_jacobian(ROL::LA::Matrix<Real> &K, const std::vector<Real> &z,
                       bool transpose = false) {
     // Fill jacobian
     K.shape(2*(nx_+1)*(ny_+1),2*(nx_+1)*(ny_+1));
@@ -237,7 +235,7 @@ public:
     }
   }
 
-  void build_jacobian(Teuchos::SerialDenseMatrix<int, Real> &K, const std::vector<Real> &z, 
+  void build_jacobian(ROL::LA::Matrix<Real> &K, const std::vector<Real> &z, 
                       const std::vector<Real> &v, bool transpose = false) {
     // Fill jacobian
     K.shape(2*(nx_+1)*(ny_+1),2*(nx_+1)*(ny_+1));
@@ -433,24 +431,22 @@ public:
     ROL::Ptr<const vector> zp = getVector(z);
 
     // Assemble Jacobian
-    Teuchos::SerialDenseMatrix<int, Real> K;
+    ROL::LA::Matrix<Real> K;
     FEM_->build_jacobian(K,*zp);
     // Assemble RHS
-    Teuchos::SerialDenseVector<int, Real> F(K.numRows());
+    ROL::LA::Vector<Real> F(K.numRows());
     FEM_->build_force(F);
     // Solve
-    Teuchos::SerialDenseVector<int, Real> U(K.numCols());
-    Teuchos::SerialDenseSolver<int, Real> solver;
-    solver.setMatrix( Teuchos::rcpFromRef(K) );
-    solver.setVectors( Teuchos::rcpFromRef(U), Teuchos::rcpFromRef(F) );
-    solver.factorWithEquilibration(true);
-    solver.factor();
-    solver.solve();
-    FEM_->set_boundary_conditions(U);
+    ROL::Ptr<ROL::LAPACK<int, Real>> lapack = ROL::makePtr<ROL::LAPACK<int,Real>>();
+    int info;
+    int n = K.numRows();
+    lapack->POTRF('U',n,K.values(),n,&info);
+    lapack->POTRS('U',n,1,K.values(),n,F.values(),n,&info);
+    FEM_->set_boundary_conditions(F);
     // Retrieve solution
-    up->resize(U.length(),0.0);
-    for (uint i=0; i<static_cast<uint>(U.length()); i++) {
-      (*up)[i] = U(i);
+    up->resize(F.length(),0.0);
+    for (uint i=0; i<static_cast<uint>(F.length()); i++) {
+      (*up)[i] = F(i);
     }
     // Compute residual
     this->value(c,u,z,tol);
@@ -464,10 +460,10 @@ public:
     ROL::Ptr<const vector> zp = getVector(z);
 
     // Apply Jacobian
-    vector V;
-    V.assign(vp->begin(),vp->end());
-    FEM_->set_boundary_conditions(V);
-    FEM_->apply_jacobian(*jvp,V,*zp);
+    vector lV;
+    lV.assign(vp->begin(),vp->end());
+    FEM_->set_boundary_conditions(lV);
+    FEM_->apply_jacobian(*jvp,lV,*zp);
   }
 
   void applyJacobian_2(ROL::Vector<Real> &jv, const ROL::Vector<Real> &v, const ROL::Vector<Real> &u,
@@ -492,25 +488,23 @@ public:
     ROL::Ptr<const vector> zp = getVector(z);
 
     // Assemble Jacobian
-    Teuchos::SerialDenseMatrix<int, Real> K;
+    ROL::LA::Matrix<Real> K;
     FEM_->build_jacobian(K,*zp);
     // Solve
-    Teuchos::SerialDenseVector<int, Real> U(K.numCols());
-    Teuchos::SerialDenseVector<int, Real> F(vp->size());
+    ROL::LA::Vector<Real> F(vp->size());
     for (uint i=0; i<vp->size(); i++) {
       F(i) = (*vp)[i];
     }
-    Teuchos::SerialDenseSolver<int, Real> solver;
-    solver.setMatrix(Teuchos::rcpFromRef(K));
-    solver.setVectors(Teuchos::rcpFromRef(U),Teuchos::rcpFromRef(F));
-    solver.factorWithEquilibration(true);
-    solver.factor();
-    solver.solve();
-    FEM_->set_boundary_conditions(U);
+    ROL::Ptr<ROL::LAPACK<int, Real>> lapack = ROL::makePtr<ROL::LAPACK<int,Real>>();
+    int info;
+    int n = K.numRows();
+    lapack->POTRF('U',n,K.values(),n,&info);
+    lapack->POTRS('U',n,1,K.values(),n,F.values(),n,&info);
+    FEM_->set_boundary_conditions(F);
     // Retrieve solution
-    ijvp->resize(U.length(),0.0);
-    for (uint i=0; i<static_cast<uint>(U.length()); i++) {
-      (*ijvp)[i] = U(i);
+    ijvp->resize(F.length(),0.0);
+    for (uint i=0; i<static_cast<uint>(F.length()); i++) {
+      (*ijvp)[i] = F(i);
     }
   }
 
@@ -522,10 +516,10 @@ public:
     ROL::Ptr<const vector> zp = getVector(z);
 
     // apply jacobian
-    vector V;
-    V.assign(vp->begin(),vp->end());
-    FEM_->set_boundary_conditions(V);
-    FEM_->apply_jacobian(*ajvp,V,*zp);
+    vector lV;
+    lV.assign(vp->begin(),vp->end());
+    FEM_->set_boundary_conditions(lV);
+    FEM_->apply_jacobian(*ajvp,lV,*zp);
   }
 
   void applyAdjointJacobian_2(ROL::Vector<Real> &ajv, const ROL::Vector<Real> &v, const ROL::Vector<Real> &u,
@@ -539,10 +533,10 @@ public:
     vector U;
     U.assign(up->begin(),up->end());
     FEM_->set_boundary_conditions(U);
-    std::vector<Real> V;
-    V.assign(vp->begin(),vp->end());
-    FEM_->set_boundary_conditions(V);
-    FEM_->apply_adjoint_jacobian(*ajvp,U,*zp,V);
+    std::vector<Real> lV;
+    lV.assign(vp->begin(),vp->end());
+    FEM_->set_boundary_conditions(lV);
+    FEM_->apply_adjoint_jacobian(*ajvp,U,*zp,lV);
   }
 
   void applyInverseAdjointJacobian_1(ROL::Vector<Real> &iajv, const ROL::Vector<Real> &v,
@@ -553,25 +547,23 @@ public:
      ROL::Ptr<const vector> zp = getVector(z);
 
     // Assemble Jacobian
-    Teuchos::SerialDenseMatrix<int, Real> K;
+    ROL::LA::Matrix<Real> K;
     FEM_->build_jacobian(K,*zp);
     // Solve
-    Teuchos::SerialDenseVector<int, Real> U(K.numCols());
-    Teuchos::SerialDenseVector<int, Real> F(vp->size());
+    ROL::LA::Vector<Real> F(vp->size());
     for (uint i=0; i<vp->size(); i++) {
       F(i) = (*vp)[i];
     }
-    Teuchos::SerialDenseSolver<int, Real> solver;
-    solver.setMatrix(Teuchos::rcpFromRef(K));
-    solver.setVectors(Teuchos::rcpFromRef(U), Teuchos::rcpFromRef(F));
-    solver.factorWithEquilibration(true);
-    solver.factor();
-    solver.solve();
-    FEM_->set_boundary_conditions(U);
+    ROL::Ptr<ROL::LAPACK<int, Real>> lapack = ROL::makePtr<ROL::LAPACK<int,Real>>();
+    int info;
+    int n = K.numRows();
+    lapack->POTRF('U',n,K.values(),n,&info);
+    lapack->POTRS('U',n,1,K.values(),n,F.values(),n,&info);
+    FEM_->set_boundary_conditions(F);
     // Retrieve solution
-    iajvp->resize(U.length(),0.0);
-    for (int i=0; i<U.length(); i++) {
-      (*iajvp)[i] = U(i);
+    iajvp->resize(F.length(),0.0);
+    for (int i=0; i<F.length(); i++) {
+      (*iajvp)[i] = F(i);
     }
   }
 
@@ -778,10 +770,10 @@ public:
     hv.zero();
     if ( !useLC_ ) {
       vector KV(vp->size(),0.0);
-      vector V;
-      V.assign(vp->begin(),vp->end());
-      FEM_->set_boundary_conditions(V);
-      FEM_->apply_jacobian(KV,V,*zp);
+      vector lV;
+      lV.assign(vp->begin(),vp->end());
+      FEM_->set_boundary_conditions(lV);
+      FEM_->apply_jacobian(KV,lV,*zp);
       for (uint i=0; i<vp->size(); i++) {
         (*hvp)[i] = 2.0*KV[i];
       }
@@ -832,10 +824,10 @@ public:
       std::vector<Real> U;
       U.assign(up->begin(),up->end());
       FEM_->set_boundary_conditions(U);
-      std::vector<Real> V;
-      V.assign(vp->begin(),vp->end());
-      FEM_->set_boundary_conditions(V);
-      FEM_->apply_adjoint_jacobian(*hvp,U,*zp,V);
+      std::vector<Real> lV;
+      lV.assign(vp->begin(),vp->end());
+      FEM_->set_boundary_conditions(lV);
+      FEM_->apply_adjoint_jacobian(*hvp,U,*zp,lV);
       for (uint i=0; i<hvp->size(); i++) {
         (*hvp)[i] *= 2.0;
       }
@@ -859,9 +851,9 @@ public:
       vector U;
       U.assign(up->begin(),up->end());
       FEM_->set_boundary_conditions(U);
-      vector V;
-      V.assign(vp->begin(),vp->end());
-      FEM_->set_boundary_conditions(V);
+      vector lV;
+      lV.assign(vp->begin(),vp->end());
+      FEM_->set_boundary_conditions(lV);
       FEM_->apply_adjoint_jacobian(*hvp,U,*zp,*vp,U);
     }
   }
@@ -871,8 +863,8 @@ typedef double RealT;
 
 int main(int argc, char *argv[]) {
 
-  typedef typename std::vector<RealT>::size_type uint;
-  Teuchos::GlobalMPISession mpiSession(&argc, &argv);
+  typedef typename std::vector<RealT>::size_type luint;
+  ROL::GlobalMPISession mpiSession(&argc, &argv);
 
   // This little trick lets us print to std::cout only if a (dummy) command-line argument is provided.
   int iprint     = argc - 1;
@@ -889,8 +881,8 @@ int main(int argc, char *argv[]) {
   try {
     // FEM problem description.
     int prob = 1;  // prob = 0 is the MBB beam example, prob = 1 is the cantilever beam example.
-    uint nx  = 30; // Number of x-elements (60 for prob = 0, 32 for prob = 1).
-    uint ny  = 10; // Number of y-elements (20 for prob = 0, 20 for prob = 1).
+    luint nx  = 30; // Number of x-elements (60 for prob = 0, 32 for prob = 1).
+    luint ny  = 10; // Number of y-elements (20 for prob = 0, 20 for prob = 1).
     int P    = 1;  // SIMP penalization power.
     RealT frac = 0.4;      // Volume fraction.
     ROL::Ptr<FEM<RealT>> pFEM = ROL::makePtr<FEM<RealT>>(nx,ny,P,prob);

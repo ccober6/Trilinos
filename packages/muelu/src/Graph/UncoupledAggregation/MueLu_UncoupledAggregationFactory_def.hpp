@@ -38,6 +38,7 @@
 #include "KokkosGraph_Distance2ColorHandle.hpp"
 #include "KokkosGraph_Distance2Color.hpp"
 #include "KokkosGraph_MIS2.hpp"
+#include "Kokkos_UnorderedMap.hpp"
 
 namespace MueLu {
 
@@ -180,6 +181,7 @@ void UncoupledAggregationFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(Level
   LO numRows;
 
   const std::string aggregationBackend = pL.get<std::string>("aggregation: backend");
+  const std::string aggAlgo            = pL.get<std::string>("aggregation: coloring algorithm");
 
   // "Graph" can have type "LWGraph" or "LWGraph_kokkos".
   // The aggregation phases can call either "BuildAggregatesNonKokkos" or "BuildAggregates".
@@ -226,8 +228,10 @@ void UncoupledAggregationFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(Level
 
   if (!runOnHost) {
     TEUCHOS_TEST_FOR_EXCEPTION(pL.get<bool>("aggregation: use interface aggregation"), std::invalid_argument, "Option: 'aggregation: use interface aggregation' is not supported in the Kokkos version of uncoupled aggregation");
-    // Sanity Checking: match ML behavior is not supported in UncoupledAggregation_Kokkos in Phase 1 , but it is in 2a and 2b
-    TEUCHOS_TEST_FOR_EXCEPTION(pL.get<bool>("aggregation: match ML phase1"), std::invalid_argument, "Option: 'aggregation: match ML phase1' is not supported in the Kokkos version of uncoupled aggregation");
+    if (aggAlgo != "mis2 coarsening" && aggAlgo != "mis2 aggregation") {
+      // Sanity Checking: match ML behavior is not supported in UncoupledAggregation_Kokkos in Phase 1 , but it is in 2a and 2b
+      TEUCHOS_TEST_FOR_EXCEPTION(pL.get<bool>("aggregation: match ML phase1"), std::invalid_argument, "Option: 'aggregation: match ML phase1' is not supported in the Kokkos version of uncoupled aggregation");
+    }
   }
 
   // Build
@@ -314,7 +318,6 @@ void UncoupledAggregationFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(Level
   }
 
   LO numNonAggregatedNodes = numRows;
-  std::string aggAlgo      = pL.get<std::string>("aggregation: coloring algorithm");
   if (aggAlgo == "mis2 coarsening" || aggAlgo == "mis2 aggregation") {
     TEUCHOS_ASSERT(!runOnHost);
 
@@ -338,38 +341,54 @@ void UncoupledAggregationFactory<LocalOrdinal, GlobalOrdinal, Node>::Build(Level
       labels = KokkosGraph::graph_mis2_aggregate<device_t, rowmap_t, colinds_t>(aRowptrs, aColinds, numAggs);
     }
     {
-      {
+      size_t labelCapacity = numAggs * 1.5;
+      // until all hashmap insertions succeed...
+      while (true) {
         // find aggregates that are not empty
-        Kokkos::View<bool*, typename device_t::memory_space> has_nodes("has_nodes", numAggs);
+        Kokkos::UnorderedMap<LocalOrdinal, void, exec_space> used_labels(labelCapacity);
         Kokkos::parallel_for(
+            "MueLu::UncoupledAggregationFactory::MIS2::nonempty_aggs",
             Kokkos::RangePolicy<exec_space>(0, numRows),
             KOKKOS_LAMBDA(lno_t i) {
               if (aggStat(i) == READY)
-                Kokkos::atomic_store(&has_nodes(labels(i)), true);
+                used_labels.insert(labels(i));
             });
+        Kokkos::fence();
+        if (used_labels.failed_insert()) {
+          // Retry with larger hashmap capacity
+          labelCapacity = (labelCapacity + 1) * 1.5;
+          continue;
+        }
 
         // compute aggIds for non-empty aggs
         Kokkos::View<LO*, typename device_t::memory_space> new_labels("new_labels", numAggs);
         Kokkos::parallel_scan(
-            Kokkos::RangePolicy<exec_space>(0, numAggs),
+            "MueLu::UncoupledAggregationFactory::MIS2::set_new_labels",
+            Kokkos::RangePolicy<exec_space>(0, used_labels.capacity()),
             KOKKOS_LAMBDA(lno_t i, lno_t & update, const bool is_final) {
-              if (is_final)
-                new_labels(i) = update;
-              if (has_nodes(i))
+              if (used_labels.valid_at(i)) {
+                auto label = used_labels.key_at(i);
+                if (is_final) {
+                  new_labels(label) = update;
+                }
                 ++update;
+              }
             },
             numAggs);
 
         // reassign aggIds
         Kokkos::parallel_for(
+            "MueLu::UncoupledAggregationFactory::MIS2::reassign_labels",
             Kokkos::RangePolicy<exec_space>(0, numRows),
             KOKKOS_LAMBDA(lno_t i) {
               labels(i) = new_labels(labels(i));
             });
+        // Hashmap insertions all succeeded and we were able to update labels
+        break;
       }
 
-      auto vertex2AggId = aggregates->GetVertex2AggId()->getLocalViewDevice(Xpetra::Access::ReadWrite);
-      auto procWinner   = aggregates->GetProcWinner()->getLocalViewDevice(Xpetra::Access::OverwriteAll);
+      auto vertex2AggId = aggregates->GetVertex2AggId()->getLocalViewDevice(Tpetra::Access::ReadWrite);
+      auto procWinner   = aggregates->GetProcWinner()->getLocalViewDevice(Tpetra::Access::OverwriteAll);
       int rank          = comm->getRank();
       Kokkos::parallel_for(
           Kokkos::RangePolicy<exec_space>(0, numRows),

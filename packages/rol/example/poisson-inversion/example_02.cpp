@@ -22,9 +22,10 @@
 #include "ROL_Types.hpp"
 #include "ROL_HelperFunctions.hpp"
 #include "ROL_Stream.hpp"
+#include "ROL_LAPACK.hpp"
 
 
-#include "Teuchos_GlobalMPISession.hpp"
+#include "ROL_GlobalMPISession.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -155,7 +156,7 @@ public:
     u[    0] = z[    0]/hu_ * u0_;
     u[nu_-1] = z[nz_-1]/hu_ * u1_;
     // Solve Tridiagonal System Using LAPACK's SPD Tridiagonal Solver
-    Teuchos::LAPACK<int,Real> lp;
+    ROL::LAPACK<int,Real> lp;
     int info;
     int ldb  = nu_;
     int nhrs = 1;
@@ -182,7 +183,7 @@ public:
     p.resize(nu_,0.0);
     apply_mass(p,r);    
     // Solve Tridiagonal System Using LAPACK's SPD Tridiagonal Solver
-    Teuchos::LAPACK<int,Real> lp;
+    ROL::LAPACK<int,Real> lp;
     int info;
     int ldb  = nu_;
     int nhrs = 1;
@@ -206,7 +207,7 @@ public:
     w.resize(nu_,0.0);
     apply_linearized_control_operator(w,z,v,u);
     // Solve Tridiagonal System Using LAPACK's SPD Tridiagonal Solver
-    Teuchos::LAPACK<int,Real> lp;
+    ROL::LAPACK<int,Real> lp;
     int info;
     int ldb  = nu_;
     int nhrs = 1;
@@ -236,7 +237,7 @@ public:
       q[i] -= res[i];
     }
     // Solve Tridiagonal System Using LAPACK's SPD Tridiagonal Solver
-    Teuchos::LAPACK<int,Real> lp;
+    ROL::LAPACK<int,Real> lp;
     int info;
     int ldb  = nu_;
     int nhrs = 1;
@@ -430,11 +431,11 @@ int main(int argc, char *argv[]) {
   typedef ROL::Vector<RealT>     V;
   typedef ROL::StdVector<RealT>  SV;
   
-  typedef typename vector::size_type uint;
+  typedef typename vector::size_type luint;
 
     
 
-  Teuchos::GlobalMPISession mpiSession(&argc, &argv);
+  ROL::GlobalMPISession mpiSession(&argc, &argv);
 
   // This little trick lets us print to std::cout only if a (dummy) command-line argument is provided.
   int iprint     = argc - 1;
@@ -451,7 +452,7 @@ int main(int argc, char *argv[]) {
 
   try {
 
-    uint dim = 128; // Set problem dimension.
+    luint dim = 128; // Set problem dimension.
     RealT alpha = 1.e-6;
     Objective_PoissonInversion<RealT> obj(dim, alpha);
 
@@ -460,7 +461,7 @@ int main(int argc, char *argv[]) {
     ROL::Ptr<vector> y_ptr = ROL::makePtr<vector>(dim, 0.0);
 
     // Set initial guess.
-    for (uint i=0; i<dim; i++) {
+    for (luint i=0; i<dim; i++) {
       (*x_ptr)[i] = (RealT)rand()/(RealT)RAND_MAX + 1.e2;
       (*y_ptr)[i] = (RealT)rand()/(RealT)RAND_MAX + 1.e2;
     }
@@ -511,7 +512,7 @@ int main(int argc, char *argv[]) {
     // Output control to file.
     std::ofstream file;
     file.open("control_PDAS.txt");
-    for ( uint i = 0; i < dim; i++ ) {
+    for ( luint i = 0; i < dim; i++ ) {
       file << (*x_ptr)[i] << "\n";
     }
     file.close();
@@ -532,7 +533,7 @@ int main(int argc, char *argv[]) {
 
     std::ofstream file_tr;
     file_tr.open("control_TR.txt");
-    for ( uint i = 0; i < dim; i++ ) {
+    for ( luint i = 0; i < dim; i++ ) {
       file_tr << (*y_ptr)[i] << "\n";
     }
     file_tr.close();
@@ -541,7 +542,7 @@ int main(int argc, char *argv[]) {
     obj.solve_state_equation(u,*y_ptr);
     std::ofstream file_u;
     file_u.open("state.txt");
-    for ( uint i = 0; i < (dim-1); i++ ) {
+    for ( luint i = 0; i < (dim-1); i++ ) {
       file_u << u[i] << "\n";
     }
     file_u.close();

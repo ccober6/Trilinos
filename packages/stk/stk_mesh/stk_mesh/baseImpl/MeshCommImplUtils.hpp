@@ -39,7 +39,6 @@
 
 #include <stk_util/parallel/CommSparse.hpp>
 #include <stk_mesh/base/Types.hpp>
-#include <stk_mesh/base/BulkData.hpp>
 #include <stk_mesh/base/EntityProcMapping.hpp>
 
 #include <vector>
@@ -48,6 +47,7 @@
 
 namespace stk {
 namespace mesh {
+class BulkData;
 namespace impl {
 
 //----------------------------------------------------------------------
@@ -78,7 +78,12 @@ void unpack_induced_parts_from_sharers(OrdinalVector& induced_parts,
                                        stk::CommSparse& comm,
                                        EntityKey expected_key);
 
-void pack_and_send_induced_parts_from_sharers_to_owners(const BulkData& bulkData, stk::CommSparse& comm, EntityCommListInfoVector& entity_comm_list);
+void unpack_induced_parts_from_sharers_by_key(OrdinalVector& induced_parts,
+                                              PairIterEntityComm entity_comm_info,
+                                              stk::CommSparse& comm,
+                                              EntityKey expected_key);
+
+void pack_and_send_induced_parts_from_sharers_to_owners(const BulkData& bulkData, stk::CommSparse& comm, const EntityCommListInfoVector& entity_comm_list);
 
 bool pack_and_send_modified_shared_entity_states(stk::CommSparse& comm,
                                                  const BulkData& bulk,

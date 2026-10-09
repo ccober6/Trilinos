@@ -27,8 +27,8 @@ class VectorDroppingClassical : public VectorDroppingBase<Scalar, LocalOrdinal, 
   using matrix_type             = Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
   using crs_matrix_type         = Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
   using GraphType               = Xpetra::CrsGraph<LocalOrdinal, GlobalOrdinal, Node>;
-  using local_matrix_type       = typename crs_matrix_type::local_matrix_type;
-  using local_graph_type        = typename GraphType::local_graph_type;
+  using local_matrix_type       = typename crs_matrix_type::local_matrix_device_type;
+  using local_graph_type        = typename GraphType::local_graph_device_type;
   using rowptr_type             = typename local_graph_type::row_map_type::non_const_type;
   using device_type             = typename Node::device_type;
   using memory_space            = typename device_type::memory_space;
@@ -52,7 +52,7 @@ class VectorDroppingClassical : public VectorDroppingBase<Scalar, LocalOrdinal, 
                                        const std::string& droppingMethod,
                                        const magnitudeType threshold,
                                        const bool aggregationMayCreateDirichlet,
-                                       const bool symmetrizeDroppedGraph,
+                                       const std::string& symmetrizeDroppedGraph,
                                        const bool useBlocking,
                                        Level& level,
                                        const Factory& factory);

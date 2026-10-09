@@ -20,12 +20,15 @@
 #include "BelosLinearProblem.hpp"
 #include "BelosSolverManager.hpp"
 
-#include "BelosPseudoBlockStochasticCGIter.hpp"
 #include "BelosStatusTestMaxIters.hpp"
 #include "BelosStatusTestGenResNorm.hpp"
 #include "BelosStatusTestCombo.hpp"
 #include "BelosStatusTestOutputFactory.hpp"
 #include "BelosOutputManager.hpp"
+#include "BelosPseudoBlockStochasticCGIter.hpp"
+#include "BelosTeuchosDenseAdapter.hpp"
+#include "BelosKokkosDenseAdapter.hpp"
+
 #ifdef BELOS_TEUCHOS_TIME_MONITOR
 #include "Teuchos_TimeMonitor.hpp"
 #endif
@@ -54,11 +57,11 @@ namespace Belos {
     PseudoBlockStochasticCGSolMgrLinearProblemFailure(const std::string& what_arg) : BelosError(what_arg)
     {}};
 
-  template<class ScalarType, class MV, class OP>
-  class PseudoBlockStochasticCGSolMgr : public SolverManager<ScalarType,MV,OP> {
+  template<class ScalarType, class MV, class OP, class DM = DefaultDenseMatrix<int,ScalarType>>
+  class PseudoBlockStochasticCGSolMgr : public SolverManager<ScalarType,MV,OP,DM> {
 
   private:
-    typedef MultiVecTraits<ScalarType,MV> MVT;
+    typedef MultiVecTraits<ScalarType,MV,DM> MVT;
     typedef OperatorTraits<ScalarType,MV,OP> OPT;
     typedef Teuchos::ScalarTraits<ScalarType> SCT;
     typedef typename Teuchos::ScalarTraits<ScalarType>::magnitudeType MagnitudeType;
@@ -85,22 +88,22 @@ namespace Belos {
      *   - "Output Style" - a OutputType specifying the style of output. Default: Belos::General
      *   - "Convergence Tolerance" - a \c MagnitudeType specifying the level that residual norms must reach to decide convergence.
      */
-    PseudoBlockStochasticCGSolMgr( const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > &problem,
+    PseudoBlockStochasticCGSolMgr( const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > &problem,
                          const Teuchos::RCP<Teuchos::ParameterList> &pl );
 
     //! Destructor.
     virtual ~PseudoBlockStochasticCGSolMgr() {};
 
     //! clone for Inverted Injection (DII)
-    Teuchos::RCP<SolverManager<ScalarType, MV, OP> > clone () const override {
-      return Teuchos::rcp(new PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>);
+    Teuchos::RCP<SolverManager<ScalarType, MV, OP, DM> > clone () const override {
+      return Teuchos::rcp(new PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP,DM>);
     }
     //@}
 
     //! @name Accessor methods
     //@{
 
-    const LinearProblem<ScalarType,MV,OP>& getProblem() const override {
+    const LinearProblem<ScalarType,MV,OP,DM>& getProblem() const override {
       return *problem_;
     }
 
@@ -137,10 +140,22 @@ namespace Belos {
     //@{
 
     //! Set the linear problem that needs to be solved.
-    void setProblem( const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > &problem ) override { problem_ = problem; }
+    void setProblem( const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > &problem ) override { problem_ = problem; }
 
     //! Set the parameters the solver manager should use to solve the linear problem.
     void setParameters( const Teuchos::RCP<Teuchos::ParameterList> &params ) override;
+
+    //! Set a debug status test, OR-combined into the top-level status test.
+    void setDebugStatusTest( const Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > &debugStatusTest ) override {
+      debugStatusTest_ = debugStatusTest;
+      // Force the cached status-test tree (and its output wrapper) to be rebuilt
+      // on the next solve so the debug test is wired into sTest_.  This manager
+      // caches sTest_/outputTest_ behind null checks, so clear them and re-run
+      // setParameters.
+      sTest_ = Teuchos::null;
+      outputTest_ = Teuchos::null;
+      isSet_ = false;
+    }
 
     //@}
 
@@ -191,17 +206,18 @@ namespace Belos {
   private:
 
     // Linear problem.
-    Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > problem_;
+    Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > problem_;
 
     // Output manager.
     Teuchos::RCP<OutputManager<ScalarType> > printer_;
     Teuchos::RCP<std::ostream> outputStream_;
 
     // Status test.
-    Teuchos::RCP<StatusTest<ScalarType,MV,OP> > sTest_;
-    Teuchos::RCP<StatusTestMaxIters<ScalarType,MV,OP> > maxIterTest_;
-    Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP> > convTest_;
-    Teuchos::RCP<StatusTestOutput<ScalarType,MV,OP> > outputTest_;
+    Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > sTest_;
+    Teuchos::RCP<StatusTestMaxIters<ScalarType,MV,OP,DM> > maxIterTest_;
+    Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP,DM> > convTest_;
+    Teuchos::RCP<StatusTestOutput<ScalarType,MV,OP,DM> > outputTest_;
+    Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > debugStatusTest_;
 
     // Current parameter list.
     Teuchos::RCP<Teuchos::ParameterList> params_;
@@ -245,8 +261,8 @@ namespace Belos {
 
 
 // Empty Constructor
-template<class ScalarType, class MV, class OP>
-PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::PseudoBlockStochasticCGSolMgr() :
+template<class ScalarType, class MV, class OP, class DM>
+PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP,DM>::PseudoBlockStochasticCGSolMgr() :
   outputStream_(Teuchos::rcpFromRef(std::cout)),
   convtol_(DefaultSolverParameters::convTol),
   maxIters_(maxIters_default_),
@@ -263,9 +279,9 @@ PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::PseudoBlockStochasticCGSolMgr()
 {}
 
 // Basic Constructor
-template<class ScalarType, class MV, class OP>
-PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::
-PseudoBlockStochasticCGSolMgr (const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > &problem,
+template<class ScalarType, class MV, class OP, class DM>
+PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP,DM>::
+PseudoBlockStochasticCGSolMgr (const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > &problem,
                                const Teuchos::RCP<Teuchos::ParameterList> &pl ) :
   problem_(problem),
   outputStream_(Teuchos::rcpFromRef(std::cout)),
@@ -294,8 +310,8 @@ PseudoBlockStochasticCGSolMgr (const Teuchos::RCP<LinearProblem<ScalarType,MV,OP
   }
 }
 
-template<class ScalarType, class MV, class OP>
-void PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::setParameters( const Teuchos::RCP<Teuchos::ParameterList> &params )
+template<class ScalarType, class MV, class OP, class DM>
+void PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP,DM>::setParameters( const Teuchos::RCP<Teuchos::ParameterList> &params )
 {
   using Teuchos::ParameterList;
   using Teuchos::parameterList;
@@ -398,8 +414,8 @@ void PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::setParameters( const Teuch
   }
 
   // Convergence
-  typedef Belos::StatusTestCombo<ScalarType,MV,OP>  StatusTestCombo_t;
-  typedef Belos::StatusTestGenResNorm<ScalarType,MV,OP>  StatusTestResNorm_t;
+  typedef Belos::StatusTestCombo<ScalarType,MV,OP,DM>  StatusTestCombo_t;
+  typedef Belos::StatusTestGenResNorm<ScalarType,MV,OP,DM>  StatusTestResNorm_t;
 
   // Check for convergence tolerance
   if (params->isParameter("Convergence Tolerance")) {
@@ -480,7 +496,7 @@ void PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::setParameters( const Teuch
 
   // Basic test checks maximum iterations and native residual.
   if (maxIterTest_ == Teuchos::null)
-    maxIterTest_ = Teuchos::rcp( new StatusTestMaxIters<ScalarType,MV,OP>( maxIters_ ) );
+    maxIterTest_ = Teuchos::rcp( new StatusTestMaxIters<ScalarType,MV,OP,DM>( maxIters_ ) );
 
   // Implicit residual test, using the native residual to determine if convergence was achieved.
   if (convTest_ == Teuchos::null || newResTest) {
@@ -488,14 +504,19 @@ void PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::setParameters( const Teuch
     convTest_->defineScaleForm( convertStringToScaleType( resScale_ ), Belos::TwoNorm );
   }
 
-  if (sTest_ == Teuchos::null || newResTest)
+  if (sTest_ == Teuchos::null || newResTest) {
     sTest_ = Teuchos::rcp( new StatusTestCombo_t( StatusTestCombo_t::OR, maxIterTest_, convTest_ ) );
+    if (Teuchos::nonnull(debugStatusTest_)) {
+      // Add the debug convergence test, if it exists.
+      sTest_ = Teuchos::rcp( new StatusTestCombo_t( StatusTestCombo_t::OR, sTest_, debugStatusTest_ ) );
+    }
+  }
 
   if (outputTest_ == Teuchos::null || newResTest) {
 
     // Create the status test output class.
     // This class manages and formats the output from the status test.
-    StatusTestOutputFactory<ScalarType,MV,OP> stoFactory( outputStyle_ );
+    StatusTestOutputFactory<ScalarType,MV,OP,DM> stoFactory( outputStyle_ );
     outputTest_ = stoFactory.create( printer_, sTest_, outputFreq_, Passed+Failed+Undefined );
 
     // Set the solver string for the output test
@@ -517,9 +538,9 @@ void PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::setParameters( const Teuch
 }
 
 
-template<class ScalarType, class MV, class OP>
+template<class ScalarType, class MV, class OP, class DM>
 Teuchos::RCP<const Teuchos::ParameterList>
-PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::getValidParameters() const
+PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP,DM>::getValidParameters() const
 {
   using Teuchos::ParameterList;
   using Teuchos::parameterList;
@@ -577,8 +598,9 @@ PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::getValidParameters() const
 
 
 // solve()
-template<class ScalarType, class MV, class OP>
-ReturnType PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::solve() {
+template<class ScalarType, class MV, class OP, class DM>
+ReturnType PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP,DM>::solve() {
+  ReturnType retType = Undetermined;
 
   // Set the current parameters if they were not set before.
   // NOTE:  This may occur if the user generated the solver manager with the default constructor and
@@ -617,8 +639,8 @@ ReturnType PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::solve() {
   //////////////////////////////////////////////////////////////////////////////////////
   // Pseudo-Block CG solver
 
-  Teuchos::RCP<PseudoBlockStochasticCGIter<ScalarType,MV,OP> > block_cg_iter
-    = Teuchos::rcp( new PseudoBlockStochasticCGIter<ScalarType,MV,OP>(problem_,printer_,outputTest_,plist) );
+  Teuchos::RCP<PseudoBlockStochasticCGIter<ScalarType,MV,OP,DM> > block_cg_iter
+    = Teuchos::rcp( new PseudoBlockStochasticCGIter<ScalarType,MV,OP,DM>(problem_,printer_,outputTest_,plist) );
 
   // Enter solve() iterations
   {
@@ -661,7 +683,7 @@ ReturnType PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::solve() {
           if ( convTest_->getStatus() == Passed ) {
 
             // Figure out which linear systems converged.
-            std::vector<int> convIdx = Teuchos::rcp_dynamic_cast<StatusTestGenResNorm<ScalarType,MV,OP> >(convTest_)->convIndices();
+            std::vector<int> convIdx = Teuchos::rcp_dynamic_cast<StatusTestGenResNorm<ScalarType,MV,OP,DM> >(convTest_)->convIndices();
 
             // If the number of converged linear systems is equal to the
             // number of current linear systems, then we are done with this block.
@@ -711,6 +733,20 @@ ReturnType PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::solve() {
           ////////////////////////////////////////////////////////////////////////////////////
           else if ( maxIterTest_->getStatus() == Passed ) {
             // we don't have convergence
+            retType = MaxItersReached;
+            isConverged = false;
+            break;  // break from while(1){block_cg_iter->iterate()}
+          }
+
+          ////////////////////////////////////////////////////////////////////////////////////
+          //
+          // a debug status test (if any) stopped the iteration
+          //
+          ////////////////////////////////////////////////////////////////////////////////////
+          else if (Teuchos::nonnull(debugStatusTest_) &&
+                   debugStatusTest_->getStatus() == Passed) {
+            // we don't have convergence, but a debug test asked us to stop
+            retType = Unconverged;
             isConverged = false;
             break;  // break from while(1){block_cg_iter->iterate()}
           }
@@ -723,11 +759,13 @@ ReturnType PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::solve() {
           ////////////////////////////////////////////////////////////////////////////////////
 
           else {
+            retType = InconsistentState;
             TEUCHOS_TEST_FOR_EXCEPTION(true,std::logic_error,
                                "Belos::PseudoBlockStochasticCGSolMgr::solve(): Invalid return from PseudoBlockStochasticCGIter::iterate().");
           }
         }
         catch (const std::exception &e) {
+          retType = NonspecificException;
           printer_->stream(Errors) << "Error! Caught std::exception in PseudoBlockStochasticCGIter::iterate() at iteration "
                                    << block_cg_iter->getNumIters() << std::endl
                                    << e.what() << std::endl;
@@ -781,14 +819,14 @@ ReturnType PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::solve() {
   numIters_ = maxIterTest_->getNumIters();
 
   if (!isConverged ) {
-    return Unconverged; // return from PseudoBlockStochasticCGSolMgr::solve()
+    return retType; // return from PseudoBlockStochasticCGSolMgr::solve()
   }
   return Converged; // return from PseudoBlockStochasticCGSolMgr::solve()
 }
 
 //  This method requires the solver manager to return a std::string that describes itself.
-template<class ScalarType, class MV, class OP>
-std::string PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::description() const
+template<class ScalarType, class MV, class OP, class DM>
+std::string PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP,DM>::description() const
 {
   std::ostringstream oss;
   oss << "Belos::PseudoBlockStochasticCGSolMgr<...,"<<Teuchos::ScalarTraits<ScalarType>::name()<<">";
@@ -798,5 +836,18 @@ std::string PseudoBlockStochasticCGSolMgr<ScalarType,MV,OP>::description() const
 }
 
 } // end Belos namespace
+
+#ifdef HAVE_BELOS_TPETRA
+#include "BelosTpetraETIHelpers.hpp"
+
+#define BELOS_TPETRA_PSEUDOBLOCKSTOCHASTICCGSOLMGR_NOEXTERN_CALL(SC, LO, GO, NT)            \
+  BELOS_TPETRA_CALL(Belos::PseudoBlockStochasticCGSolMgr, SC, LO, GO, NT)
+
+#define BELOS_TPETRA_PSEUDOBLOCKSTOCHASTICCGSOLMGR_EXTERN_CALL(SC, LO, GO, NT)              \
+  BELOS_TPETRA_EXTERN_CALL(Belos::PseudoBlockStochasticCGSolMgr, SC, LO, GO, NT)
+
+TPETRA_INSTANTIATE_SLGN_NO_ORDINAL_SCALAR(BELOS_TPETRA_PSEUDOBLOCKSTOCHASTICCGSOLMGR_EXTERN_CALL)
+#endif
+
 
 #endif /* BELOS_PSEUDO_BLOCK_CG_SOLMGR_HPP */

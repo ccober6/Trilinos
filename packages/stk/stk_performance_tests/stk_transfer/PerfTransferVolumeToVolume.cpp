@@ -44,6 +44,7 @@
 #include "stk_unit_test_utils/FieldEvaluator.hpp"
 #include "stk_unit_test_utils/UnitTestSearchUtils.hpp"
 #include "stk_unit_test_utils/UnitTestTransferUtils.hpp"
+#include "stk_unit_test_utils/MockMasterElementProvider.hpp"
 
 #include <gtest/gtest.h>
 #include "mpi.h"            // for MPI_COMM_WORLD

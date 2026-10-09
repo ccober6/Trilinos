@@ -90,7 +90,7 @@ int run (int argc, char *argv[])
   // Output stream for verbose output.
   RCP<FancyOStream> verbOut = verbose ? out : getFancyOStream (blackHole);
 
-  const bool success = true;
+  bool success = true;
 
   // Test whether it's possible to instantiate the solver.
   // This is a minimal compilation test.
@@ -109,8 +109,7 @@ int run (int argc, char *argv[])
   RCP<tcrsmatrix_t> A;
   RCP<MV> X_guess, X_exact, B;
   {
-    Teuchos::RCP<NT> node; // can be null; only for type deduction
-    Belos::Tpetra::ProblemMaker<tcrsmatrix_t> factory (comm, node, out, tolerant, debug);
+    Belos::Tpetra::ProblemMaker<tcrsmatrix_t> factory (comm, out, tolerant, debug);
 
     RCP<ParameterList> problemParams = parameterList ();
     problemParams->set ("Global number of rows",
@@ -140,9 +139,10 @@ int run (int argc, char *argv[])
 
   *verbOut << "Solving linear system" << std::endl;
   Belos::ReturnType result = solver.solve ();
+  success = (result == Belos::Converged);
 
-  *verbOut << "Result of solve: "
-           << Belos::convertReturnTypeToString (result)
+  *verbOut << "Result of solve"
+           << ": rc = " << Belos::convertReturnTypeToString (result)
            << std::endl;
 
   // Make sure that all the processes finished.

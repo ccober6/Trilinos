@@ -13,8 +13,6 @@
 #ifndef IFPACK2_ILUT_DECL_HPP
 #define IFPACK2_ILUT_DECL_HPP
 
-#include "KokkosSparse_par_ilut.hpp"
-
 #include "Ifpack2_Preconditioner.hpp"
 #include "Ifpack2_Details_CanChangeMatrix.hpp"
 #include "Tpetra_CrsMatrix_decl.hpp"
@@ -264,6 +262,9 @@ class ILUT : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar_
   ///
   /// \param X [in] Input multivector; "right-hand side" of the solve.
   /// \param Y [out] Output multivector; result of the solve.
+  /// \param mode [in] Whether to apply the transpose (Teuchos::NO_TRANS, Teuchos::TRANS, Teuchos::CONJ_TRANS).
+  /// \param alpha [in] Scaling factor for the result.
+  /// \param beta [in] Scaling factor for Y before adding the result.
   void
   apply(const Tpetra::MultiVector<scalar_type, local_ordinal_type, global_ordinal_type, node_type>& X,
         Tpetra::MultiVector<scalar_type, local_ordinal_type, global_ordinal_type, node_type>& Y,
@@ -400,6 +401,14 @@ class ILUT : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar_
   Teuchos::RCP<const row_matrix_type> A_;
   //! "Local filter" version of A_.
   Teuchos::RCP<const row_matrix_type> A_local_;
+  //! Persistent CRS representation of A_local_ used by the par_ilut path.
+  //!
+  //! If A_local_ is already a Tpetra::CrsMatrix, then A_local_crs_ aliases it.
+  //! Otherwise, initialize() constructs a persistent mutable CRS copy in
+  //! A_local_crs_nc_ and A_local_crs_ aliases that copy.
+  Teuchos::RCP<const crs_matrix_type> A_local_crs_;
+  //! Mutable cached CRS representation used when A_local_ is not already a CrsMatrix.
+  Teuchos::RCP<crs_matrix_type> A_local_crs_nc_;
   lno_row_view_t A_local_rowmap_;
   lno_nonzero_view_t A_local_entries_;
   scalar_nonzero_view_t A_local_values_;

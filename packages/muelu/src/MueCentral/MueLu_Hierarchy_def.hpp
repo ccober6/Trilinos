@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <list>
 
 #include <Xpetra_Matrix.hpp>
 #include <Xpetra_MultiVectorFactory.hpp>
@@ -32,6 +33,7 @@
 #include "MueLu_PFactory.hpp"
 #include "MueLu_SmootherFactory.hpp"
 #include "MueLu_SmootherBase.hpp"
+#include "MueLu_Behavior.hpp"
 
 #include "Teuchos_TimeMonitor.hpp"
 
@@ -59,6 +61,7 @@ Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Hierarchy()
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Hierarchy(const std::string& label)
   : Hierarchy() {
+  SetLabel(label);
   setObjectLabel(label);
   Levels_[0]->setObjectLabel(label);
 }
@@ -159,6 +162,11 @@ double Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::GetOperatorComplexi
       return 0.0;
     }
 
+    if (!Am->haveGlobalConstants()) {
+      GetOStream(Warnings0) << "Some level operators are do not have global constants computed, operator complexity calculation aborted" << std::endl;
+      return 0.0;
+    }
+
     totalNnz += as<double>(Am->getGlobalNumEntries());
     if (i == 0)
       lev0Nnz = totalNnz;
@@ -179,6 +187,7 @@ double Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::GetSmootherComplexi
   if (A.is_null()) return -1.0;
   RCP<Matrix> Am = rcp_dynamic_cast<Matrix>(A);
   if (Am.is_null()) return -1.0;
+  if (!Am->haveGlobalConstants()) return -1.0;
   a0_nnz = as<double>(Am->getGlobalNumEntries());
 
   // Get smoother complexity at each level
@@ -234,23 +243,20 @@ void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::SetMatvecParams(RCP<P
           xpExporter->setDistributorParameters(matvecParams);
       }
     }
-    if (level->IsAvailable("P")) {
-      RCP<Matrix> P                = level->Get<RCP<Matrix>>("P");
-      RCP<const Import> xpImporter = P->getCrsGraph()->getImporter();
-      if (!xpImporter.is_null())
-        xpImporter->setDistributorParameters(matvecParams);
-      RCP<const Export> xpExporter = P->getCrsGraph()->getExporter();
-      if (!xpExporter.is_null())
-        xpExporter->setDistributorParameters(matvecParams);
-    }
-    if (level->IsAvailable("R")) {
-      RCP<Matrix> R                = level->Get<RCP<Matrix>>("R");
-      RCP<const Import> xpImporter = R->getCrsGraph()->getImporter();
-      if (!xpImporter.is_null())
-        xpImporter->setDistributorParameters(matvecParams);
-      RCP<const Export> xpExporter = R->getCrsGraph()->getExporter();
-      if (!xpExporter.is_null())
-        xpExporter->setDistributorParameters(matvecParams);
+    const std::list<std::string> matrices = {"P", "R", "D0", "NodeMatrix"};
+    for (auto it = matrices.begin(); it != matrices.end(); ++it) {
+      if (level->IsAvailable(*it)) {
+        RCP<Matrix> mat = level->Get<RCP<Matrix>>(*it);
+        if (!mat.is_null()) {
+          RCP<const Import> xpImporter = mat->getCrsGraph()->getImporter();
+          if (!xpImporter.is_null()) {
+            xpImporter->setDistributorParameters(matvecParams);
+          }
+          RCP<const Export> xpExporter = mat->getCrsGraph()->getExporter();
+          if (!xpExporter.is_null())
+            xpExporter->setDistributorParameters(matvecParams);
+        }
+      }
     }
     if (level->IsAvailable("Importer")) {
       RCP<const Import> xpImporter = level->Get<RCP<const Import>>("Importer");
@@ -277,7 +283,6 @@ bool Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Setup(int coarseLevel
   Level& level = *Levels_[coarseLevelID];
 
   std::string label = FormattingHelper::getColonLabel(level.getObjectLabel());
-  TimeMonitor m1(*this, label + this->ShortClassName() + ": " + "Setup (total)");
   TimeMonitor m2(*this, label + this->ShortClassName() + ": " + "Setup" + " (total, level=" + Teuchos::toString(coarseLevelID) + ")");
 
   // TODO: pass coarseLevelManager by reference
@@ -510,6 +515,7 @@ bool Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Setup(int coarseLevel
       Levels_[nextLevelID - 2]->Release(*coarseFact);
     }
     Levels_.resize(actualNumLevels);
+    levelManagers_.resize(actualNumLevels);
   }
 
   // I think this is the proper place for graph so that it shows every dependence
@@ -770,8 +776,7 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
   MagnitudeType prevNorm = STS::magnitude(STS::one()), curNorm = STS::magnitude(STS::one());
   rate_ = 1.0;
 
-  for (LO i = 1; i <= nIts; i++) {
-#ifdef HAVE_MUELU_DEBUG
+  if (Behavior::debug()) {
     if (A->getDomainMap()->isCompatible(*(X.getMap())) == false) {
       std::ostringstream ss;
       ss << "Level " << startLevel << ": level A's domain map is not compatible with X";
@@ -783,7 +788,6 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
       ss << "Level " << startLevel << ": level A's range map is not compatible with B";
       throw Exceptions::Incompatible(ss.str());
     }
-#endif
   }
 
   bool emptyFineSolve = true;
@@ -893,14 +897,10 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
   std::string levelSuffix  = " (level=" + toString(startLevel) + ")";
   std::string levelSuffix1 = " (level=" + toString(startLevel + 1) + ")";
 
-  bool useStackedTimer = !Teuchos::TimeMonitor::getStackedTimer().is_null();
-
   RCP<Monitor> iterateTime;
   RCP<TimeMonitor> iterateTime1;
   if (startLevel == 0)
     iterateTime = rcp(new Monitor(*this, "Solve", label, (nIts == 1) ? None : Runtime0, Timings0));
-  else if (!useStackedTimer)
-    iterateTime1 = rcp(new TimeMonitor(*this, prefix + "Solve (total, level=" + toString(startLevel) + ")", Timings0));
 
   std::string iterateLevelTimeLabel = prefix + "Solve" + levelSuffix;
   RCP<TimeMonitor> iterateLevelTime = rcp(new TimeMonitor(*this, iterateLevelTimeLabel, Timings0));
@@ -991,8 +991,6 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
       {
         // ============== PRESMOOTHING ==============
         RCP<TimeMonitor> STime;
-        if (!useStackedTimer)
-          STime = rcp(new TimeMonitor(*this, prefix + "Solve : smoothing (total)", Timings0));
         RCP<TimeMonitor> SLevelTime = rcp(new TimeMonitor(*this, prefix + "Solve : smoothing" + levelSuffix, Timings0));
 
         if (Fine->IsAvailable("PreSmoother")) {
@@ -1005,8 +1003,6 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
       RCP<MultiVector> residual;
       {
         RCP<TimeMonitor> ATime;
-        if (!useStackedTimer)
-          ATime = rcp(new TimeMonitor(*this, prefix + "Solve : residual calculation (total)", Timings0));
         RCP<TimeMonitor> ALevelTime = rcp(new TimeMonitor(*this, prefix + "Solve : residual calculation" + levelSuffix, Timings0));
         if (zeroGuess) {
           // If there's a pre-smoother, then zeroGuess is false.  If there isn't and people still have zeroGuess set,
@@ -1027,8 +1023,6 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
       {
         // ============== RESTRICTION ==============
         RCP<TimeMonitor> RTime;
-        if (!useStackedTimer)
-          RTime = rcp(new TimeMonitor(*this, prefix + "Solve : restriction (total)", Timings0));
         RCP<TimeMonitor> RLevelTime = rcp(new TimeMonitor(*this, prefix + "Solve : restriction" + levelSuffix, Timings0));
         coarseRhs                   = coarseRhs_[startLevel];
 
@@ -1048,8 +1042,6 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
       coarseX = coarseX_[startLevel];
       if (!doPRrebalance_ && !importer.is_null()) {
         RCP<TimeMonitor> ITime;
-        if (!useStackedTimer)
-          ITime = rcp(new TimeMonitor(*this, prefix + "Solve : import (total)", Timings0));
         RCP<TimeMonitor> ILevelTime = rcp(new TimeMonitor(*this, prefix + "Solve : import" + levelSuffix1, Timings0));
 
         // Import: range map of R --> domain map of rebalanced Ac (before subcomm replacement)
@@ -1072,7 +1064,7 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
 
           Iterate(*coarseRhs, *coarseX, 1, true, startLevel + 1);
           // ^^ zero initial guess
-          if (Cycle_ == WCYCLE && WCycleStartLevel_ >= startLevel)
+          if (Cycle_ == WCYCLE && WCycleStartLevel_ <= startLevel)
             Iterate(*coarseRhs, *coarseX, 1, false, startLevel + 1);
           // ^^ nonzero initial guess
 
@@ -1084,8 +1076,6 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
 
       if (!doPRrebalance_ && !importer.is_null()) {
         RCP<TimeMonitor> ITime;
-        if (!useStackedTimer)
-          ITime = rcp(new TimeMonitor(*this, prefix + "Solve : export (total)", Timings0));
         RCP<TimeMonitor> ILevelTime = rcp(new TimeMonitor(*this, prefix + "Solve : export" + levelSuffix1, Timings0));
 
         // Import: range map of rebalanced Ac (before subcomm replacement) --> domain map of P
@@ -1097,8 +1087,6 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
       {
         // ============== PROLONGATION ==============
         RCP<TimeMonitor> PTime;
-        if (!useStackedTimer)
-          PTime = rcp(new TimeMonitor(*this, prefix + "Solve : prolongation (total)", Timings0));
         RCP<TimeMonitor> PLevelTime = rcp(new TimeMonitor(*this, prefix + "Solve : prolongation" + levelSuffix, Timings0));
         // Update X += P * coarseX
         // Note that due to what may be round-off error accumulation, use of the fused kernel
@@ -1116,8 +1104,6 @@ ConvergenceStatus Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Iterate(
       {
         // ============== POSTSMOOTHING ==============
         RCP<TimeMonitor> STime;
-        if (!useStackedTimer)
-          STime = rcp(new TimeMonitor(*this, prefix + "Solve : smoothing (total)", Timings0));
         RCP<TimeMonitor> SLevelTime = rcp(new TimeMonitor(*this, prefix + "Solve : smoothing" + levelSuffix, Timings0));
 
         if (Fine->IsAvailable("PostSmoother")) {
@@ -1238,8 +1224,9 @@ void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::describe(Teuchos::Fan
     std::vector<Xpetra::global_size_t> nnzPerLevel;
     std::vector<Xpetra::global_size_t> rowsPerLevel;
     std::vector<int> numProcsPerLevel;
-    bool someOpsNotMatrices             = false;
-    const Xpetra::global_size_t INVALID = Teuchos::OrdinalTraits<Xpetra::global_size_t>::invalid();
+    bool someOpsNotMatrices                 = false;
+    const Xpetra::global_size_t OPERATOR    = Teuchos::OrdinalTraits<Xpetra::global_size_t>::invalid();
+    const Xpetra::global_size_t UNAVAILABLE = Teuchos::OrdinalTraits<Xpetra::global_size_t>::max();
     for (int i = 0; i < numLevels; i++) {
       TEUCHOS_TEST_FOR_EXCEPTION(!(Levels_[i]->IsAvailable("A")), Exceptions::RuntimeError,
                                  "Operator A is not available on level " << i);
@@ -1251,13 +1238,16 @@ void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::describe(Teuchos::Fan
       RCP<Matrix> Am = rcp_dynamic_cast<Matrix>(A);
       if (Am.is_null()) {
         someOpsNotMatrices = true;
-        nnzPerLevel.push_back(INVALID);
+        nnzPerLevel.push_back(OPERATOR);
         rowsPerLevel.push_back(A->getDomainMap()->getGlobalNumElements());
         numProcsPerLevel.push_back(A->getDomainMap()->getComm()->getSize());
       } else {
-        LO storageblocksize       = Am->GetStorageBlockSize();
-        Xpetra::global_size_t nnz = Am->getGlobalNumEntries() * storageblocksize * storageblocksize;
-        nnzPerLevel.push_back(nnz);
+        LO storageblocksize = Am->GetStorageBlockSize();
+        if (Am->haveGlobalConstants()) {
+          Xpetra::global_size_t nnz = Am->getGlobalNumEntries() * storageblocksize * storageblocksize;
+          nnzPerLevel.push_back(nnz);
+        } else
+          nnzPerLevel.push_back(UNAVAILABLE);
         rowsPerLevel.push_back(Am->getGlobalNumRows() * storageblocksize);
         numProcsPerLevel.push_back(Am->getRowMap()->getComm()->getSize());
       }
@@ -1270,8 +1260,9 @@ void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::describe(Teuchos::Fan
       std::ostringstream oss;
       oss << std::setfill(' ');
       oss << "\n--------------------------------------------------------------------------------\n";
-      oss << "---                            Multigrid Summary " << std::setw(28) << std::left << label << "---\n";
+      oss << "---                            Multigrid Summary " << std::setw(32) << "---\n";
       oss << "--------------------------------------------------------------------------------" << std::endl;
+      if (hierarchyLabel_ != "") oss << "Label               = " << hierarchyLabel_ << std::endl;
       if (verbLevel & Parameters1)
         oss << "Scalar              = " << Teuchos::ScalarTraits<Scalar>::name() << std::endl;
       oss << "Number of levels    = " << numLevels << std::endl;
@@ -1308,7 +1299,7 @@ void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::describe(Teuchos::Fan
       }
       for (size_t i = 0; i < nnzPerLevel.size(); ++i) {
         tt = nnzPerLevel[i];
-        if (tt != INVALID)
+        if ((tt != OPERATOR) && (tt != UNAVAILABLE))
           break;
         tt = 100;  // This will get used if all levels are operators.
       }
@@ -1329,12 +1320,15 @@ void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::describe(Teuchos::Fan
       for (size_t i = 0; i < nnzPerLevel.size(); ++i) {
         oss << "  " << i << "  ";
         oss << std::setw(rowspacer) << rowsPerLevel[i];
-        if (nnzPerLevel[i] != INVALID) {
+        if ((nnzPerLevel[i] != OPERATOR) && (nnzPerLevel[i] != UNAVAILABLE)) {
           oss << std::setw(nnzspacer) << nnzPerLevel[i];
           oss << std::setprecision(2) << std::setiosflags(std::ios::fixed);
           oss << std::setw(9) << as<double>(nnzPerLevel[i]) / rowsPerLevel[i];
         } else {
-          oss << std::setw(nnzspacer) << "Operator";
+          if (nnzPerLevel[i] == OPERATOR)
+            oss << std::setw(nnzspacer) << "Operator";
+          else
+            oss << std::setw(nnzspacer) << "N/A";
           oss << std::setprecision(2) << std::setiosflags(std::ios::fixed);
           oss << std::setw(9) << "     ";
         }
@@ -1396,7 +1390,7 @@ void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::IsPreconditioner(cons
 }
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::DumpCurrentGraph(int currLevel) const {
+void Hierarchy<Scalar, LocalOrdinal, GlobalOrdinal, Node>::DumpCurrentGraph(int /*currLevel*/) const {
   if (GetProcRankVerbose() != 0)
     return;
 #if defined(HAVE_MUELU_BOOST) && defined(HAVE_MUELU_BOOST_FOR_REAL) && defined(BOOST_VERSION) && (BOOST_VERSION >= 104400)

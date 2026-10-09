@@ -43,16 +43,17 @@
 #include <stk_mesh/base/Entity.hpp>     // for Entity, etc
 #include <stk_mesh/base/EntityCommDatabase.hpp>  // for EntityCommDatabase
 #include <stk_mesh/base/Ghosting.hpp>   // for Ghosting
-#include <stk_mesh/base/Selector.hpp>   // for Selector
 #include <stk_mesh/base/NgpTypes.hpp>
 #include <stk_mesh/base/Ngp.hpp>
 #include <stk_mesh/baseImpl/BucketRepository.hpp>  // for BucketRepository
+#include <stk_mesh/baseImpl/ViewVector.hpp>
 #include <stk_util/parallel/Parallel.hpp>  // for ParallelMachine
 #include "stk_mesh/base/Bucket.hpp"     // for Bucket
 #include "stk_mesh/base/EntityKey.hpp"  // for EntityKey, hash_value
 #include "stk_mesh/base/FieldDataManager.hpp"
 #include "stk_mesh/base/DeviceFieldDataManagerFactory.hpp"
 #include "stk_mesh/base/SharingInfo.hpp"
+#include "stk_mesh/base/GhostingCache.hpp"  // for GhostingCache
 #include "stk_topology/topology.hpp"    // for topology, etc
 #include "stk_util/util/ReportHandler.hpp"  // for ThrowAssert, etc
 #include "stk_mesh/base/ModificationSummary.hpp"
@@ -78,6 +79,7 @@ namespace stk { namespace mesh { class FieldBase; } }
 namespace stk { namespace mesh { class MetaData; } }
 namespace stk { namespace mesh { class Part; } }
 namespace stk { namespace mesh { class BulkData; } }
+namespace stk { namespace mesh { class Selector; } }
 namespace stk { namespace mesh { namespace impl { class AuraGhosting; } } }
 namespace stk { namespace mesh { namespace impl { class EntityKeyMapping; } } }
 namespace stk { namespace mesh { class FaceCreator; } }
@@ -95,8 +97,9 @@ namespace stk { namespace mesh { namespace impl {
   template <typename NgpMemSpace> NgpMeshHostData<NgpMemSpace>* get_ngp_mesh_host_data(const BulkData & bulk);
 }}}
 namespace stk { namespace mesh { namespace impl {
-  template <typename MemSpace> DeviceFieldDataManagerBase* get_device_field_data_manager(const BulkData& bulk);
+  template <typename Space> DeviceFieldDataManagerBase* get_device_field_data_manager(const BulkData& bulk);
 }}}
+namespace stk { namespace mesh { namespace impl { void sync_buckets_from_partitions(BulkData & bulk); } } }
 
 namespace stk {
 namespace tools {
@@ -128,7 +131,7 @@ void communicate_field_data(const BulkData & mesh, const std::vector<const Field
 void skin_mesh( BulkData & mesh, Selector const& element_selector, PartVector const& skin_parts, const Selector * secondary_selector);
 void create_edges( BulkData & mesh, const Selector & element_selector, Part * part_to_insert_new_edges );
 void internal_create_faces( BulkData & mesh, const Selector & element_selector, bool connect_faces_to_edges, FaceCreationBehavior faceCreationBehavior);
-bool process_killed_elements(stk::mesh::BulkData& bulkData,
+bool process_killed_elements(BulkData& bulkData,
                              const stk::mesh::EntityVector& killedElements,
                              stk::mesh::Part& active,
                              stk::mesh::impl::ParallelSelectedInfo &remoteActiveSelector,
@@ -203,6 +206,8 @@ public:
    */
   size_t synchronized_count() const { return m_meshModification.synchronized_count() ; }
 
+  size_t ngp_mesh_synchronized_count() const;
+
   /** \brief  Begin a modification phase during which the mesh bulk data
    *          could become parallel inconsistent.  This is a parallel
    *          synchronous call.  The first time this method is called
@@ -218,7 +223,7 @@ public:
    *           False if already in this state.
    */
   virtual
-  bool modification_begin(const std::string description = std::string("UNSPECIFIED"));
+  bool modification_begin(const std::string& description = std::string("UNSPECIFIED"));
 
   /** \brief  Parallel synchronization of modifications and
    *          transition to the guaranteed parallel consistent state.
@@ -276,8 +281,8 @@ public:
    *    StateNM3 <- StateNM2
    *  </PRE>
    */
-  void update_field_data_states(bool rotateNgpFieldViews = false);
-  void update_field_data_states(FieldBase *field, bool rotateNgpFieldViews = false);
+  void update_field_data_states(bool alsoRotateOnDevice = false);
+  void update_field_data_states(FieldBase *field, bool alsoRotateOnDevice = false);
 
   /** \brief  Copy field data from src entity to Dest entity
    *           - Fields that exist on the src that don't exist on the dest will
@@ -486,10 +491,6 @@ public:
    *  1) If 'e_from' is a member of 'part' and
    *     part.primary_entity_rank() == entity_rank(e_from)
    *     then 'e_to' has induced membership in 'part'.
-   *  2) If there exists a part relation 'part_rel' such that
-   *     'e_from' is a member of part_rel.m_root and
-   *     the entity relation conforms to the part relation
-   *     then 'e_to' has induced membership in part_rel.m_target.
    *
    * Note that relation-declarations must be symmetric across all
    * sharers of the involved entities within a modification cycle.
@@ -535,6 +536,10 @@ public:
   inline NgpCommMapIndicesHostMirror<NgpMemSpace> volatile_fast_shared_comm_map(EntityRank rank, int proc,
                                                                                 bool includeGhosts=false) const;
 
+  template <typename NgpMemSpace>
+  inline size_t volatile_fast_shared_comm_map_size(EntityRank rank, int proc,
+                                                   bool includeGhosts=false) const;
+
   const std::vector<int>& all_sharing_procs(stk::mesh::EntityRank rank) const;
 
   /** \brief  Query the shared-entity aura.
@@ -543,11 +548,11 @@ public:
    */
   Ghosting & aura_ghosting() const {
     confirm_host_mesh_is_synchronized_from_device();
-    return *m_ghosting[AURA];
+    return *(ghostings()[AURA]);
   }
   Ghosting & shared_ghosting() const {
     confirm_host_mesh_is_synchronized_from_device();
-    return *m_ghosting[SHARED];
+    return *(ghostings()[SHARED]);
   }
 
   /** Return the part corresponding to the specified ghosting.
@@ -595,10 +600,10 @@ public:
   /** \brief  Vector of all ghostings */
   const std::vector<Ghosting*> & ghostings() const {
     confirm_host_mesh_is_synchronized_from_device();
-    return m_ghosting;
+    return m_ghosting_cache.get_ghostings();
   }
 
-  size_t get_num_communicated_entities() const { return m_entity_comm_list.size(); }
+  size_t get_num_communicated_entities() const { return m_entity_comm_map.comm_list().size(); }
 
   bool in_shared(EntityKey key) const { return !internal_entity_comm_map_shared(key).empty(); }
   bool in_shared(Entity entity) const;
@@ -748,6 +753,12 @@ public:
   // Return index (offset) of query ordinal if found, num_connectivity otherwise.
   unsigned find_ordinal(Entity entity, EntityRank rank, ConnectivityOrdinal ordinal) const;
   bool has_permutation(Entity entity, EntityRank rank) const;
+
+  uint16_t owned_closure_count(Entity entity) const
+  {
+      return entity.local_offset() < m_closure_count.size() ? m_closure_count[entity.local_offset()] : 0;
+  }
+
   bool owned_closure(Entity entity) const
   {
       return m_closure_count[entity.local_offset()] > static_cast<uint16_t>(0);
@@ -891,10 +902,12 @@ protected: //functions
   bool modification_end_for_entity_creation( const std::vector<EntityRank> & entity_rank_vector,
                                              ModEndOptimizationFlag opt = ModEndOptimizationFlag::MOD_END_SORT); // Mod Mark
 
+  void modification_end_for_sync_to_host(ModEndOptimizationFlag opt = ModEndOptimizationFlag::MOD_END_SORT);
+
   bool internal_modification_end_for_skin_mesh( EntityRank entity_rank,
                                                 ModEndOptimizationFlag opt,
-                                                const stk::mesh::Selector& selectedToSkin,
-                                                const stk::mesh::Selector * only_consider_second_element_from_this_selector); // Mod Mark
+                                                const Selector& selectedToSkin,
+                                                const Selector * only_consider_second_element_from_this_selector); // Mod Mark
 
   bool inputs_ok_and_need_ghosting(Ghosting & ghosts ,
                                const std::vector<EntityProc> & add_send ,
@@ -918,7 +931,7 @@ protected: //functions
                             const EntityProcVec& entities,
                             EntityProcVec& entitiesWithClosure);
 
-  const EntityCommListInfoVector & internal_comm_list() const { return m_entity_comm_list; }
+  const EntityCommListInfoVector & internal_comm_list() const { return m_entity_comm_map.comm_list(); }
   const EntityCommDatabase& internal_comm_db() const { return m_entity_comm_map; }
 
   PairIterEntityComm internal_entity_comm_map(const EntityKey & key) const { return m_entity_comm_map.comm(key); }
@@ -979,7 +992,6 @@ protected: //functions
 
   void internal_change_entity_parts_without_propagating_to_downward_connected_entities(Entity entity, const OrdinalVector& add_parts, const OrdinalVector& remove_parts, OrdinalVector& parts_removed, OrdinalVector& newBucketPartList, OrdinalVector& scratchSpace);
   void internal_change_bucket_parts_without_propagating_to_downward_connected_entities(Bucket* bucket, EntityRank rank, const OrdinalVector& add_parts, const OrdinalVector& remove_parts, OrdinalVector& ranked_parts_removed, OrdinalVector& newBucketPartList);
-  void internal_change_entity_parts_without_propagating_to_downward_connected_entities_with_notification(Entity entity, const OrdinalVector& add_parts, const OrdinalVector& remove_parts, OrdinalVector& parts_removed, OrdinalVector& newBucketPartList, OrdinalVector& scratchSpace);
   void internal_determine_inducible_parts(EntityRank e_rank, const OrdinalVector& add_parts, const OrdinalVector& parts_removed, OrdinalVector& inducible_parts_added, OrdinalVector& inducible_parts_removed);
   void internal_determine_inducible_parts_and_propagate_to_downward_connected_entities(
                                                         Entity entity,
@@ -1044,7 +1056,8 @@ protected: //functions
                                                                                stk::mesh::Entity e_to,
                                                                                OrdinalVector &to_add);
 
-  bool internal_modification_begin(const std::string& description, bool resetSymGhostInfo = true);
+  bool modification_begin_for_sync_to_host(const std::string& description);
+  bool internal_modification_begin(const std::string& description, bool resetSymGhostInfo = true, bool isSyncToHost=false);
   bool internal_modification_end_for_change_entity_owner(ModEndOptimizationFlag opt );
   bool internal_modification_end_for_change_parts(ModEndOptimizationFlag opt = ModEndOptimizationFlag::MOD_END_SORT);
   void internal_modification_end_for_change_ghosting();
@@ -1057,13 +1070,12 @@ protected: //functions
 
   void filter_upward_ghost_relations(const Entity entity, std::function<void(Entity)> filter);
   EntityVector get_upward_send_ghost_relations(const Entity entity);
-  EntityVector get_upward_recv_ghost_relations(const Entity entity);
   void update_comm_list_based_on_changes_in_comm_map();
 
   void internal_resolve_shared_part_membership_for_element_death(); // Mod Mark
 
   void remove_unneeded_induced_parts(stk::mesh::Entity entity, PairIterEntityComm entity_comm_info,
-          PartStorage& part_storage, stk::CommSparse& comm);
+          PartStorage& part_storage, stk::CommSparse& comm, bool useKeyBasedUnpack = false);
 
   void internal_resolve_shared_membership(const stk::mesh::EntityVector & entitiesNoLongerShared); // Mod Mark
   virtual void internal_resolve_parallel_create();
@@ -1081,7 +1093,6 @@ protected: //functions
   virtual void internal_update_sharing_comm_map_and_fill_list_modified_shared_entities_of_node_rank(stk::mesh::EntityVector& shared_new);
 
   virtual void internal_resolve_send_ghost_membership();
-  virtual bool should_sort_buckets_by_first_entity_identifier() const { return false; }
   void resolve_ownership_of_modified_entities(const std::vector<stk::mesh::Entity> &shared_new); // Mod Mark
   void move_entities_to_proper_part_ownership( const std::vector<stk::mesh::Entity> &shared_modified ); // Mod Mark
 
@@ -1175,7 +1186,6 @@ protected: //functions
   }
 
   void require_good_rank_and_id(EntityRank ent_rank, EntityId ent_id) const;
-  void remove_entity_callback(EntityRank rank, unsigned bucket_id, unsigned bucket_ord);
 
   bool internal_destroy_relation(Entity e_from ,
                                  Entity e_to,
@@ -1241,13 +1251,17 @@ private:
   void set_ngp_mesh(NgpMeshBase * ngpMesh) const { m_ngpMeshBase = ngpMesh; }
   NgpMeshBase * get_ngp_mesh() const { return m_ngpMeshBase; }
 
-  template <typename MemSpace>
+  template <typename Space>
   DeviceFieldDataManagerBase* get_device_field_data_manager() const;
 
   void record_entity_deletion(Entity entity, bool isGhost);
   void break_boundary_relations_and_delete_buckets(const std::vector<impl::RelationEntityToNode> & relationsToDestroy, const stk::mesh::BucketVector & bucketsToDelete);
   void delete_buckets(const stk::mesh::BucketVector & buckets);
   void mark_entities_as_deleted(stk::mesh::Bucket * bucket);
+
+  void sync_buckets_from_partitions() {
+    m_bucket_repository.sync_from_partitions();
+  }
 
   void filter_ghosting_remove_receives(const stk::mesh::Ghosting &ghosting, const std::vector <Entity> &remove_receive,
     std::vector<Entity> &recvGhosts, std::vector<bool>& ghostStatus);
@@ -1310,7 +1324,6 @@ private:
 
   void new_bucket_callback(EntityRank rank, const PartVector& superset_parts, size_t capacity, Bucket* new_bucket);
   void new_bucket_caching(EntityRank rank, Bucket* new_bucket);
-  void remove_bucket_caching(EntityRank rank, const Selector selector);
 
   //
   //  "fields" is an optional argument, if present copy only the listed fields.
@@ -1328,7 +1341,7 @@ private:
   void remove_entity_field_data_callback(EntityRank rank, unsigned bucket_id, unsigned newBucketSize,
                                          unsigned bucket_ord);
   void add_entity_callback(EntityRank rank, unsigned bucketId, unsigned newBucketSize, unsigned bucketCapacity,
-                           unsigned indexInBucket);
+                           unsigned indexInBucket, bool initializeFieldData = true);
   void reset_empty_field_data_callback(EntityRank rank, unsigned bucketId, unsigned bucketSize,
                                        unsigned bucketCapacity, const FieldVector & fields);
 
@@ -1444,6 +1457,7 @@ private:
   friend NgpMeshBase * impl::get_ngp_mesh(const BulkData & bulk);
   friend void impl::set_ngp_mesh(const BulkData & bulk, NgpMeshBase * ngpMesh);
   template <typename NgpMemSpace> friend impl::NgpMeshHostData<NgpMemSpace>* impl::get_ngp_mesh_host_data(const BulkData & bulk);
+  friend void impl::sync_buckets_from_partitions(BulkData & bulk);
 
   template<typename T>
   friend void stk::tools::replace_bulk_data(const stk::mesh::BulkData & in_mesh, T & out_mesh, std::function<void(T& outMesh)> op);
@@ -1470,31 +1484,33 @@ private:
                                  const PARTVECTOR& parts);
 
   stk::mesh::EntityId select_side_id(Entity elem, unsigned sideOrdinal);
-  void entity_comm_list_insert(Entity node);
   void init_mesh_consistency_check_mode();
 
 public: // data
   mutable bool m_check_invalid_rels; // TODO REMOVE
 
 protected: //data
+  std::shared_ptr<MetaData> m_meta_data;
   bool m_createUpwardConnectivity = true;
   std::shared_ptr<impl::AuraGhosting> m_auraGhosting;
   mutable ModificationNotifier notifier;
   static const uint16_t orphaned_node_marking;
   EntityCommDatabase m_entity_comm_map;
-  std::vector<Ghosting*> m_ghosting;
-  std::shared_ptr<MetaData> m_meta_data;
+  impl::GhostingCache m_ghosting_cache;
+
   std::vector<EntitySharing> m_mark_entity; //indexed by Entity
   bool m_add_node_sharing_called;
   std::vector<uint16_t> m_closure_count; //indexed by Entity
   std::vector<MeshIndex> m_mesh_indexes; //indexed by Entity
   std::unique_ptr<impl::EntityKeyMapping> m_entityKeyMapping;
-  EntityCommListInfoVector m_entity_comm_list;
   std::vector<int> m_entitycomm;
   std::vector<int> m_owner;
   std::vector<std::pair<EntityKey,EntityCommInfo>> m_removedGhosts;
+  stk::EmptyModificationSummary m_modSummary;
+  // If needing debug info for modifications, comment out above line and uncomment line below
+  //stk::ModificationSummary m_modSummary;
   CommListUpdater m_comm_list_updater;
-  std::vector<EntityKey> m_entity_keys; //indexed by Entity
+  impl::ViewVector<EntityKey> m_entity_keys; //indexed by Entity
   std::unique_ptr<FieldDataManager> m_field_data_manager;
   impl::BucketRepository m_bucket_repository;
 
@@ -1526,16 +1542,12 @@ private: // data
   mutable std::shared_ptr<impl::NgpMeshHostDataBase> m_ngpMeshHostDataBase;
   mutable std::vector<std::vector<int> > m_all_sharing_procs;
   mutable unsigned m_all_sharing_procs_sync_count;
-  PartVector m_ghost_parts;
   int m_num_fields;
   bool m_keep_fields_updated;
-  std::vector<unsigned> m_local_ids; //indexed by Entity
+  impl::ViewVector<unsigned> m_local_ids; //indexed by Entity
 
   mutable std::vector<SelectorBucketMap> m_selector_to_buckets_maps;
   bool m_use_identifiers_for_resolving_sharing;
-  stk::EmptyModificationSummary m_modSummary;
-  // If needing debug info for modifications, comment out above line and uncomment line below
-  //stk::ModificationSummary m_modSummary;
   std::shared_ptr<stk::mesh::MeshDiagnosticObserver> m_meshDiagnosticObserver;
   stk::mesh::ElemElemGraph* m_elemElemGraph = nullptr;
   std::shared_ptr<stk::mesh::ElemElemGraphUpdater> m_elemElemGraphUpdater;
@@ -1555,7 +1567,6 @@ protected:
   stk::mesh::impl::SoloSideIdGenerator m_soloSideIdGenerator;
   bool m_supportsLargeIds = false;
 };
-
 
 inline unsigned
 BulkData::num_connectivity(Entity entity, EntityRank rank) const
@@ -1976,8 +1987,8 @@ void BulkData::internal_update_ngp_fast_comm_maps() const
 
     if (parallel_size() > 1) {
         const EntityRank num_ranks = static_cast<EntityRank>(get_entity_rank_count());
-        const EntityCommListInfoVector& all_comm = m_entity_comm_list;
         const EntityCommDatabase& commDB = internal_comm_db();
+        const EntityCommListInfoVector& all_comm = commDB.comm_list();
 
         // Assemble map, find all shared and ghost entities and pack into volatile fast map
         Kokkos::View<unsigned**,stk::ngp::HostMemSpace> shared_entity_counts("shared_entity_counts", num_ranks,parallel_size());
@@ -2054,32 +2065,64 @@ template <typename NgpMemSpace>
 inline NgpCommMapIndicesHostMirror<NgpMemSpace>
 BulkData::volatile_fast_shared_comm_map(EntityRank rank, int proc, bool includeGhosts) const
 {
-  confirm_host_mesh_is_synchronized_from_device();
-  STK_ThrowAssert(this->in_synchronized_state());
-  if (m_ngpMeshHostDataBase == nullptr ||
-      (dynamic_cast<impl::NgpMeshHostData<NgpMemSpace>*>(m_ngpMeshHostDataBase.get()))->volatileFastSharedCommMapSyncCount < synchronized_count()) {
-    internal_update_ngp_fast_comm_maps<NgpMemSpace>();
-  }
-
   if (parallel_size() > 1)
   {
+    confirm_host_mesh_is_synchronized_from_device();
+    STK_ThrowAssert(this->in_synchronized_state());
+    if (m_ngpMeshHostDataBase == nullptr ||
+        m_ngpMeshHostDataBase->volatileFastSharedCommMapSyncCount < synchronized_count()) {
+      internal_update_ngp_fast_comm_maps<NgpMemSpace>();
+    }
+
+#ifndef NDEBUG
     impl::NgpMeshHostData<NgpMemSpace>* ngpHostData = dynamic_cast<impl::NgpMeshHostData<NgpMemSpace>*>(m_ngpMeshHostDataBase.get());
+#else
+    impl::NgpMeshHostData<NgpMemSpace>* ngpHostData = static_cast<impl::NgpMeshHostData<NgpMemSpace>*>(m_ngpMeshHostDataBase.get());
+#endif
 
     const size_t dataBegin = ngpHostData->hostVolatileFastSharedCommMapOffset[rank](proc);
     const size_t dataEnd = includeGhosts ? ngpHostData->hostVolatileFastSharedCommMapOffset[rank](proc+1)
                          : dataBegin + ngpHostData->hostVolatileFastSharedCommMapNumShared[rank](proc);
-    return Kokkos::subview(ngpHostData->hostVolatileFastSharedCommMap[rank], Kokkos::pair<size_t,size_t>(dataBegin, dataEnd));
+    return NgpCommMapIndicesHostMirror<NgpMemSpace>(ngpHostData->hostVolatileFastSharedCommMap[rank].data()+dataBegin, dataEnd-dataBegin);
   } else
   {
     return NgpCommMapIndicesHostMirror<NgpMemSpace>("empty comm map indices", 0);
   }
 }
 
+template <typename NgpMemSpace>
+inline size_t 
+BulkData::volatile_fast_shared_comm_map_size(EntityRank rank, int proc, bool includeGhosts) const
+{
+  if (parallel_size() > 1)
+  {
+    confirm_host_mesh_is_synchronized_from_device();
+    STK_ThrowAssert(this->in_synchronized_state());
+    if (m_ngpMeshHostDataBase == nullptr ||
+        m_ngpMeshHostDataBase->volatileFastSharedCommMapSyncCount < synchronized_count()) {
+      internal_update_ngp_fast_comm_maps<NgpMemSpace>();
+    }
+
+#ifndef NDEBUG
+    impl::NgpMeshHostData<NgpMemSpace>* ngpHostData = dynamic_cast<impl::NgpMeshHostData<NgpMemSpace>*>(m_ngpMeshHostDataBase.get());
+#else
+    impl::NgpMeshHostData<NgpMemSpace>* ngpHostData = static_cast<impl::NgpMeshHostData<NgpMemSpace>*>(m_ngpMeshHostDataBase.get());
+#endif
+
+    const size_t dataBegin = ngpHostData->hostVolatileFastSharedCommMapOffset[rank](proc);
+    const size_t dataEnd = includeGhosts ? ngpHostData->hostVolatileFastSharedCommMapOffset[rank](proc+1)
+                         : dataBegin + ngpHostData->hostVolatileFastSharedCommMapNumShared[rank](proc);
+    return dataEnd - dataBegin;
+  } else
+  {
+    return 0;
+  }
+}
+
 inline Part&
 BulkData::ghosting_part(const Ghosting& ghosting) const
 {
-  STK_ThrowRequireMsg(ghosting.ordinal() < m_ghost_parts.size(), "BulkData::ghosting_part ERROR, no part corresponds to ghosting with name="<<ghosting.name()<<" and ordinal="<<ghosting.ordinal());
-  return *m_ghost_parts[ghosting.ordinal()];
+  return *(m_ghosting_cache.get_ghosting_part(&ghosting));
 }
 
 inline bool
@@ -2158,7 +2201,7 @@ BulkData::state(Entity entity) const
 inline void
 BulkData::internal_mark_entity(Entity entity, EntitySharing sharedType)
 {
-    m_mark_entity[entity.local_offset()] = sharedType;
+  m_mark_entity[entity.local_offset()] = sharedType;
 }
 
 inline BulkData::EntitySharing
@@ -2282,12 +2325,12 @@ BulkData::set_local_id(Entity entity, unsigned id)
   m_local_ids[entity.local_offset()] = id;
 }
 
-template <typename MemSpace>
+template <typename Space>
 DeviceFieldDataManagerBase*
 BulkData::get_device_field_data_manager() const
 {
   if (not m_deviceFieldDataManager) {
-    m_deviceFieldDataManager = impl::build_device_field_data_manager<MemSpace>(*this);
+    m_deviceFieldDataManager = impl::build_device_field_data_manager<Space>(*this);
   }
   return m_deviceFieldDataManager.get();
 }
@@ -2296,6 +2339,7 @@ template <typename MemSpace>
 MeshIndexType<MemSpace>&
 BulkData::get_updated_fast_mesh_indices() const
 {
+  Kokkos::Profiling::pushRegion("get_updated_fast_mesh_indices");
   if (not m_deviceFastMeshIndices.has_value()) {
     m_deviceFastMeshIndices = std::any(MeshIndexType<MemSpace>("FastMeshIndices", 0));
   }
@@ -2304,20 +2348,16 @@ BulkData::get_updated_fast_mesh_indices() const
 
   if (m_deviceFastMeshIndicesSynchronizedCount < synchronized_count()) {
     const size_t indexSpaceSize = get_size_of_entity_index_space();
-    Kokkos::resize(Kokkos::WithoutInitializing, deviceFastMeshIndices, indexSpaceSize);
+    if (deviceFastMeshIndices.extent(0) != indexSpaceSize) {
+      Kokkos::resize(Kokkos::WithoutInitializing, deviceFastMeshIndices, indexSpaceSize);
+    }
 
     HostMeshIndexType<MemSpace> hostFastMeshIndices = Kokkos::create_mirror_view(Kokkos::WithoutInitializing,
                                                                                  deviceFastMeshIndices);
-
-    for (stk::mesh::EntityRank rank = stk::topology::NODE_RANK; rank < stk::topology::NUM_RANKS; ++rank) {
-      const stk::mesh::BucketVector& bucketsOfRank = buckets(rank);
-
-      for (const stk::mesh::Bucket* bucketPtr : bucketsOfRank) {
-        const stk::mesh::Bucket& bucket = *bucketPtr;
-        for (unsigned bucketOrd = 0; bucketOrd < bucket.size(); ++bucketOrd) {
-          const stk::mesh::Entity& entity = bucket[bucketOrd];
-          hostFastMeshIndices[entity.local_offset()] = stk::mesh::FastMeshIndex{bucket.bucket_id(), bucketOrd};
-        }
+    for(unsigned i=0; i<indexSpaceSize; ++i) {
+      const MeshIndex& mIdx = m_mesh_indexes[i];
+      if (mIdx.bucket != nullptr) {
+        hostFastMeshIndices[i] = FastMeshIndex{mIdx.bucket->bucket_id(), mIdx.bucket_ordinal};
       }
     }
 
@@ -2325,6 +2365,7 @@ BulkData::get_updated_fast_mesh_indices() const
     m_deviceFastMeshIndicesSynchronizedCount = synchronized_count();
   }
 
+  Kokkos::Profiling::popRegion();
   return deviceFastMeshIndices;
 }
 
@@ -2333,9 +2374,7 @@ inline NgpMeshBase * get_ngp_mesh(const BulkData & bulk) {
   return bulk.get_ngp_mesh();
 }
 
-inline void set_ngp_mesh(const BulkData & bulk, NgpMeshBase * ngpMesh) {
-  bulk.set_ngp_mesh(ngpMesh);
-}
+void set_ngp_mesh(const BulkData & bulk, NgpMeshBase * ngpMesh);
 
 template <typename NgpMemSpace>
 inline impl::NgpMeshHostData<NgpMemSpace>* get_ngp_mesh_host_data(const BulkData& bulk)
@@ -2346,10 +2385,14 @@ inline impl::NgpMeshHostData<NgpMemSpace>* get_ngp_mesh_host_data(const BulkData
   return dynamic_cast<NgpMeshHostData<NgpMemSpace>*>(bulk.m_ngpMeshHostDataBase.get());
 }
 
-template <typename MemSpace>
+template <typename Space>
 inline DeviceFieldDataManagerBase* get_device_field_data_manager(const BulkData& bulk)
 {
-  return bulk.get_device_field_data_manager<MemSpace>();
+  return bulk.get_device_field_data_manager<Space>();
+}
+
+inline void sync_buckets_from_partitions(BulkData & bulk) {
+  bulk.sync_buckets_from_partitions();
 }
 
 }
@@ -2358,4 +2401,3 @@ inline DeviceFieldDataManagerBase* get_device_field_data_manager(const BulkData&
 } // namespace stk
 
 #endif //  stk_mesh_BulkData_hpp
-

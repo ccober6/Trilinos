@@ -25,7 +25,7 @@
 #include "ROL_Types.hpp"
 
 #include "ROL_Stream.hpp"
-#include "Teuchos_GlobalMPISession.hpp"
+#include "ROL_GlobalMPISession.hpp"
 
 template<class Real>
 void print_vector( const ROL::Vector<Real> &x ) {
@@ -63,11 +63,9 @@ int main(int argc, char *argv[]) {
   typedef ROL::DyadicOperator<RealT>    DyadOp;
   typedef ROL::NullOperator<RealT>      NullOp;
 
-  typedef typename vector::size_type    uint;
+  typedef typename vector::size_type    luint;
 
-  using namespace Teuchos;
-
-  GlobalMPISession mpiSession(&argc, &argv);
+  ROL::GlobalMPISession mpiSession(&argc, &argv);
 
   int iprint = argc - 1;
 
@@ -85,7 +83,7 @@ int main(int argc, char *argv[]) {
 
   try {
 
-    uint dim   = 3;  // Number of elements in each subvector (could be different)
+    luint dim   = 3;  // Number of elements in each subvector (could be different)
  
     ROL::Ptr<vector> x1_ptr = ROL::makePtr<vector>(dim,1.0);
     ROL::Ptr<vector> x2_ptr = ROL::makePtr<vector>(dim,2.0);

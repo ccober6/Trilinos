@@ -20,11 +20,9 @@ namespace BaskerNS
   class BaskerPointBarrier
   {
   public:
-    #ifdef BASKER_KOKKOS
     typedef Kokkos::TeamPolicy<Exe_Space>   TeamPolicy;
     typedef typename TeamPolicy::member_type TeamMember;
-    #endif
-    
+
     //Outer idx threads, Inner idx task
     Int ** volatile token;
     Int nthreads; 
@@ -97,8 +95,8 @@ namespace BaskerNS
     inline
     void BarrierLeader(Int my_leader, Int my_id, Int task, Int k)
     {
-      //printf("Entering barrier. leader: %d id: %d task: %d k: %d token: %d \n", 
-      //    my_leader, my_id, task, token[my_leader][task]);
+      printf("Entering barrier. leader: %d id: %d task: %d k: %d token: %d \n", 
+          my_leader, my_id, task, token[my_leader][task]);
       //jdb: change from my_lead == my_id
       if(my_leader == my_id)
       {
@@ -133,15 +131,14 @@ namespace BaskerNS
         exit(0);
       }
       #endif
+      //printf("my_id=%d, my_leader=%d: set token[%d][%d] = %d ?\n", my_id,my_leader, my_id, ltask, k); fflush(stdout);
       token[my_id][ltask] = k;
       for(Int dp = (my_leader+lsize)-1; dp >= my_leader; dp--)
       {
-        //printf("kid=%d: checking location token[%d][%d] = %d ?\n", my_id, dp, ltask, k);
+        //printf(" > my_id=%d: checking location token[%d][%d] = %d ?\n", my_id, dp, ltask, k); fflush(stdout);
         ///volatile Int ldp = token[dp][task];
         while(token[dp][ltask] != k);
-        //{
-        // printf("kid: %d location: %d \n", my_id, token[dp][ltask]);
-        //}
+        //printf("kid: %d location: %d \n", my_id, token[dp][ltask]);
 
       }
       //printf("Leave Domain Barrier. leader=%d, lsize=%d (%d:%d), my_id=%d, task=%d, k=%d, l=%d -> ltask=%d\n",
@@ -169,10 +166,8 @@ namespace BaskerNS
   {
   public:
 
-    #ifdef BASKER_KOKKOS
     typedef  Kokkos::TeamPolicy<Exe_Space>   TeamPolicy;
     typedef typename TeamPolicy::member_type TeamMember;
-    #endif
 
     BaskerBarrier()
     {}
@@ -261,13 +256,9 @@ namespace BaskerNS
       printf("done with fanin\n");
       */
 
-      volatile BASKER_BOOL spin = BASKER_TRUE;
-
       if(Kokkos::atomic_fetch_add(&(value), Int(1)) == (l_size-1))
       {
         value = 0;
-        //Kokkos::atomic_fetch_add(&(value), -1*l_size);
-        //spin = BASKER_FALSE;
       }
       else
       {
@@ -285,85 +276,6 @@ namespace BaskerNS
       }
     }
   }; //end BaskerBarrier
-
-
-  /*   First attempt
-  template <Int, Entry, Exe_Space>
-  class BaskerBarrier
-  {
-  public:
-
-#ifdef BASKER_KOKKOS
-    typedef  Kokkos::TeampPolicy<Exe_Space>   TeamPolicy;
-    typedef typename TeamPolicy::member_type TeamMember;
-#endif
-
-    BaskerBarrier()
-    {}
-    //Kokkos thread
-    BaskerBarrier(TeamMember &thread)
-    {
-      kokkos_barrier(thread);
-    }
-    //Atomic
-    BaskerBarrier(volatile Int &value, const Int l_size )
-    {
-      atomic_barrier(value,l_size);
-    }
-    BaskerBarrier(TeamMember &thread, 
-        volatile Int &value, const Int l_size)
-    {
-
-
-    }
-    BASKER_INLINE
-      void Barrier(TeamMember &thread)
-      {
-        kokkos_barrier(thread);
-      }
-    BASKER_INLINE
-      void Barrier(volatile Int &value, const Int l_size)
-      {
-        atomic_barrier(value, l_size);
-      }
-    BASKER_INLINE
-      void Barrier(TeamMember &thread,
-          volatile Int &value, const Int l_size)
-      {
-        if(l_size <= thread.team_size())
-        {
-          kokkos_barrier(thread);
-        }
-        else
-        {
-          atomic_barrier(value, l_size);
-        }
-      }//end Barrier()
-
-
-  private:
-    BASKER_INLINE
-      void kokkos_barrier(TeamMember &thread)
-      {
-        thread.team_barrier();
-      }
-    BASKER_INLINE
-      void 
-
-      BASKER_INLINE
-      void atomic_barrier(volatile Int &value, const Int l_size)
-      {
-        //Note: need to comeback and makesure this is the best way
-        Kokkos::atomic_fetch_add(&(value), 1);
-        while(value < l_size)
-        {
-          BASKER_NO_OP;
-        }
-      }
-  }; //end BaskerBarrier
-  */
-
-
 }//end namespace Basker
 
 #endif //end ifndef BASKER_THREADS

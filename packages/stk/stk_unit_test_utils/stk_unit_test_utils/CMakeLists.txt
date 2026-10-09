@@ -10,9 +10,14 @@ endif()
 SET(HEADERS_NEED_IO
   ElemGraphMultipleSharedSidesUtils.hpp
   BulkDataTester.hpp
+  CorruptRestart.hpp
+  DeviceBucketTestUtils.hpp
   FaceCreationTestUtils.hpp
   FaceTestingUtils.hpp
   GeneratedMeshToFile.hpp
+  MeshFileFixture.hpp
+  MeshFixture.hpp
+  MeshUtilsForBoundingVolumes.hpp
   ReadWriteSidesetTester.hpp
   StkMeshFromGeneratedMesh.hpp
   TextMeshAdjacencyGraph.hpp
@@ -30,12 +35,14 @@ SET(HEADERS_NEED_IO
   TextMeshUtils.hpp
   TextMesh.hpp
   ioUtils.hpp
-  meshCreationHelpers.hpp
   exampleMeshes.h
   )
+
 SET(SOURCES_NEED_IO
   BulkDataTester.cpp
   ConstructedMesh.cpp
+  CorruptRestart.cpp
+  DeviceBucketTestUtils.cpp
   FaceTestingUtils.cpp
   GenerateALefRAMesh.cpp
   GeneratedMeshToFile.cpp
@@ -44,38 +51,42 @@ SET(SOURCES_NEED_IO
   TextMeshToFile.cpp
   TextMesh.cpp
   ioUtils.cpp
-  meshCreationHelpers.cpp
   )
 
 SET(HEADERS_NEED_SEARCHUTIL
-  MockMasterElementHex8.hpp
-  MockMasterElement.hpp
-  MockMasterElementLine2.hpp
   MockMasterElementProvider.hpp
-  MockMasterElementQuad4.hpp
-  MockSearchMesh.hpp
-  UnitTestSearchUtils.hpp
-  )
+)
+
 SET(SOURCES_NEED_SEARCHUTIL
   MockMasterElementProvider.cpp
+)
+
+SET(HEADERS_NEED_SEARCHUTIL_AND_IO
+  FieldEvaluator.hpp
+  meshCreationHelpers.hpp
+  TransferTesters.hpp
+  UnitTestSearchUtils.hpp
+  )
+
+SET(SOURCES_NEED_SEARCHUTIL_AND_IO
+  meshCreationHelpers.cpp
   UnitTestSearchUtils.cpp
   )
 
 SET(HEADERS_NEED_TRANSFERUTIL
+  MockSearchMesh.hpp
+  TransferPingPong.hpp
   UnitTestTransferUtils.hpp
   )
 SET(SOURCES_NEED_TRANSFERUTIL
+  TransferPingPong.cpp
   UnitTestTransferUtils.cpp
   )
-  
+
 SET(HEADERS_NEED_MESH_BUT_NOT_IO
   BuildMesh.hpp
   BucketTester.hpp
   DebugWriter.hpp
-  FieldEvaluator.hpp
-  MeshFixture.hpp
-  MeshFileFixture.hpp
-  MeshUtilsForBoundingVolumes.hpp
   ParticleUtils.hpp
   unittestMeshUtils.hpp
   )
@@ -100,18 +111,30 @@ SET(SOURCES_NEED_MPI
 SET(HEADERS
   algorithmTimer.hpp
   AssemblyUtils.hpp
-  Legendre.hpp
   CommandLineArgs.hpp
   getOption.h
+  ObjectLifetimeSpy.hpp
   StkReportRedirector.hpp
   stringAndNumberComparisons.hpp
   timer.hpp
+  MockMasterElement.hpp
+  MockMasterElementLine2.hpp
+  MockMasterElementQuad4_2D.hpp
+  MockMasterElementQuad4.hpp
+  MockMasterElementHex8.hpp
+  Legendre.hpp
+
   )
 SET(SOURCES
   AssemblyUtils.cpp
-  Legendre.cpp
+  ObjectLifetimeSpy.cpp
   StkReportRedirector.cpp
   stringAndNumberComparisons.cpp
+  MockMasterElementLine2.cpp
+  MockMasterElementQuad4_2D.cpp
+  MockMasterElementQuad4.cpp
+  MockMasterElementHex8.cpp
+  Legendre.cpp
   )
 
 
@@ -128,6 +151,11 @@ ENDIF()
 IF(${PROJECT_NAME}_ENABLE_STKSearchUtil)
   LIST(APPEND SOURCES ${SOURCES_NEED_SEARCHUTIL})
   LIST(APPEND HEADERS ${HEADERS_NEED_SEARCHUTIL})
+ENDIF()
+
+IF(${PROJECT_NAME}_ENABLE_STKSearchUtil AND ${PROJECT_NAME}_ENABLE_STKIO)
+  LIST(APPEND SOURCES ${SOURCES_NEED_SEARCHUTIL_AND_IO})
+  LIST(APPEND HEADERS ${HEADERS_NEED_SEARCHUTIL_AND_IO})
 ENDIF()
 
 IF(${PROJECT_NAME}_ENABLE_STKTransferUtil)
@@ -148,7 +176,7 @@ ENDIF()
 IF(${PROJECT_NAME}_ENABLE_STKTransfer AND ${PROJECT_NAME}_ENABLE_STKMiddle_mesh)
   ADD_SUBDIRECTORY(stk_transfer_fixtures)
 ENDIF()
-    
+
 if(HAVE_STK_Trilinos)
   TRIBITS_ADD_LIBRARY(stk_unit_test_utils
     HEADERS ${HEADERS}
@@ -179,7 +207,7 @@ else()
   if(STK_ENABLE_STKTransferUtil)
     target_link_libraries(stk_unit_test_utils PUBLIC stk_transfer_util)
   endif()
-  
+
   target_link_libraries(stk_unit_test_utils PUBLIC stk_util_parallel)
 
   find_package(GTest REQUIRED)

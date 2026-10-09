@@ -1,14 +1,6 @@
 tribits_get_package_enable_status(Kokkos  KokkosEnable "")
 
 
-macro(disable_warnings_for_deprecated_packages)
-    message(STATUS "Disabling all warnings/errors for deprecated packages")
-    foreach(package ${DEPRECATED_PACKAGES})
-        set(${package}_CXX_FLAGS "-w ${${package}_CXX_FLAGS}")
-    endforeach()
-endmacro()
-
-
 macro(enable_warnings warnings)
     message(STATUS "Trilinos warnings enabled: ${warnings}")
     foreach(warning ${warnings})
@@ -32,6 +24,8 @@ macro(enable_errors errors)
     endforeach()
 endmacro()
 
+message(STATUS "Adding '-std=c99' to C compiler flags for Zoltan")
+set(Zoltan_C_FLAGS "-std=c99 ${Zoltan_C_FLAGS} ${CMAKE_C_FLAGS}")
 
 IF (CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
   IF(WIN32)
@@ -41,6 +35,42 @@ IF (CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     MESSAGE("-- " "Adding '-fp-model=precise' to C++ compiler flags because Trilinos needs it when using the Intel OneAPI C++ compiler.")
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fp-model=precise")
   ENDIF()
+ENDIF()
+
+# Windows toolchains with the MSVC C++ ABI need /EHsc so throw/catch work in all
+# packages and tests.  Covers Visual Studio and Ninja generators, cl.exe, clang-cl,
+# Intel (classic icpc), and IntelLLVM on Windows - not MinGW/Cygwin (different models).
+IF(WIN32 AND NOT CYGWIN AND ${PROJECT_NAME}_ENABLE_CXX)
+  SET(_TRILINOS_WINDOWS_MSVC_ABI_CXX FALSE)
+  IF(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    SET(_TRILINOS_WINDOWS_MSVC_ABI_CXX TRUE)
+  ELSEIF(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND "x${CMAKE_CXX_SIMULATE_ID}" STREQUAL "xMSVC")
+    SET(_TRILINOS_WINDOWS_MSVC_ABI_CXX TRUE)
+  ELSEIF(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+    SET(_TRILINOS_WINDOWS_MSVC_ABI_CXX TRUE)
+  ELSEIF(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    SET(_TRILINOS_WINDOWS_MSVC_ABI_CXX TRUE)
+  ENDIF()
+  IF(_TRILINOS_WINDOWS_MSVC_ABI_CXX)
+    IF(CMAKE_CXX_FLAGS MATCHES "(^| )/EHa( |$)")
+      MESSAGE(WARNING
+        "CMAKE_CXX_FLAGS contains /EHa; Trilinos will not add /EHsc (exception model left to user).")
+    ELSEIF(CMAKE_CXX_FLAGS MATCHES "(^| )/EHsc-( |$)")
+      MESSAGE(WARNING
+        "CMAKE_CXX_FLAGS contains /EHsc-; Trilinos will not add /EHsc (exceptions explicitly disabled).")
+    ELSEIF(NOT CMAKE_CXX_FLAGS MATCHES "(^| )/EHsc( |$)")
+      MESSAGE("-- "
+        "Adding '/EHsc' for C++ exception handling on Windows (${CMAKE_CXX_COMPILER_ID})")
+      SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
+      ADD_COMPILE_OPTIONS($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+    ELSE()
+      # CMAKE_CXX_FLAGS already has /EHsc (e.g. CMake MSVC defaults); still set
+      # directory compile options so a later -DCMAKE_CXX_FLAGS= override cannot
+      # drop exceptions for targets in this project.
+      ADD_COMPILE_OPTIONS($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+    ENDIF()
+  ENDIF()
+  UNSET(_TRILINOS_WINDOWS_MSVC_ABI_CXX)
 ENDIF()
 
 IF (KokkosEnable)
@@ -62,22 +92,22 @@ set(explicitly_disabled_warnings
 )
 set(upcoming_warnings
     aggressive-loop-optimizations
-    array-bounds=2
-    class-memaccess
-    dangling-pointer=2
-    mismatched-new-delete
-    missing-braces
-    overloaded-virtual=1
-    pessimizing-move
-    range-loop-construct
-    shadow
-    unused-but-set-variable
-    uninitialized
+    array-bounds=2  # -Wall
+    class-memaccess  # -Wall
+    dangling-pointer=2  # -Wall
+    # deprecated-copy  # -Wextra, lots of warnings
+    implicit-fallthrough=3  # -Wextra
+    maybe-uninitialized  # -Wall
+    mismatched-new-delete  # -Wall
+    pessimizing-move  # -Wall
+    restrict
+    #unused-parameter  # -Wextra, lots of warnings
     ${Trilinos_ADDITIONAL_WARNINGS}
 )
 set(promoted_warnings
     address
     aligned-new
+    alloc-size  # -Wextra
     array-compare
     bool-compare
     bool-operation
@@ -86,16 +116,22 @@ set(promoted_warnings
     c++14-compat
     c++17compat
     c++20compat
+    calloc-transposed-args
     cast-align
+    cast-function-type  # -Wextra
     catch-value
     char-subscripts
+    clobbered
     comment
     dangling-else
+    dangling-reference  # -Wextra
     delete-non-virtual-dtor
     div-by-zero
     duplicate-decl-specifier
+    empty-body
     enum-compare
     enum-int-mismatch
+    expansion-to-defined  # -Wextra
     format
     format=1
     format-contains-nul
@@ -105,6 +141,7 @@ set(promoted_warnings
     format-truncation=1
     format-zero-length
     frame-address
+    ignored-qualifiers  # -Wextra
     implicit
     implicit-function-declaration
     implicit-int
@@ -114,37 +151,45 @@ set(promoted_warnings
     int-to-pointer-cast
     logical-not-parentheses
     main
-    maybe-uninitialized
     memset-elt-size
     memset-transposed-args
     misleading-indentation
     mismatched-dealloc
     missing-attributes
+    missing-field-initializers  # -Wextra
     multistatement-macros
     narrowing
     nonnull
     nonnull-compare
     openmp-simd
+    overloaded-virtual=1
     packed-not-aligned
     parentheses
     pointer-sign
+    range-loop-construct
+    redundant-move  # -Wextra
     reorder
-    restrict
     return-type
     self-move
     sequence-point
+    shadow
     sign-compare
+    sized-deallocation  # -Wextra
     sizeof-array-div
     sizeof-pointer-div
     sizeof-pointer-memaccess
     strict-aliasing
     strict-overflow=1
+    string-compare  # -Wextra
     switch
     tautological-compare
     trigraphs
     type-limits
+    uninitialized
     unknown-pragmas
     unused
+    unused-but-set-parameter
+    unused-but-set-variable
     unused-const-variable=1
     unused-function
     unused-label
@@ -190,20 +235,32 @@ function(filter_valid_warnings_as_errors warnings output)
     set(${output} ${valid_warnings} PARENT_SCOPE)
 endfunction()
 
-
 if("${Trilinos_WARNINGS_MODE}" STREQUAL "WARN")
     filter_valid_warnings("${upcoming_warnings}" upcoming_warnings)
     enable_warnings("${upcoming_warnings}")
     filter_valid_warnings_as_errors("${promoted_warnings}" promoted_warnings)
     enable_errors("${promoted_warnings}")
-    disable_warnings_for_deprecated_packages()
 elseif("${Trilinos_WARNINGS_MODE}" STREQUAL "ERROR")
     filter_valid_warnings_as_errors("${promoted_warnings}" promoted_warnings)
     filter_valid_warnings_as_errors("${upcoming_warnings}" upcoming_warnings)
     enable_errors("${promoted_warnings};${upcoming_warnings}")
-    disable_warnings_for_deprecated_packages()
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     disable_warnings("${explicitly_disabled_warnings}")
 endif()
+
+
+# Make sure that all deprecated packages are forcefully disabled (and that the variables controlling enablement are defined)
+macro(force_disable_package packageName)
+    tribits_filter_package_list_from_var(Trilinos_DEFINED_PACKAGES INTERNAL ON NONEMPTY packageSublist)
+    set(Trilinos_ENABLE_${packageName} OFF CACHE BOOL "Enable ${packageName} (special setting for force-disable, should ALWAYS be `OFF`)")
+    foreach(package ${packageSublist})
+        set(${package}_ENABLE_${packageName} OFF CACHE BOOL "Enable ${packageName} support in ${package} (special setting for force-disable, should ALWAYS be `OFF`)")
+    endforeach()
+endmacro()
+
+set(DEPRECATED_PACKAGES Amesos AztecOO Epetra EpetraExt Ifpack Intrepid Isorropia ML NewPackage Pliris PyTrilinos ShyLU_DDCore ThyraEpetraAdapters ThyraEpetraExtAdapters Triutils)
+FOREACH(package ${DEPRECATED_PACKAGES})
+  force_disable_package(${package})
+ENDFOREACH()

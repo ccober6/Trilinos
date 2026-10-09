@@ -70,9 +70,12 @@ class Matrix : public Xpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node
   typedef GlobalOrdinal global_ordinal_type;
   typedef Node node_type;
 
-#ifdef HAVE_XPETRA_TPETRA
-  typedef typename CrsMatrix::local_matrix_type local_matrix_type;
-#endif
+  using local_matrix_type        = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_type;
+  using local_matrix_device_type = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_device_type;
+  using local_matrix_host_type   = typename Xpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::local_matrix_host_type;
+
+  using ATS              = KokkosKernels::ArithTraits<Scalar>;
+  using impl_scalar_type = typename ATS::val_type;
 
   //! @name Constructor/Destructor Methods
   //@{
@@ -422,18 +425,8 @@ class Matrix : public Xpetra::Operator<Scalar, LocalOrdinal, GlobalOrdinal, Node
   virtual Scalar GetMaxEigenvalueEstimate() const;
 
   // ----------------------------------------------------------------------------------
-#ifdef HAVE_XPETRA_TPETRA
-  virtual local_matrix_type getLocalMatrixDevice() const = 0;
-#if KOKKOS_VERSION >= 40799
+  virtual local_matrix_type getLocalMatrixDevice() const                          = 0;
   virtual typename local_matrix_type::host_mirror_type getLocalMatrixHost() const = 0;
-#else
-  virtual typename local_matrix_type::HostMirror getLocalMatrixHost() const = 0;
-#endif
-#else
-#ifdef __GNUC__
-#warning "Xpetra Kokkos interface for CrsMatrix is enabled (HAVE_XPETRA_KOKKOS_REFACTOR) but Tpetra is disabled. The Kokkos interface needs Tpetra to be enabled, too."
-#endif
-#endif
   // ----------------------------------------------------------------------------------
 
   //! Compute a residual R = B - (*this) * X

@@ -33,38 +33,22 @@ APPEND_SET(HEADERS
   Piro_SolverFactory_Def.hpp
   Piro_StratimikosUtils.hpp
   Piro_ConfigDefs.hpp
-  )
-IF(PIRO_HAVE_EPETRA_STACK)
-APPEND_SET(HEADERS
-  Piro_Epetra_MatrixFreeDecorator.hpp
-  Piro_Epetra_InvertMassMatrixDecorator.hpp
-  Piro_Epetra_SolverFactory.hpp
-  )
-ENDIF()
-APPEND_SET(SOURCES
-  Piro_ValidPiroParameters.cpp
-  Piro_StratimikosUtils.cpp
-  Piro_Version.cpp
-  )
-IF(PIRO_HAVE_EPETRA_STACK)
-APPEND_SET(SOURCES
-  Piro_Epetra_MatrixFreeDecorator.cpp
-  Piro_Epetra_InvertMassMatrixDecorator.cpp
-  Piro_Epetra_SolverFactory.cpp
-  )
-ENDIF()
-APPEND_SET(HEADERS
   Piro_MatrixFreeDecorator.hpp
   Piro_MatrixFreeDecorator_Def.hpp
   Piro_MatrixFreeLinearOp.hpp
   Piro_MatrixFreeLinearOp_Def.hpp
   Piro_ObserverBase.hpp
   Piro_ROL_ObserverBase.hpp
-  )
+)
+
+APPEND_SET(SOURCES
+  Piro_ValidPiroParameters.cpp
+  Piro_StratimikosUtils.cpp
+  Piro_Version.cpp
+)
 #
-# B.2) epetra files
+# B.2) solvers
 #
-# Optional NOX Dependency (which includes LOCA)
 IF (Piro_ENABLE_NOX)
   APPEND_SET(HEADERS
     Piro_SteadyStateSolver.hpp
@@ -74,46 +58,18 @@ IF (Piro_ENABLE_NOX)
     Piro_NOXSolver_Def.hpp
     Piro_LOCASolver.hpp
     Piro_LOCASolver_Def.hpp
-    Piro_LOCAAdaptiveSolver.hpp
-    Piro_LOCAAdaptiveSolver_Def.hpp
     Piro_ObserverToLOCASaveDataStrategyAdapter.hpp
-    Piro_VelocityVerletSolver.hpp
-    Piro_VelocityVerletSolver_Def.hpp
     Piro_TrapezoidRuleSolver.hpp
     Piro_TrapezoidRuleSolver_Def.hpp
     Piro_TransientDecorator.hpp
   )
-IF(PIRO_HAVE_EPETRA_STACK)
-  APPEND_SET(HEADERS
-    Piro_Epetra_NOXSolver.hpp
-    Piro_Epetra_LOCASolver.hpp
-    Piro_Epetra_LOCAAdaptiveSolver.hpp
-    Piro_Epetra_AdaptiveSolutionManager.hpp
-    Piro_Epetra_VelocityVerletSolver.hpp
-    Piro_Epetra_NewmarkSolver.hpp
-    Piro_Epetra_TrapezoidRuleSolver.hpp
-    Piro_Epetra_SensitivityOperator.hpp
-  )
-ENDIF()
   APPEND_SET(SOURCES
     Piro_NOXSolver.cpp
     Piro_LOCASolver.cpp
-    Piro_LOCAAdaptiveSolver.cpp
     Piro_ObserverToLOCASaveDataStrategyAdapter.cpp
     )
-IF(PIRO_HAVE_EPETRA_STACK)
-  APPEND_SET(SOURCES
-    Piro_Epetra_NOXSolver.cpp
-    Piro_Epetra_LOCASolver.cpp
-    Piro_Epetra_LOCAAdaptiveSolver.cpp
-    Piro_Epetra_AdaptiveSolutionManager.cpp
-    Piro_Epetra_VelocityVerletSolver.cpp
-    Piro_Epetra_NewmarkSolver.cpp
-    Piro_Epetra_TrapezoidRuleSolver.cpp
-    Piro_Epetra_SensitivityOperator.cpp
-    )
 ENDIF()
-ENDIF()
+
 IF (Piro_ENABLE_Tempus)
   APPEND_SET(HEADERS
     Piro_TempusSolver.hpp
@@ -135,29 +91,55 @@ IF (Piro_ENABLE_ROL)
     Piro_CustomLBFGSSecant.hpp)
 
   # Add rol/adapters/thyra directories if Rol is enabled
-  TRIBITS_INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/../../rol/adapters/thyra/src/function)
-  TRIBITS_INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/../../rol/adapters/thyra/src/vector)
+  TRIBITS_INCLUDE_DIRECTORIES(
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../rol/adapters/thyra/src/function
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../rol/adapters/thyra/src/vector
+  )
+
+  IF (Piro_ENABLE_HdsaLib)
+    APPEND_SET(HEADERS
+      Piro_HDSA_MD_ROL_Data_Interface.hpp
+      Piro_HDSA_MD_ROL_Elliptic_u_Prior_Interface.hpp
+      Piro_HDSA_MD_ROL_Elliptic_z_Prior_Interface.hpp)
+      
+    TRIBITS_INCLUDE_DIRECTORIES(
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/interfaces/hyperparameter_interfaces
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/interfaces/problem_interfaces
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/interfaces/ouu_interfaces
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/interfaces/transient_prior_interfaces
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/interfaces/u_prior_interfaces
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/interfaces/z_prior_interfaces
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/analysis/prior
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/analysis/posterior
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/analysis/auxiliary
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/model_discrepancy/analysis/posterior/continuation
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/pseudo_time_continuation/interfaces
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/pseudo_time_continuation/analysis
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/pseudo_time_continuation/analysis/trajectories
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/pseudo_time_continuation/analysis/preconditioners
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/base/auxiliary
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/base/linear_algebra
+      ${HDSALIB_REPO_SOURCE_DIR}/src/core/base/vectors
+      ${HDSALIB_REPO_SOURCE_DIR}/src/trilinos_adapter/adapters
+      ${HDSALIB_REPO_SOURCE_DIR}/src/trilinos_adapter/core
+      ${HDSALIB_REPO_SOURCE_DIR}/interfaces/rol
+    )
+  ENDIF()
 ENDIF()
 #
 
 #
-# B.2) Analysis Tools
+# B.2) drivers
 #
 APPEND_SET(HEADERS
   Piro_PerformSolve.hpp
   Piro_PerformSolve_Def.hpp
-  )
-APPEND_SET(SOURCES Piro_PerformSolve.cpp)
-
-IF(PIRO_HAVE_EPETRA_STACK)
-APPEND_SET(HEADERS Piro_Epetra_PerformSolve.hpp)
-APPEND_SET(SOURCES Piro_Epetra_PerformSolve.cpp)
-APPEND_SET(HEADERS Piro_Epetra_PerformAnalysis.hpp)
-APPEND_SET(SOURCES Piro_Epetra_PerformAnalysis.cpp)
-ENDIF()
-
-APPEND_SET(HEADERS Piro_PerformAnalysis.hpp)
-APPEND_SET(SOURCES Piro_PerformAnalysis.cpp)
+  Piro_PerformAnalysis.hpp
+)
+APPEND_SET(SOURCES 
+  Piro_PerformSolve.cpp
+  Piro_PerformAnalysis.cpp
+)
 
 #
 # C) Define the targets for package's library(s)

@@ -125,6 +125,7 @@ BelosLinearOpWithSolve<Scalar>::BelosLinearOpWithSolve()
   label_(""),
   filenameLHS_(""),
   filenameRHS_(""),
+  init_(false),
   counter_(0)
 {}
 
@@ -158,6 +159,7 @@ void BelosLinearOpWithSolve<Scalar>::initialize(
   approxFwdOpSrc_ = approxFwdOpSrc;
   supportSolveUse_ = supportSolveUse_in;
   convergenceTestFrequency_ = convergenceTestFrequency;
+  init_ = false;
   // Check if "Convergence Tolerance" is in the solver parameter list.  If
   // not, use the default from the solver.
   if ( !is_null(solverPL_) ) {
@@ -326,6 +328,7 @@ void BelosLinearOpWithSolve<Scalar>::uninitialize(
   isExternalPrec_ = false;
   approxFwdOpSrc_ = Teuchos::null;
   supportSolveUse_ = SUPPORT_SOLVE_UNSPECIFIED;
+  init_ = false;
 }
 
 
@@ -650,7 +653,10 @@ BelosLinearOpWithSolve<Scalar>::solveImpl(
         );
     Teuchos::OSTab tab1(outUsed,1,"BELOS");
     tmpPL->set("Output Stream", outUsed);
-    iterativeSolver_->setParameters(tmpPL);
+    if (!init_) {
+      iterativeSolver_->setParameters(tmpPL);
+      init_ = !nonnull(solveCriteria);
+    }
     if (nonnull(generalSolveCriteriaBelosStatusTest)) {
       iterativeSolver_->setUserConvStatusTest(generalSolveCriteriaBelosStatusTest);
     }
@@ -671,54 +677,48 @@ BelosLinearOpWithSolve<Scalar>::solveImpl(
   totalTimer.stop();
 
   SolveStatus<Scalar> solveStatus;
-
-  switch (belosSolveStatus) {
-    case Belos::Unconverged: {
-      solveStatus.solveStatus = SOLVE_STATUS_UNCONVERGED;
-      // Set achievedTol even if the solver did not converge.  This is
-      // helpful for things like nonlinear solvers, which might be
-      // able to use a partially converged result, and which would
-      // like to know the achieved convergence tolerance for use in
-      // computing bounds.  It's also helpful for estimating whether a
-      // small increase in the maximum iteration count might be
-      // helpful next time.
+  if (belosSolveStatus == Belos::Converged) {
+    solveStatus.solveStatus = SOLVE_STATUS_CONVERGED;
+    if (nonnull(generalSolveCriteriaBelosStatusTest)) {
+      // The user set a custom status test.  This means that we
+      // should ask the custom status test itself, rather than the
+      // Belos solver, what the final achieved convergence tolerance
+      // was.
+      const ArrayView<const ScalarMag> achievedTol =
+        generalSolveCriteriaBelosStatusTest->achievedTol();
+      solveStatus.achievedTol = Teuchos::ScalarTraits<ScalarMag>::zero();
+      for (Ordinal i = 0; i < achievedTol.size(); ++i) {
+        solveStatus.achievedTol = std::max(solveStatus.achievedTol, achievedTol[i]);
+      }
+    }
+    else {
       try {
         // Some solvers might not have implemented achievedTol().
         // The default implementation throws std::runtime_error.
         solveStatus.achievedTol = iterativeSolver_->achievedTol();
       } catch (std::runtime_error&) {
-        // Do nothing; use the default value of achievedTol.
+        // Use the default convergence tolerance.  This is a correct
+        // upper bound, since we did actually converge.
+        solveStatus.achievedTol = tmpPL->get("Convergence Tolerance", defaultTol_);
       }
-      break;
     }
-    case Belos::Converged: {
-      solveStatus.solveStatus = SOLVE_STATUS_CONVERGED;
-      if (nonnull(generalSolveCriteriaBelosStatusTest)) {
-        // The user set a custom status test.  This means that we
-        // should ask the custom status test itself, rather than the
-        // Belos solver, what the final achieved convergence tolerance
-        // was.
-        const ArrayView<const ScalarMag> achievedTol =
-          generalSolveCriteriaBelosStatusTest->achievedTol();
-        solveStatus.achievedTol = Teuchos::ScalarTraits<ScalarMag>::zero();
-        for (Ordinal i = 0; i < achievedTol.size(); ++i) {
-          solveStatus.achievedTol = std::max(solveStatus.achievedTol, achievedTol[i]);
-        }
-      }
-      else {
-        try {
-          // Some solvers might not have implemented achievedTol().
-          // The default implementation throws std::runtime_error.
-          solveStatus.achievedTol = iterativeSolver_->achievedTol();
-        } catch (std::runtime_error&) {
-          // Use the default convergence tolerance.  This is a correct
-          // upper bound, since we did actually converge.
-          solveStatus.achievedTol = tmpPL->get("Convergence Tolerance", defaultTol_);
-        }
-      }
-      break;
+  }
+  else {
+    solveStatus.solveStatus = SOLVE_STATUS_UNCONVERGED;
+    // Set achievedTol even if the solver did not converge.  This is
+    // helpful for things like nonlinear solvers, which might be
+    // able to use a partially converged result, and which would
+    // like to know the achieved convergence tolerance for use in
+    // computing bounds.  It's also helpful for estimating whether a
+    // small increase in the maximum iteration count might be
+    // helpful next time.
+    try {
+      // Some solvers might not have implemented achievedTol().
+      // The default implementation throws std::runtime_error.
+      solveStatus.achievedTol = iterativeSolver_->achievedTol();
+    } catch (std::runtime_error&) {
+      // Do nothing; use the default value of achievedTol.
     }
-    TEUCHOS_SWITCH_DEFAULT_DEBUG_ASSERT();
   }
 
   std::ostringstream ossmessage;
@@ -752,6 +752,9 @@ BelosLinearOpWithSolve<Scalar>::solveImpl(
   // just be the convergence tolerance (a correct upper bound).
   solveStatus.extraParameters->set ("Belos/Achieved Tolerance",
                                     solveStatus.achievedTol);
+
+  solveStatus.extraParameters->template set<Belos::ReturnType> ("Belos/ReturnType",
+                                                                belosSolveStatus);
 
 //  This information is in the previous line, which is printed anytime the verbosity
 //  is not set to Teuchos::VERB_NONE, so I'm commenting this out for now.

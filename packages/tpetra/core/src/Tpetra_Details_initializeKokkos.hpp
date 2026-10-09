@@ -27,10 +27,9 @@ namespace Details {
 ///
 /// \warning Prefer Tpetra::initialize.  Give it the actual
 ///   command-line arguments.
-void
-initializeKokkos ();
+void initializeKokkos(int* argc = nullptr, char*** argv = nullptr, const int myRank = 0);
 
-} // namespace Details
-} // namespace Tpetra
+}  // namespace Details
+}  // namespace Tpetra
 
-#endif // TPETRA_DETAILS_INITIALIZEKOKKOS_HPP
+#endif  // TPETRA_DETAILS_INITIALIZEKOKKOS_HPP

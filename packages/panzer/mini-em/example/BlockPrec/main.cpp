@@ -23,15 +23,12 @@
 #include "Teuchos_StackedTimer.hpp"
 #include "Teuchos_ScalarTraits.hpp"
 
-#include "Kokkos_View_Fad.hpp"
+#include "Sacado_Fad_Kokkos.hpp"
 #include <Tpetra_KokkosCompat_ClassicNodeAPI_Wrapper.hpp>
 
 #include "Panzer_NodeType.hpp"
 #include "Panzer_ResponseLibrary.hpp"
 #include "Panzer_BlockedTpetraLinearObjFactory.hpp"
-#ifdef PANZER_HAVE_EPETRA_STACK
-# include "Panzer_BlockedEpetraLinearObjFactory.hpp"
-#endif
 #include "Panzer_ElementBlockIdToPhysicsIdMap.hpp"
 #include "Panzer_BlockedDOFManagerFactory.hpp"
 #include "Panzer_ModelEvaluator.hpp"
@@ -90,17 +87,18 @@ void writeToExodus(double time_stamp,
 using namespace mini_em;
 
 using mini_em::physicsType, mini_em::MAXWELL, mini_em::DARCY;
-using mini_em::solverType, mini_em::AUGMENTATION, mini_em::MUELU, mini_em::ML, mini_em::CG, mini_em::GMRES;
-using mini_em::linearAlgebraType, mini_em::linAlgTpetra, mini_em::linAlgEpetra;
+using mini_em::solverType, mini_em::AUGMENTATION, mini_em::MUELU, mini_em::CG, mini_em::GMRES;
 
 
-template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class blockedLinObjFactory, bool useTpetra>
-int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
+template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class blockedLinObjFactory>
+int main_(int argc,char * argv[])
 {
 
   using Teuchos::RCP;
   using Teuchos::rcp;
   using Teuchos::rcp_dynamic_cast;
+
+  Teuchos::CommandLineProcessor clp(false);
 
   Teuchos::RCP<Teuchos::FancyOStream> out = Teuchos::rcp(new Teuchos::FancyOStream(Teuchos::rcpFromRef(std::cout)));
   Teuchos::RCP<const Teuchos::MpiComm<int> > comm
@@ -120,6 +118,7 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
   {
     // defaults for command-line options
     int x_elements=-1,y_elements=-1,z_elements=-1,basis_order=1;
+    std::string meshType = "";
     int workset_size=2000;
     std::string pCoarsenScheduleStr = "1";
     double dt=0.0;
@@ -128,8 +127,8 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
     bool matrix_output = false;
     std::string input_file = "maxwell.xml";
     std::string xml = "";
-    solverType solverValues[5] = {AUGMENTATION, MUELU, ML, CG, GMRES};
-    const char * solverNames[5] = {"Augmentation", "MueLu", "ML", "CG", "GMRES"};
+    solverType solverValues[8] = {AUGMENTATION, MUELU, CG, GMRES, MAXWELL1_RS, MAXWELL1_SA_RS, MAXWELL1_EMIN, DIRECT};
+    const char * solverNames[8] = {"Augmentation", "MueLu", "CG", "GMRES", "Maxwell1-RS", "Maxwell1-SA-RS", "Maxwell1-Emin", "direct"};
     bool preferTPLs = false;
     bool useBarriers = false;
     bool truncateMueLuHierarchy = false;
@@ -140,15 +139,12 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
     bool doSolveTimings = false;
     bool matrixFree = false;
     int numReps = 0;
-    linearAlgebraType linAlgebraValues[2] = {linAlgTpetra, linAlgEpetra};
-    const char * linAlgebraNames[2] = {"Tpetra", "Epetra"};
-    linearAlgebraType linAlgebra = linAlgTpetra;
-    clp.setOption<linearAlgebraType>("linAlgebra",&linAlgebra,2,linAlgebraValues,linAlgebraNames);
     use_stacked_timer = true;
     print_fom = true;
     clp.setOption("x-elements",&x_elements);
     clp.setOption("y-elements",&y_elements);
     clp.setOption("z-elements",&z_elements);
+    clp.setOption("meshType",&meshType);
     clp.setOption("basis-order",&basis_order);
     clp.setOption("workset-size",&workset_size);
     clp.setOption("pCoarsenSchedule",&pCoarsenScheduleStr);
@@ -158,7 +154,7 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
     clp.setOption("matrix-output","no-matrix-output",&matrix_output);
     clp.setOption("inputFile",&input_file,"XML file with the problem definitions");
     clp.setOption("solverFile",&xml,"XML file with the solver params");
-    clp.setOption<solverType>("solver",&solver,5,solverValues,solverNames,"Solver that is used");
+    clp.setOption<solverType>("solver",&solver,8,solverValues,solverNames,"Solver that is used");
     clp.setOption("tpl", "no-tpl", &preferTPLs, "Prefer TPL usage over fused kernels");
     clp.setOption("barriers", "no-barriers", &useBarriers, "Use barriers in the solver");
     clp.setOption("truncateMueLuHierarchy", "no-truncateMueLuHierarchy", &truncateMueLuHierarchy, "Truncate the MueLu hierarchy");
@@ -258,7 +254,7 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
     {
       Teuchos::TimeMonitor tMmesh(*Teuchos::TimeMonitor::getNewTimer(std::string("Mini-EM: build mesh")));
       double mesh_size = 0.;
-      mini_em::getMesh(mesh_pl, meshFile, x_elements, y_elements, z_elements, basis_order, comm, mesh, mesh_factory, mesh_size);
+      mini_em::getMesh(mesh_pl, meshFile, x_elements, y_elements, z_elements, meshType, basis_order, comm, mesh, mesh_factory, mesh_size);
       dim = Teuchos::as<int>(mesh->getDimension());
 
       // set dt
@@ -306,7 +302,7 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
         throw;
     }
 
-    RCP<Teuchos::ParameterList> lin_solver_pl = mini_em::getSolverParameters(linAlgebra, physics, solver, dim, comm, out, xml, basis_order, preferTPLs, useBarriers, truncateMueLuHierarchy);
+    RCP<Teuchos::ParameterList> lin_solver_pl = mini_em::getSolverParameters(physics, solver, dim, comm, out, xml, basis_order, preferTPLs, useBarriers, truncateMueLuHierarchy);
 
     if (lin_solver_pl->sublist("Preconditioner Types").isSublist("Teko") &&
         lin_solver_pl->sublist("Preconditioner Types").sublist("Teko").isSublist("Inverse Factory Library")) {
@@ -517,11 +513,50 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
                                      Teuchos::as<int>(mesh->getDimension()),
                                      comm, lin_solver_pl,req_handler, false, false, auxDofManager);
 
+    // Run the full auxiliary physics lifecycle before constructing the main
+    // physics evaluator.  auxPhysicsME->setupModel populates auxGlobalData
+    // with the LOCPair scatter containers (via buildAndRegisterScatterEvaluators),
+    // evalModel fills them, and then the aux assembler objects are freed.
+    // This ensures aux worksets and field managers never overlap in memory
+    // with the main physics data structures, lowering the HWM.
+    {
+      RCP<panzer::ModelEvaluator<Scalar> > auxPhysicsME = rcp(new panzer::ModelEvaluator<Scalar> (auxLinObjFactory, lowsFactory, globalData, false, 0.0));
+      auxPhysicsME->template disableEvaluationType<panzer::Traits::Tangent>();
+
+      {
+        Teuchos::TimeMonitor tMauxphysicsEval(*Teuchos::TimeMonitor::getNewTimer(std::string("Mini-EM: setup auxiliary physics model evaluator")));
+
+        auxPhysicsME->setupModel(auxWkstContainer,auxPhysicsBlocks,aux_bcs,
+                                 *eqset_factory,
+                                 bc_factory,
+                                 cm_factory,
+                                 cm_factory,
+                                 closure_models,
+                                 user_data,false,"");
+
+        // auxGlobalData is now populated by buildAndRegisterScatterEvaluators
+        for(panzer::GlobalEvaluationDataContainer::const_iterator itr=auxGlobalData->begin();itr!=auxGlobalData->end();++itr)
+          auxPhysicsME->addNonParameterGlobalEvaluationData(itr->first,itr->second);
+      }
+
+      {
+        Teuchos::TimeMonitor tMauxphysicsEval(*Teuchos::TimeMonitor::getNewTimer(std::string("Mini-EM: eval auxiliary physics model evaluator")));
+        Thyra::ModelEvaluatorBase::InArgs<Scalar> auxInArgs = auxPhysicsME->getNominalValues();
+        Thyra::ModelEvaluatorBase::OutArgs<Scalar> auxOutArgs = auxPhysicsME->createOutArgs();
+        Teuchos::RCP<Thyra::LinearOpBase<Scalar> > aux_W_op = auxPhysicsME->create_W_op();
+
+        auxOutArgs.set_W_op(aux_W_op);
+        auxPhysicsME->evalModel(auxInArgs, auxOutArgs);
+      }
+      // auxPhysicsME goes out of scope here, releasing its reference to auxWkstContainer.
+    }
+    // auxWkstContainer and auxPhysicsBlocks are outer-scope; free them explicitly.
+    auxWkstContainer = Teuchos::null;
+    auxPhysicsBlocks.clear();
+
     //setup model evaluators
     RCP<panzer::ModelEvaluator<Scalar> > physicsME = rcp(new panzer::ModelEvaluator<Scalar> (linObjFactory, lowsFactory, globalData, true, 0.0));
-    RCP<panzer::ModelEvaluator<Scalar> > auxPhysicsME = rcp(new panzer::ModelEvaluator<Scalar> (auxLinObjFactory, lowsFactory, globalData, false, 0.0));
     physicsME->template disableEvaluationType<panzer::Traits::Tangent>();
-    auxPhysicsME->template disableEvaluationType<panzer::Traits::Tangent>();
 
     // add a volume response functionals
     std::map<int,std::string> responseIndexToName;
@@ -561,35 +596,13 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
                             closure_models,
                             user_data,false,"");
 
-      // add auxiliary data to model evaluator
-      for(panzer::GlobalEvaluationDataContainer::const_iterator itr=auxGlobalData->begin();itr!=auxGlobalData->end();++itr)
-        physicsME->addNonParameterGlobalEvaluationData(itr->first,itr->second);
-    }
-
-    {
-      Teuchos::TimeMonitor tMauxphysicsEval(*Teuchos::TimeMonitor::getNewTimer(std::string("Mini-EM: setup auxiliary physics model evaluator")));
-
-      auxPhysicsME->setupModel(auxWkstContainer,auxPhysicsBlocks,aux_bcs,
-                               *eqset_factory,
-                               bc_factory,
-                               cm_factory,
-                               cm_factory,
-                               closure_models,
-                               user_data,false,"");
-
-      // evaluate the auxiliary model to obtain auxiliary operators
-      for(panzer::GlobalEvaluationDataContainer::const_iterator itr=auxGlobalData->begin();itr!=auxGlobalData->end();++itr)
-        auxPhysicsME->addNonParameterGlobalEvaluationData(itr->first,itr->second);
-    }
-
-    {
-      Teuchos::TimeMonitor tMauxphysicsEval(*Teuchos::TimeMonitor::getNewTimer(std::string("Mini-EM: eval auxiliary physics model evaluator")));
-      Thyra::ModelEvaluatorBase::InArgs<Scalar> auxInArgs = auxPhysicsME->getNominalValues();
-      Thyra::ModelEvaluatorBase::OutArgs<Scalar> auxOutArgs = auxPhysicsME->createOutArgs();
-      Teuchos::RCP<Thyra::LinearOpBase<Scalar> > aux_W_op = auxPhysicsME->create_W_op();
-
-      auxOutArgs.set_W_op(aux_W_op);
-      auxPhysicsME->evalModel(auxInArgs, auxOutArgs);
+      // Note: do NOT add auxGlobalData to physicsME here.  The assembly engine
+      // calls gedc.initialize() which would zero every LOCPair's ghosted
+      // container, destroying the aux matrices.  The preconditioner accesses
+      // auxGlobalData directly via OperatorRequestCallback, not through
+      // physicsME->nonParamGlobalEvaluationData_.  (The equivalent loop in
+      // the original code was a no-op because auxGlobalData was empty at that
+      // point; keep it that way intentionally.)
     }
 
     // setup a response library to write to the mesh
@@ -777,38 +790,13 @@ int main_(Teuchos::CommandLineProcessor &clp, int argc,char * argv[])
 int main(int argc,char * argv[]){
   Teuchos::GlobalMPISession mpiSession(&argc, &argv, NULL);
 
-  Kokkos::initialize(argc, argv);
-
-  Teuchos::CommandLineProcessor clp(false);
-  linearAlgebraType linAlgebraValues[2] = {linAlgTpetra, linAlgEpetra};
-  const char * linAlgebraNames[2] = {"Tpetra", "Epetra"};
-  linearAlgebraType linAlgebra = linAlgTpetra;
-  clp.setOption<linearAlgebraType>("linAlgebra",&linAlgebra,2,linAlgebraValues,linAlgebraNames);
-  solverType solverValues[5] = {AUGMENTATION, MUELU, ML, CG, GMRES};
-  const char * solverNames[5] = {"Augmentation", "MueLu", "ML", "CG", "GMRES"};
-  solverType solver = MUELU;
-  clp.setOption<solverType>("solver",&solver,5,solverValues,solverNames,"Solver that is used");
-  // bool useComplex = false;
-  // clp.setOption("complex","real",&useComplex);
-  clp.recogniseAllOptions(false);
-  switch (clp.parse(argc, argv, NULL)) {
-    case Teuchos::CommandLineProcessor::PARSE_ERROR:                return EXIT_FAILURE;
-    case Teuchos::CommandLineProcessor::PARSE_UNRECOGNIZED_OPTION:
-    case Teuchos::CommandLineProcessor::PARSE_SUCCESSFUL:
-    case Teuchos::CommandLineProcessor::PARSE_HELP_PRINTED:         break;
-  }
-
-  if (solver == ML) {
-    TEUCHOS_ASSERT(linAlgebra == linAlgEpetra);
-    // TEUCHOS_ASSERT(!useComplex);
-  }
-
+  Tpetra::initialize(&argc, &argv);
   int retVal;
-  if (linAlgebra == linAlgTpetra) {
+  {
     // if (useComplex) {
 // #if defined(HAVE_TPETRA_COMPLEX_DOUBLE)
 //       typedef typename panzer::BlockedTpetraLinearObjFactory<panzer::Traits,std::complex<double>,int,panzer::GlobalOrdinal> blockedLinObjFactory;
-//       retVal = main_<std::complex<double>,int,panzer::GlobalOrdinal,blockedLinObjFactory,true>(clp, argc, argv);
+//       retVal = main_<std::complex<double>,int,panzer::GlobalOrdinal,blockedLinObjFactory>(clp, argc, argv);
 // #else
 //       std::cout << std::endl
 //                 << "WARNING" << std::endl
@@ -817,18 +805,11 @@ int main(int argc,char * argv[]){
 // #endif
 //     } else {
       typedef typename panzer::BlockedTpetraLinearObjFactory<panzer::Traits,double,int,panzer::GlobalOrdinal> blockedLinObjFactory;
-      retVal = main_<double,int,panzer::GlobalOrdinal,blockedLinObjFactory,true>(clp, argc, argv);
+      retVal = main_<double,int,panzer::GlobalOrdinal,blockedLinObjFactory>(argc, argv);
 //    }
-#ifdef PANZER_HAVE_EPETRA_STACK
-  } else if (linAlgebra == linAlgEpetra) {
-    // TEUCHOS_ASSERT(!useComplex);
-    typedef typename panzer::BlockedEpetraLinearObjFactory<panzer::Traits,int> blockedLinObjFactory;
-    retVal = main_<double,int,int,blockedLinObjFactory,false>(clp, argc, argv);
-#endif
-  } else
-    TEUCHOS_ASSERT(false);
+  }
 
-  Kokkos::finalize();
+  Tpetra::finalize();
 
   return retVal;
 }

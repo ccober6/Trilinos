@@ -38,33 +38,27 @@
 #include "stk_mesh/base/NgpTypes.hpp"
 #include "stk_util/ngp/NgpSpaces.hpp"
 
-namespace stk
-{
-namespace mesh
-{
-namespace impl
+namespace stk::mesh::impl
 {
 
 struct NgpMeshHostDataBase {
   virtual ~NgpMeshHostDataBase() = default;
+  unsigned volatileFastSharedCommMapSyncCount = 0;
 };
 
 template <typename NgpMemSpace>
 struct NgpMeshHostData : NgpMeshHostDataBase {
 
-  typename EntityKeyViewType<NgpMemSpace>::host_mirror_type hostEntityKeys;
-  typename UnsignedViewType<NgpMemSpace>::host_mirror_type hostEntityLocalIds;
   typename UnsignedViewType<NgpMemSpace>::host_mirror_type hostVolatileFastSharedCommMapOffset[stk::topology::NUM_RANKS];
   typename UnsignedViewType<NgpMemSpace>::host_mirror_type hostVolatileFastSharedCommMapNumShared[stk::topology::NUM_RANKS];
   typename NgpCommMapIndices<NgpMemSpace>::host_mirror_type hostVolatileFastSharedCommMap[stk::topology::NUM_RANKS];
-  unsigned volatileFastSharedCommMapSyncCount = 0;
 
   typename UnsignedViewType<NgpMemSpace>::host_mirror_type m_hostBufferOffsets;
   typename UnsignedViewType<NgpMemSpace>::host_mirror_type m_hostMeshIndicesOffsets;
+
+  typename Kokkos::View<std::byte*, NgpMemSpace>::host_mirror_type m_byteBuffer;
 };
 
-}  // namespace impl
-}  // namespace mesh
-}  // namespace stk
+}  // namespace stk::mesh::impl
 
 #endif

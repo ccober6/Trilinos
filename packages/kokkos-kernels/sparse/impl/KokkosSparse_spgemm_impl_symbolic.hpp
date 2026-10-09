@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #include "KokkosKernels_BitUtils.hpp"
 #include <unordered_map>
 namespace KokkosSparse {
@@ -1106,7 +1093,7 @@ template <typename HandleType, typename a_row_view_t_, typename a_lno_nnz_view_t
           typename b_lno_row_view_t_, typename b_lno_nnz_view_t_, typename b_scalar_nnz_view_t_>
 template <typename a_r_view_t, typename a_n_view_t, typename b_oldrow_view_t, typename b_row_view_t>
 struct KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_view_t_, b_lno_row_view_t_,
-                    b_lno_nnz_view_t_, b_scalar_nnz_view_t_>::PredicMaxRowNNZ {
+                    b_lno_nnz_view_t_, b_scalar_nnz_view_t_>::PredictMaxRowNNZ {
   nnz_lno_t m;          // num rows
   a_r_view_t row_mapA;  // row pointers of a
   a_n_view_t entriesA;  // col
@@ -1125,10 +1112,10 @@ struct KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_v
    * \param row_end_indices_B_: row end indices of B
    * \param team_row_chunk_size_: the number of rows assigned to each team.
    */
-  PredicMaxRowNNZ(nnz_lno_t m_, a_r_view_t row_mapA_, a_n_view_t entriesA_,
+  PredictMaxRowNNZ(nnz_lno_t m_, a_r_view_t row_mapA_, a_n_view_t entriesA_,
 
-                  b_oldrow_view_t row_begins_B_, b_row_view_t row_end_indices_B_, nnz_lno_t team_row_chunk_size_,
-                  size_type *flops_per_row_ = NULL)
+                   b_oldrow_view_t row_begins_B_, b_row_view_t row_end_indices_B_, nnz_lno_t team_row_chunk_size_,
+                   size_type *flops_per_row_ = NULL)
       : m(m_),
         row_mapA(row_mapA_),
         entriesA(entriesA_),
@@ -1187,7 +1174,7 @@ struct KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_v
 template <typename HandleType, typename a_row_view_t_, typename a_lno_nnz_view_t_, typename a_scalar_nnz_view_t_,
           typename b_lno_row_view_t_, typename b_lno_nnz_view_t_, typename b_scalar_nnz_view_t_>
 struct KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_view_t_, b_lno_row_view_t_,
-                    b_lno_nnz_view_t_, b_scalar_nnz_view_t_>::PredicMaxRowNNZIntersection {
+                    b_lno_nnz_view_t_, b_scalar_nnz_view_t_>::PredictMaxRowNNZIntersection {
   const nnz_lno_t m, k;       // num rows
   const size_type *row_mapA;  // row pointers of a
   const nnz_lno_t *entriesA;  // col
@@ -1206,11 +1193,11 @@ struct KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_v
    * \param row_end_indices_B_: row end indices of B
    * \param team_row_chunk_size_: the number of rows assigned to each team.
    */
-  PredicMaxRowNNZIntersection(const nnz_lno_t m_, const nnz_lno_t k_, const size_type *row_mapA_,
-                              const nnz_lno_t *entriesA_,
+  PredictMaxRowNNZIntersection(const nnz_lno_t m_, const nnz_lno_t k_, const size_type *row_mapA_,
+                               const nnz_lno_t *entriesA_,
 
-                              const size_type *row_begins_B_, const size_type *row_end_indices_B_,
-                              const nnz_lno_t team_row_chunk_size_, nnz_lno_t *min_result_row_for_each_row_)
+                               const size_type *row_begins_B_, const size_type *row_end_indices_B_,
+                               const nnz_lno_t team_row_chunk_size_, nnz_lno_t *min_result_row_for_each_row_)
       : m(m_),
         k(k_),
         row_mapA(row_mapA_),
@@ -1794,17 +1781,17 @@ void KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_vie
 	  nnz_lno_t r_maxNumRoughZeros = this->getMaxRoughRowNNZ(a_row_cnt, row_mapA, entriesA, old_row_mapB,row_mapB_ /*,flops_per_row.data()*/);
 	  std::cout << "compressed r_maxNumRoughZeros:" << r_maxNumRoughZeros << std::endl;
 
-	  typename const_a_lno_row_view_t::HostMirror h_row_mapA =  Kokkos::create_mirror_view (row_mapA);
+	  typename const_a_lno_row_view_t::host_mirror_type h_row_mapA =  Kokkos::create_mirror_view (row_mapA);
 	  Kokkos::deep_copy(h_row_mapA, row_mapA);
-	  typename const_a_lno_row_view_t::HostMirror h_entriesA =  Kokkos::create_mirror_view (entriesA);
+	  typename const_a_lno_row_view_t::host_mirror_type h_entriesA =  Kokkos::create_mirror_view (entriesA);
 	  Kokkos::deep_copy(h_entriesA, entriesA);
-	  typename const_a_lno_row_view_t::HostMirror h_row_mapB_ =  Kokkos::create_mirror_view (row_mapB_);
+	  typename const_a_lno_row_view_t::host_mirror_type h_row_mapB_ =  Kokkos::create_mirror_view (row_mapB_);
 	  Kokkos::deep_copy(h_row_mapB_, row_mapB_);
-	  typename const_a_lno_row_view_t::HostMirror h_old_row_mapB =  Kokkos::create_mirror_view (old_row_mapB);
+	  typename const_a_lno_row_view_t::host_mirror_type h_old_row_mapB =  Kokkos::create_mirror_view (old_row_mapB);
 	  Kokkos::deep_copy(h_old_row_mapB, old_row_mapB);
-	  typename const_a_lno_row_view_t::HostMirror h_row_mapB =  Kokkos::create_mirror_view (row_mapB);
+	  typename const_a_lno_row_view_t::host_mirror_type h_row_mapB =  Kokkos::create_mirror_view (row_mapB);
 	  Kokkos::deep_copy(h_row_mapB, row_mapB);
-	  typename c_row_view_t::HostMirror h_rowmapC = Kokkos::create_mirror_view (rowmapC);
+	  typename c_row_view_t::host_mirror_type h_rowmapC = Kokkos::create_mirror_view (rowmapC);
 	  Kokkos::deep_copy(h_rowmapC, rowmapC);
 
 	  MyExecSpace().fence();
@@ -1974,11 +1961,11 @@ size_t KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_v
   int suggested_team_size       = this->handle->get_suggested_team_size(suggested_vector_size);
   nnz_lno_t team_row_chunk_size = this->handle->get_team_work_size(suggested_team_size, this->concurrency, m);
 
-  PredicMaxRowNNZ<a_r_view_t, a_n_view_t, b_oldrow_view_t, b_r_view_t> pcnnnz(
+  PredictMaxRowNNZ<a_r_view_t, a_n_view_t, b_oldrow_view_t, b_r_view_t> pcnnnz(
       m, row_mapA_, entriesA_, row_pointers_begin_B, row_pointers_end_B, team_row_chunk_size, flops_per_row);
 
   typename b_oldrow_view_t::non_const_value_type rough_size = 0;
-  Kokkos::parallel_reduce("KokkosSparse::PredicMaxRowNNZ::STATIC",
+  Kokkos::parallel_reduce("KokkosSparse::PredictMaxRowNNZ::STATIC",
                           team_policy_t(m / team_row_chunk_size + 1, suggested_team_size, suggested_vector_size),
                           pcnnnz, rough_size);
   MyExecSpace().fence();
@@ -1990,7 +1977,7 @@ template <typename HandleType, typename a_row_view_t_, typename a_lno_nnz_view_t
           typename b_lno_row_view_t_, typename b_lno_nnz_view_t_, typename b_scalar_nnz_view_t_>
 
 struct KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_view_t_, b_lno_row_view_t_,
-                    b_lno_nnz_view_t_, b_scalar_nnz_view_t_>::PredicMaxRowNNZ_p {
+                    b_lno_nnz_view_t_, b_scalar_nnz_view_t_>::PredictMaxRowNNZ_p {
   const nnz_lno_t m;          // num rows
   const size_type *row_mapA;  // row pointers of a
   const nnz_lno_t *entriesA;  // col
@@ -2008,9 +1995,10 @@ struct KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_v
    * \param row_end_indices_B_: row end indices of B
    * \param team_row_chunk_size_: the number of rows assigned to each team.
    */
-  PredicMaxRowNNZ_p(const nnz_lno_t m_, const size_type *row_mapA_, const nnz_lno_t *entriesA_,
+  PredictMaxRowNNZ_p(const nnz_lno_t m_, const size_type *row_mapA_, const nnz_lno_t *entriesA_,
 
-                    const size_type *row_begins_B_, const size_type *row_end_indices_B_, nnz_lno_t team_row_chunk_size_)
+                     const size_type *row_begins_B_, const size_type *row_end_indices_B_,
+                     nnz_lno_t team_row_chunk_size_)
       : m(m_),
         row_mapA(row_mapA_),
         entriesA(entriesA_),
@@ -2076,10 +2064,10 @@ size_t KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_v
   int suggested_team_size       = this->handle->get_suggested_team_size(suggested_vector_size);
   nnz_lno_t team_row_chunk_size = this->handle->get_team_work_size(suggested_team_size, this->concurrency, m);
 
-  PredicMaxRowNNZ_p pcnnnz(m, row_mapA_, entriesA_, row_pointers_begin_B, row_pointers_end_B, team_row_chunk_size);
+  PredictMaxRowNNZ_p pcnnnz(m, row_mapA_, entriesA_, row_pointers_begin_B, row_pointers_end_B, team_row_chunk_size);
 
   size_type rough_size = 0;
-  Kokkos::parallel_reduce("KokkosSparse::PredicMaxRowNNZ_P::STATIC",
+  Kokkos::parallel_reduce("KokkosSparse::PredictMaxRowNNZ_P::STATIC",
                           team_policy_t(m / team_row_chunk_size + 1, suggested_team_size, suggested_vector_size),
                           pcnnnz, rough_size);
   MyExecSpace().fence();
@@ -2104,11 +2092,11 @@ KokkosSPGEMM<HandleType, a_row_view_t_, a_lno_nnz_view_t_, a_scalar_nnz_view_t_,
   int suggested_team_size       = this->handle->get_suggested_team_size(suggested_vector_size);
   nnz_lno_t team_row_chunk_size = this->handle->get_team_work_size(suggested_team_size, this->concurrency, m);
 
-  PredicMaxRowNNZIntersection pcnnnz(m, this->b_col_cnt, row_mapA_, entriesA_, row_pointers_begin_B, row_pointers_end_B,
-                                     team_row_chunk_size, min_result_row_for_each_row);
+  PredictMaxRowNNZIntersection pcnnnz(m, this->b_col_cnt, row_mapA_, entriesA_, row_pointers_begin_B,
+                                      row_pointers_end_B, team_row_chunk_size, min_result_row_for_each_row);
 
   nnz_lno_t rough_size = 0;
-  Kokkos::parallel_reduce("KokkosSparse::PredicMaxRowNNZIntersection::STATIC",
+  Kokkos::parallel_reduce("KokkosSparse::PredictMaxRowNNZIntersection::STATIC",
                           team_policy_t(m / team_row_chunk_size + 1, suggested_team_size, suggested_vector_size),
                           pcnnnz, rough_size);
   MyExecSpace().fence();

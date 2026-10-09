@@ -62,7 +62,7 @@ namespace user_app {
   buildModelEvaluator(const Teuchos::RCP<Teuchos::ParameterList>& input_params,
                       const Teuchos::RCP<const Teuchos::Comm<int>>& comm);
 
-  Teuchos::RCP<Tempus::IntegratorBasic<double>>
+  Teuchos::RCP<Tempus::IntegratorForwardSensitivity<double>>
   buildTimeIntegrator(const Teuchos::RCP<Teuchos::ParameterList>& input_params,
                       const Teuchos::RCP<const Teuchos::Comm<int>>& comm,
                       Teuchos::RCP<Thyra::ModelEvaluator<double>> me,
@@ -72,10 +72,6 @@ namespace user_app {
                       Teuchos::RCP<panzer::LinearObjFactory<panzer::Traits>> linObjFactory,
                       Teuchos::RCP<panzer::GlobalIndexer> globalIndexer,
                       const bool overrideNoxOutput);
-
-  std::tuple<int,int> findParameterIndex(const std::string& p_name,const Thyra::ModelEvaluator<double>& me);
-
-  std::tuple<int,int> findResponseIndex(const std::string& g_name,const Thyra::ModelEvaluator<double>& me);
 }
 
 /*

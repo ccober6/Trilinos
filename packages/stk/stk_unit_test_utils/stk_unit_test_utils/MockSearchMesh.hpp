@@ -53,9 +53,9 @@
 #include <utility>    // for move, pair
 #include <vector>     // for vector, swap
 
-#include "MockMasterElementHex8.hpp"
-#include "MockMasterElementLine2.hpp"
-#include "MockMasterElementQuad4.hpp"
+#include "stk_unit_test_utils/MockMasterElementHex8.hpp"
+#include "stk_unit_test_utils/MockMasterElementLine2.hpp"
+#include "stk_unit_test_utils/MockMasterElementQuad4.hpp"
 #include <stk_io/FillMesh.hpp>
 #include <stk_io/IossBridge.hpp>
 #include <stk_mesh/base/Field.hpp>
@@ -180,7 +180,6 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
     return stk::search::get_part_membership(m_bulk, k, m_parts);
   }
 
-  //BEGINSource_bounding_boxes
   void bounding_boxes(std::vector<BoundingBox>& boxes, [[maybe_unused]] bool /*includeGhosts*/=false) const override
   {
     Point min_corner, max_corner;
@@ -202,9 +201,7 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
     std::sort(boxes.begin(), boxes.end(),
         [](const BoundingBox& a, const BoundingBox& b) { return a.second.id() < b.second.id(); });
   }
-  //ENDSource_bounding_boxes
 
-  //BEGINSource_find_parametric_coords
   void find_parametric_coords(const EntityKey& k,
       const std::vector<double>& toCoords,
       std::vector<double>& parametricCoords,
@@ -236,11 +233,10 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
     );
 
     parametricCoords.assign(3, std::numeric_limits<double>::max());
-    parametricDistance = Hex8::is_in_element(transposedElementCoords.data(), toCoords.data(), parametricCoords.data());
+    parametricDistance = stk::unit_test_util::Hex8::is_in_element(transposedElementCoords.data(), toCoords.data(), parametricCoords.data());
 
     isWithinParametricTolerance = parametricDistance <= (1 + m_parametricTolerance);
   }
-  //ENDSource_find_parametric_coords
 
   bool modify_search_outside_parametric_tolerance(const EntityKey& /*k*/,
       const std::vector<double>& /*toCoords*/,
@@ -330,6 +326,10 @@ class Hex8SendMesh : public stk::search::SourceMeshInterface<Hex8SendMesh>
   void post_mesh_modification_event() override { }
 
   void destroy_ghosting() override { }
+
+  void acquire_field_data() override { }
+  void release_field_data() override { }
+  bool has_acquired_field_data() const override { return true; }
 
  protected:
   stk::mesh::MetaData& m_meta;
@@ -541,6 +541,10 @@ class Hex8RecvMesh : public stk::search::DestinationMeshInterface<Hex8RecvMesh>
 
   double get_search_tolerance() const final { return m_searchTolerance; }
 
+  void acquire_field_data() override { m_pointEvaluator->acquire_field_data(); m_hasAcquiredFieldData = true; }
+  void release_field_data() override { m_pointEvaluator->release_field_data(); m_hasAcquiredFieldData = false; }
+  bool has_acquired_field_data() const override { return m_hasAcquiredFieldData; }
+
  protected:
   stk::mesh::BulkData& m_bulk;
   stk::mesh::MetaData& m_meta;
@@ -557,6 +561,8 @@ class Hex8RecvMesh : public stk::search::DestinationMeshInterface<Hex8RecvMesh>
   const double m_searchTolerance;
 
   std::string m_name{"Hex8DestinationMesh"};
+
+  bool m_hasAcquiredFieldData{false};
 
   Hex8RecvMesh(const Hex8RecvMesh&) = delete;
   const Hex8RecvMesh& operator()(const Hex8RecvMesh&) = delete;
@@ -616,6 +622,10 @@ class SinglePointMesh : public stk::search::DestinationMeshInterface<SinglePoint
   }
 
   void initialize() override { }
+
+  void acquire_field_data() override { }
+  void release_field_data() override { }
+  bool has_acquired_field_data() const override { return true; }
 
  private:
   const stk::ParallelMachine m_comm;

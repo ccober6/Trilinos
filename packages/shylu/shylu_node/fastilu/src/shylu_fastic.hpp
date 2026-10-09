@@ -54,8 +54,8 @@ class FastICPrec
 
         typedef Kokkos::RangePolicy<ExecSpace> RangePolicy;
 
-        using STS = Kokkos::ArithTraits<Scalar>;
-        using RTS = Kokkos::ArithTraits<Real>;
+        using STS = KokkosKernels::ArithTraits<Scalar>;
+        using RTS = KokkosKernels::ArithTraits<Real>;
 
     private:
         double computeTime;

@@ -47,7 +47,6 @@
 #include "MueLu_InitialBlockNumberFactory.hpp"
 #include "MueLu_IndefBlockedDiagonalSmoother.hpp"
 #include "MueLu_InverseApproximationFactory.hpp"
-#include "MueLu_IsorropiaInterface.hpp"
 #include "MueLu_LineDetectionFactory.hpp"
 #include "MueLu_LocalOrdinalTransferFactory.hpp"
 #include "MueLu_RepartitionInterface.hpp"
@@ -79,6 +78,9 @@
 #include "MueLu_SimpleSmoother.hpp"
 #include "MueLu_SmootherFactory.hpp"
 #include "MueLu_StructuredAggregationFactory.hpp"
+#ifdef HAVE_MUELU_EXPERIMENTAL
+#include "MueLu_StructuredRAPFactory.hpp"
+#endif
 #include "MueLu_StructuredLineDetectionFactory.hpp"
 #include "MueLu_SubBlockAFactory.hpp"
 #ifdef HAVE_MUELU_TEKO
@@ -104,9 +106,6 @@
 
 #include "MueLu_CoalesceDropFactory_kokkos.hpp"
 #include "MueLu_GeometricInterpolationPFactory_kokkos.hpp"
-#ifdef HAVE_MUELU_DEPRECATED_CODE
-#include "MueLu_SaPFactory_kokkos.hpp"
-#endif
 #include "MueLu_SemiCoarsenPFactory_kokkos.hpp"
 #include "MueLu_StructuredAggregationFactory_kokkos.hpp"
 #include "MueLu_TentativePFactory_kokkos.hpp"
@@ -119,7 +118,7 @@
 #include "MueLu_MatlabSmoother.hpp"
 #endif
 
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
 #include "MueLu_IntrepidPCoarsenFactory.hpp"
 #endif
 
@@ -195,6 +194,9 @@ RCP<const FactoryBase> FactoryFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   if (factoryName == "SemiCoarsenPFactory") return Build2<SemiCoarsenPFactory>(paramList, factoryMapIn, factoryManagersIn);
   if (factoryName == "StructuredAggregationFactory") return Build2<StructuredAggregationFactory>(paramList, factoryMapIn, factoryManagersIn);
   if (factoryName == "StructuredLineDetectionFactory") return Build2<StructuredLineDetectionFactory>(paramList, factoryMapIn, factoryManagersIn);
+#ifdef HAVE_MUELU_EXPERIMENTAL
+  if (factoryName == "StructuredRAPFactory") return Build2<StructuredRAPFactory>(paramList, factoryMapIn, factoryManagersIn);
+#endif
   if (factoryName == "SubBlockAFactory") return Build2<SubBlockAFactory>(paramList, factoryMapIn, factoryManagersIn);
   if (factoryName == "TentativePFactory") return Build2<TentativePFactory>(paramList, factoryMapIn, factoryManagersIn);
   if (factoryName == "ToggleCoordinatesTransferFactory") return BuildToggleCoordinatesTransferFactory(paramList, factoryMapIn, factoryManagersIn);
@@ -210,9 +212,6 @@ RCP<const FactoryBase> FactoryFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   if (factoryName == "ZeroSubBlockAFactory") return Build2<ZeroSubBlockAFactory>(paramList, factoryMapIn, factoryManagersIn);
   if (factoryName == "CoalesceDropFactory_kokkos") return Build2<CoalesceDropFactory_kokkos>(paramList, factoryMapIn, factoryManagersIn);
   if (factoryName == "GeometricInterpolationPFactory_kokkos") return Build2<GeometricInterpolationPFactory_kokkos>(paramList, factoryMapIn, factoryManagersIn);
-#ifdef HAVE_MUELU_DEPRECATED_CODE
-  if (factoryName == "SaPFactory_kokkos") return Build2<SaPFactory_kokkos>(paramList, factoryMapIn, factoryManagersIn);
-#endif
   if (factoryName == "SemiCoarsenPFactory_kokkos") return Build2<SemiCoarsenPFactory_kokkos>(paramList, factoryMapIn, factoryManagersIn);
   if (factoryName == "StructuredAggregationFactory_kokkos") return Build2<StructuredAggregationFactory_kokkos>(paramList, factoryMapIn, factoryManagersIn);
   if (factoryName == "TentativePFactory_kokkos") return Build2<TentativePFactory_kokkos>(paramList, factoryMapIn, factoryManagersIn);
@@ -234,13 +233,6 @@ RCP<const FactoryBase> FactoryFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>
     return Build2<Zoltan2Interface>(paramList, factoryMapIn, factoryManagersIn);
 #else
     TEUCHOS_TEST_FOR_EXCEPTION(true, Exceptions::RuntimeError, "MueLu::FactoryFactory:BuildFactory(): Cannot create a Zoltan2Interface object: Zoltan2 is disabled: HAVE_MUELU_ZOLTAN2 && HAVE_MPI == false.");
-#endif  // HAVE_MUELU_ZOLTAN2 && HAVE_MPI
-  }
-  if (factoryName == "IsorropiaInterface") {
-#if defined(HAVE_MUELU_ISORROPIA) && defined(HAVE_MPI)
-    return Build2<IsorropiaInterface>(paramList, factoryMapIn, factoryManagersIn);
-#else
-    TEUCHOS_TEST_FOR_EXCEPTION(true, Exceptions::RuntimeError, "MueLu::FactoryFactory:BuildFactory(): Cannot create a IsorropiaInterface object: Isorropia is disabled: HAVE_MUELU_ISORROPIA && HAVE_MPI == false.");
 #endif  // HAVE_MUELU_ZOLTAN2 && HAVE_MPI
   }
 
@@ -294,7 +286,7 @@ RCP<const FactoryBase> FactoryFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>
   if (factoryName == "MatlabSmoother") return BuildMatlabSmoother(paramList, factoryMapIn, factoryManagersIn);
 #endif
 
-#ifdef HAVE_MUELU_INTREPID2
+#if defined(HAVE_MUELU_INTREPID2) && defined(HAVE_MUELU_EXPERIMENTAL)
   if (factoryName == "IntrepidPCoarsenFactory") return Build2<IntrepidPCoarsenFactory>(paramList, factoryMapIn, factoryManagersIn);
 #endif
 

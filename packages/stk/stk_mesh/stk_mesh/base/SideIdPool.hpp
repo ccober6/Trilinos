@@ -34,6 +34,7 @@
 #ifndef STK_SIDE_ID_POOL_HPP
 #define STK_SIDE_ID_POOL_HPP
 
+#include <stk_util/stk_config.h>
 #include <stk_mesh/base/Types.hpp>
 
 namespace stk { namespace mesh { class BulkData; } }
@@ -50,11 +51,7 @@ public:
 
     void generate_initial_ids(unsigned numIdsNeeded);
 
-    stk::mesh::EntityId get_available_id();
-
     void generate_additional_ids_collective(size_t num_additional_ids_needed);
-
-    void reset_suggested_side_id_iter(size_t numIdsNotReallyUsed);
 
     void clear()
     {

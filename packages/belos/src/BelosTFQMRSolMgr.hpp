@@ -26,6 +26,9 @@
 #include "BelosStatusTestCombo.hpp"
 #include "BelosStatusTestOutputFactory.hpp"
 #include "BelosOutputManager.hpp"
+#include "BelosTeuchosDenseAdapter.hpp"
+#include "BelosKokkosDenseAdapter.hpp"
+
 #ifdef BELOS_TEUCHOS_TIME_MONITOR
 #include "Teuchos_TimeMonitor.hpp"
 #endif
@@ -61,11 +64,11 @@ namespace Belos {
     TFQMRSolMgrLinearProblemFailure(const std::string& what_arg) : BelosError(what_arg)
     {}};
 
-  template<class ScalarType, class MV, class OP>
-  class TFQMRSolMgr : public SolverManager<ScalarType,MV,OP> {
+  template<class ScalarType, class MV, class OP, class DM = DefaultDenseMatrix<int, ScalarType>>
+  class TFQMRSolMgr : public SolverManager<ScalarType,MV,OP,DM> {
 
   private:
-    typedef MultiVecTraits<ScalarType,MV> MVT;
+    typedef MultiVecTraits<ScalarType,MV,DM> MVT;
     typedef OperatorTraits<ScalarType,MV,OP> OPT;
     typedef Teuchos::ScalarTraits<ScalarType> SCT;
     typedef typename Teuchos::ScalarTraits<ScalarType>::magnitudeType MagnitudeType;
@@ -99,22 +102,22 @@ namespace Belos {
      *                          outputted.  Default: -1 (never)
      *   - "Timer Label" - a \c std::string to use as a prefix for the timer labels.  Default: "Belos"
      */
-    TFQMRSolMgr( const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > &problem,
+    TFQMRSolMgr( const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > &problem,
                  const Teuchos::RCP<Teuchos::ParameterList> &pl );
 
     //! Destructor.
     virtual ~TFQMRSolMgr() {};
 
     //! clone for Inverted Injection (DII)
-    Teuchos::RCP<SolverManager<ScalarType, MV, OP> > clone () const override {
-      return Teuchos::rcp(new TFQMRSolMgr<ScalarType,MV,OP>);
+    Teuchos::RCP<SolverManager<ScalarType, MV, OP, DM> > clone () const override {
+      return Teuchos::rcp(new TFQMRSolMgr<ScalarType,MV,OP,DM>);
     }
     //@}
 
     //! @name Accessor methods
     //@{ 
     
-    const LinearProblem<ScalarType,MV,OP>& getProblem() const override {
+    const LinearProblem<ScalarType,MV,OP,DM>& getProblem() const override {
       return *problem_;
     }
 
@@ -163,10 +166,16 @@ namespace Belos {
     //@{
     
     //! Set the linear problem that needs to be solved. 
-    void setProblem( const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > &problem ) override { problem_ = problem; }
+    void setProblem( const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > &problem ) override { problem_ = problem; isSTSet_ = false; }
     
     //! Set the parameters the solver manager should use to solve the linear problem. 
     void setParameters( const Teuchos::RCP<Teuchos::ParameterList> &params ) override;
+
+    //! Set a debug status test, OR-combined into the top-level status test.
+    void setDebugStatusTest( const Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > &debugStatusTest ) override {
+      debugStatusTest_ = debugStatusTest;
+      isSTSet_ = false;
+    }
     
     //@}
     //! @name Reset methods
@@ -215,18 +224,21 @@ namespace Belos {
     bool checkStatusTest();
 
     // Linear problem.
-    Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > problem_;
+    Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > problem_;
 
     // Output manager.
     Teuchos::RCP<OutputManager<ScalarType> > printer_;
     Teuchos::RCP<std::ostream> outputStream_;
 
     // Status test.
-    Teuchos::RCP<StatusTest<ScalarType,MV,OP> > sTest_;
-    Teuchos::RCP<StatusTestMaxIters<ScalarType,MV,OP> > maxIterTest_;
-    Teuchos::RCP<StatusTest<ScalarType,MV,OP> > convTest_;
-    Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP> > expConvTest_, impConvTest_;
-    Teuchos::RCP<StatusTestOutput<ScalarType,MV,OP> > outputTest_;
+    Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > sTest_;
+    Teuchos::RCP<StatusTestMaxIters<ScalarType,MV,OP,DM> > maxIterTest_;
+    Teuchos::RCP<StatusTest<ScalarType,MV,OP,DM> > convTest_;
+    Teuchos::RCP<StatusTestGenResNorm<ScalarType,MV,OP,DM> > expConvTest_, impConvTest_;
+    Teuchos::RCP<StatusTestOutput<ScalarType,MV,OP,DM> > outputTest_;
+
+    // Debug status test (e.g. a wall-clock time limit), OR-combined into sTest_.
+    Teuchos::RCP<StatusTest<ScalarType, MV, OP, DM> > debugStatusTest_;
 
     // Current parameter list.
     Teuchos::RCP<Teuchos::ParameterList> params_;
@@ -259,8 +271,8 @@ namespace Belos {
 
 
 // Empty Constructor
-template<class ScalarType, class MV, class OP>
-TFQMRSolMgr<ScalarType,MV,OP>::TFQMRSolMgr() :
+template<class ScalarType, class MV, class OP, class DM>
+TFQMRSolMgr<ScalarType,MV,OP,DM>::TFQMRSolMgr() :
   outputStream_(Teuchos::rcpFromRef(std::cout)),
   convtol_(DefaultSolverParameters::convTol),
   impTolScale_(DefaultSolverParameters::impTolScale),
@@ -281,9 +293,9 @@ TFQMRSolMgr<ScalarType,MV,OP>::TFQMRSolMgr() :
 
 
 // Basic Constructor
-template<class ScalarType, class MV, class OP>
-TFQMRSolMgr<ScalarType,MV,OP>::TFQMRSolMgr(
-                                             const Teuchos::RCP<LinearProblem<ScalarType,MV,OP> > &problem,
+template<class ScalarType, class MV, class OP, class DM>
+TFQMRSolMgr<ScalarType,MV,OP,DM>::TFQMRSolMgr(
+                                             const Teuchos::RCP<LinearProblem<ScalarType,MV,OP,DM> > &problem,
                                              const Teuchos::RCP<Teuchos::ParameterList> &pl ) :
   problem_(problem),
   outputStream_(Teuchos::rcpFromRef(std::cout)),
@@ -311,8 +323,8 @@ TFQMRSolMgr<ScalarType,MV,OP>::TFQMRSolMgr(
   }
 }
 
-template<class ScalarType, class MV, class OP>
-void TFQMRSolMgr<ScalarType,MV,OP>::setParameters( const Teuchos::RCP<Teuchos::ParameterList> &params )
+template<class ScalarType, class MV, class OP, class DM>
+void TFQMRSolMgr<ScalarType,MV,OP,DM>::setParameters( const Teuchos::RCP<Teuchos::ParameterList> &params )
 {
   // Create the internal parameter list if ones doesn't already exist.
   if (params_ == Teuchos::null) {
@@ -498,14 +510,14 @@ void TFQMRSolMgr<ScalarType,MV,OP>::setParameters( const Teuchos::RCP<Teuchos::P
 
 
 // Check the status test versus the defined linear problem
-template<class ScalarType, class MV, class OP>
-bool TFQMRSolMgr<ScalarType,MV,OP>::checkStatusTest() {
+template<class ScalarType, class MV, class OP, class DM>
+bool TFQMRSolMgr<ScalarType,MV,OP,DM>::checkStatusTest() {
 
-  typedef Belos::StatusTestCombo<ScalarType,MV,OP>  StatusTestCombo_t;
-  typedef Belos::StatusTestGenResNorm<ScalarType,MV,OP>  StatusTestGenResNorm_t;
+  typedef Belos::StatusTestCombo<ScalarType,MV,OP,DM>  StatusTestCombo_t;
+  typedef Belos::StatusTestGenResNorm<ScalarType,MV,OP,DM>  StatusTestGenResNorm_t;
 
   // Basic test checks maximum iterations and native residual.
-  maxIterTest_ = Teuchos::rcp( new StatusTestMaxIters<ScalarType,MV,OP>( maxIters_ ) );
+  maxIterTest_ = Teuchos::rcp( new StatusTestMaxIters<ScalarType,MV,OP,DM>( maxIters_ ) );
 
   if (expResTest_) {
 
@@ -539,9 +551,17 @@ bool TFQMRSolMgr<ScalarType,MV,OP>::checkStatusTest() {
   }
   sTest_ = Teuchos::rcp( new StatusTestCombo_t( StatusTestCombo_t::OR, maxIterTest_, convTest_ ) );
 
+  // Add a debug status test if one was provided (e.g. a wall-clock time limit).
+  // OR-combining it into the top-level test lets it stop the solve; the
+  // dispatch in solve() treats such a stop as an unconverged (recoverable)
+  // termination.
+  if (Teuchos::nonnull(debugStatusTest_)) {
+    sTest_ = Teuchos::rcp( new StatusTestCombo_t( StatusTestCombo_t::OR, sTest_, debugStatusTest_ ) );
+  }
+
   // Create the status test output class.
   // This class manages and formats the output from the status test.
-  StatusTestOutputFactory<ScalarType,MV,OP> stoFactory( outputStyle_ );
+  StatusTestOutputFactory<ScalarType,MV,OP,DM> stoFactory( outputStyle_ );
   outputTest_ = stoFactory.create( printer_, sTest_, outputFreq_, Passed+Failed+Undefined );
 
   // Set the solver string for the output test
@@ -556,9 +576,9 @@ bool TFQMRSolMgr<ScalarType,MV,OP>::checkStatusTest() {
 }
 
 
-template<class ScalarType, class MV, class OP>
+template<class ScalarType, class MV, class OP, class DM>
 Teuchos::RCP<const Teuchos::ParameterList>
-TFQMRSolMgr<ScalarType,MV,OP>::getValidParameters() const
+TFQMRSolMgr<ScalarType,MV,OP,DM>::getValidParameters() const
 {
   static Teuchos::RCP<const Teuchos::ParameterList> validPL;
 
@@ -604,8 +624,9 @@ TFQMRSolMgr<ScalarType,MV,OP>::getValidParameters() const
 
 
 // solve()
-template<class ScalarType, class MV, class OP>
-ReturnType TFQMRSolMgr<ScalarType,MV,OP>::solve() {
+template<class ScalarType, class MV, class OP, class DM>
+ReturnType TFQMRSolMgr<ScalarType,MV,OP,DM>::solve() {
+  ReturnType retType = Undetermined;
 
   // Set the current parameters if they were not set before.
   // NOTE:  This may occur if the user generated the solver manager with the default constructor and
@@ -655,8 +676,8 @@ ReturnType TFQMRSolMgr<ScalarType,MV,OP>::solve() {
   //////////////////////////////////////////////////////////////////////////////////////
   // TFQMR solver
 
-  Teuchos::RCP<TFQMRIter<ScalarType,MV,OP> > tfqmr_iter =
-    Teuchos::rcp( new TFQMRIter<ScalarType,MV,OP>(problem_,printer_,outputTest_,plist) );
+  Teuchos::RCP<TFQMRIter<ScalarType,MV,OP,DM> > tfqmr_iter =
+    Teuchos::rcp( new TFQMRIter<ScalarType,MV,OP,DM>(problem_,printer_,outputTest_,plist) );
 
   // Enter solve() iterations
   {
@@ -707,6 +728,7 @@ ReturnType TFQMRSolMgr<ScalarType,MV,OP>::solve() {
           ////////////////////////////////////////////////////////////////////////////////////
           else if ( maxIterTest_->getStatus() == Passed ) {
             // we don't have convergence
+            retType = MaxItersReached;
             isConverged = false;
             break;  // break from while(1){tfqmr_iter->iterate()}
           }
@@ -718,21 +740,32 @@ ReturnType TFQMRSolMgr<ScalarType,MV,OP>::solve() {
           //
           ////////////////////////////////////////////////////////////////////////////////////
 
-          else {
+          else if (Teuchos::nonnull(debugStatusTest_) &&
+                   debugStatusTest_->getStatus() == Passed) {
+            // A debug status test (e.g. a wall-clock time limit) stopped the
+            // iteration. Treat as an unconverged termination rather than an
+            // inconsistent state.
+            retType = Unconverged;
+            isConverged = false;
+            break; // break from while(1){tfqmr_iter->iterate()}
+          } else {
+            retType = InconsistentState;
             TEUCHOS_TEST_FOR_EXCEPTION(true,std::logic_error,
                                "Belos::TFQMRSolMgr::solve(): Invalid return from TFQMRIter::iterate().");
           }
         }
         catch (const StatusTestNaNError& e) {
           // A NaN was detected in the solver.  Set the solution to zero and return unconverged.
+          retType = NaNDetected;
           achievedTol_ = MT::one();
           Teuchos::RCP<MV> X = problem_->getLHS();
           MVT::MvInit( *X, SCT::zero() );
           printer_->stream(Warnings) << "Belos::TFQMRSolMgr::solve(): Warning! NaN has been detected!" 
                                      << std::endl;
-          return Unconverged; 
+          return retType; 
         }
         catch (const std::exception &e) {
+          retType = NonspecificException;
           printer_->stream(Errors) << "Error! Caught std::exception in TFQMRIter::iterate() at iteration "
                                    << tfqmr_iter->getNumIters() << std::endl
                                    << e.what() << std::endl;
@@ -823,14 +856,14 @@ ReturnType TFQMRSolMgr<ScalarType,MV,OP>::solve() {
   }
 
   if (!isConverged) {
-    return Unconverged; // return from TFQMRSolMgr::solve()
+    return retType; // return from TFQMRSolMgr::solve()
   }
   return Converged; // return from TFQMRSolMgr::solve()
 }
 
 //  This method requires the solver manager to return a std::string that describes itself.
-template<class ScalarType, class MV, class OP>
-std::string TFQMRSolMgr<ScalarType,MV,OP>::description() const
+template<class ScalarType, class MV, class OP, class DM>
+std::string TFQMRSolMgr<ScalarType,MV,OP,DM>::description() const
 {
   std::ostringstream oss;
   oss << "Belos::TFQMRSolMgr<...,"<<Teuchos::ScalarTraits<ScalarType>::name()<<">";
@@ -839,5 +872,18 @@ std::string TFQMRSolMgr<ScalarType,MV,OP>::description() const
 }
 
 } // end Belos namespace
+
+#ifdef HAVE_BELOS_TPETRA
+#include "BelosTpetraETIHelpers.hpp"
+
+#define BELOS_TPETRA_TFQMRSOLMGR_NOEXTERN_CALL(SC, LO, GO, NT)            \
+  BELOS_TPETRA_CALL(Belos::TFQMRSolMgr, SC, LO, GO, NT)
+
+#define BELOS_TPETRA_TFQMRSOLMGR_EXTERN_CALL(SC, LO, GO, NT)              \
+  BELOS_TPETRA_EXTERN_CALL(Belos::TFQMRSolMgr, SC, LO, GO, NT)
+
+TPETRA_INSTANTIATE_SLGN_NO_ORDINAL_SCALAR(BELOS_TPETRA_TFQMRSOLMGR_EXTERN_CALL)
+#endif
+
 
 #endif /* BELOS_TFQMR_SOLMGR_HPP */

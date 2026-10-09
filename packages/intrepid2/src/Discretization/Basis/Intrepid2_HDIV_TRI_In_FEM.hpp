@@ -84,14 +84,10 @@ public:
     static ordinal_type
     getWorkSizePerPoint(ordinal_type order) {
       auto cardinality = CardinalityHDivTri(order);
-      switch (opType) {
-      case OPERATOR_GRAD:
-      case OPERATOR_DIV:
-      case OPERATOR_D1:
+      if constexpr ((opType == OPERATOR_GRAD) || (opType == OPERATOR_DIV) || (opType == OPERATOR_D1))
         return 5*cardinality;
-      default:
+      else
         return getDkCardinality<opType,2>()*cardinality;
-      }
     }
   };
 
@@ -138,26 +134,21 @@ public:
 
       typename workViewType::pointer_type ptr = _work.data() + _work.extent(0)*ptBegin*get_dimension_scalar(_work);
 
-      auto vcprop = Kokkos::common_view_alloc_prop(_work);
-      workViewType  work(Kokkos::view_wrap(ptr,vcprop), (ptEnd-ptBegin)*_work.extent(0));
+      workViewType work = createMatchingUnmanagedView<workViewType>(_work, ptr, (ptEnd-ptBegin)*_work.extent(0));
 
 
-      switch (opType) {
-      case OPERATOR_VALUE : {
+      if constexpr (opType == OPERATOR_VALUE) {
         auto output = Kokkos::subview( _outputValues, Kokkos::ALL(), ptRange, Kokkos::ALL() );
         Serial<opType>::getValues( output, input, work, _coeffs );
-        break;
       }
-      case OPERATOR_DIV: {
+      else if constexpr (opType == OPERATOR_DIV) {
         auto output = Kokkos::subview( _outputValues, Kokkos::ALL(), ptRange);
         Serial<opType>::getValues( output, input, work, _coeffs );
-        break;
       }
-      default: {
+      else {
         INTREPID2_TEST_FOR_ABORT( true,
             ">>> ERROR: (Intrepid2::Basis_HDIV_TRI_In_FEM::Functor) operator is not supported");
 
-      }
       }
     }
   };
@@ -209,9 +200,8 @@ class Basis_HDIV_TRI_In_FEM
   }
 
     virtual void 
-    getScratchSpaceSize(      ordinal_type& perTeamSpaceSize,
-                              ordinal_type& perThreadSpaceSize,
-                        const PointViewType inputPointsconst,
+    getScratchSpaceSize(      ordinal_type& perThreadSpaceSize,
+                        PointViewType inputPointsconst,
                         const EOperator operatorType = OPERATOR_VALUE) const override;
 
     KOKKOS_INLINE_FUNCTION
@@ -221,7 +211,7 @@ class Basis_HDIV_TRI_In_FEM
       const PointViewType  inputPoints,
       const EOperator operatorType,
       const typename Kokkos::TeamPolicy<typename DeviceType::execution_space>::member_type& team_member,
-      const typename DeviceType::execution_space::scratch_memory_space & scratchStorage, 
+      const int threadScratchLevel, 
       const ordinal_type subcellDim = -1,
       const ordinal_type subcellOrdinal = -1) const override;
 

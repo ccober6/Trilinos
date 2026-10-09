@@ -13,8 +13,6 @@
 #ifndef IFPACK2_CRSRILUK_DECL_HPP
 #define IFPACK2_CRSRILUK_DECL_HPP
 
-#include "KokkosSparse_spiluk.hpp"
-
 #include "Ifpack2_Preconditioner.hpp"
 #include "Ifpack2_Details_CanChangeMatrix.hpp"
 #include "Tpetra_CrsMatrix_decl.hpp"
@@ -270,6 +268,11 @@ class RILUK : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar
   typedef typename crs_matrix_type::nonconst_local_inds_host_view_type nonconst_local_inds_host_view_type;
   typedef typename crs_matrix_type::nonconst_values_host_view_type nonconst_values_host_view_type;
 
+  //! Tpetra::MultiVector specialization used for containing coordinates
+  typedef Tpetra::MultiVector<magnitude_type, local_ordinal_type,
+                              global_ordinal_type, node_type>
+      coord_type;
+
   //@}
   //! \name Implementation of Kokkos Kernels ILU(k).
   //@{
@@ -285,11 +288,14 @@ class RILUK : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar
                                                                     HandleExecSpace, TemporaryMemorySpace, PersistentMemorySpace>
       kk_handle_type;
   typedef Ifpack2::IlukGraph<Tpetra::CrsGraph<local_ordinal_type, global_ordinal_type, node_type>, kk_handle_type> iluk_graph_type;
+  typedef Kokkos::View<magnitude_type**, Kokkos::LayoutLeft, device_type> coors_view_t;
+  typedef Kokkos::View<local_ordinal_type*, Kokkos::LayoutLeft, device_type> perm_view_t;
 
   /// \brief Constructor that takes a Tpetra::RowMatrix.
   ///
   /// \param A_in [in] The input matrix.
-  RILUK(const Teuchos::RCP<const row_matrix_type>& A_in);
+  /// \param A_in_coordinates [in] Optional coordinates for the input matrix (for load balancing).
+  RILUK(const Teuchos::RCP<const row_matrix_type>& A_in, const Teuchos::RCP<const coord_type>& A_in_coordinates = Teuchos::null);
 
   /// \brief Constructor that takes a Tpetra::CrsMatrix.
   ///
@@ -298,7 +304,8 @@ class RILUK : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar
   /// a Tpetra::RowMatrix.
   ///
   /// \param A_in [in] The input matrix.
-  RILUK(const Teuchos::RCP<const crs_matrix_type>& A_in);
+  /// \param A_in_coordinates [in] Optional coordinates for the input matrix (for load balancing).
+  RILUK(const Teuchos::RCP<const crs_matrix_type>& A_in, const Teuchos::RCP<const coord_type>& A_in_coordinates = Teuchos::null);
 
  private:
   /// \brief Copy constructor: declared private but not defined, so
@@ -398,6 +405,12 @@ class RILUK : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar
   virtual void
   setMatrix(const Teuchos::RCP<const row_matrix_type>& A);
 
+  /// \brief Set the matrix rows' coordinates.
+  ///
+  /// \param A_coordinates [in] Pointer to the coordinates multivector.
+  void
+  setCoord(const Teuchos::RCP<const coord_type>& A_coordinates);
+
   //@}
   //! @name Implementation of Teuchos::Describable interface
   //@{
@@ -485,6 +498,9 @@ class RILUK : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar
   //! Get the input matrix.
   Teuchos::RCP<const row_matrix_type> getMatrix() const;
 
+  //! Get the coordinates associated with the input matrix's rows.
+  Teuchos::RCP<const coord_type> getCoord() const;
+
   // Attribute access functions
 
   //! Get RILU(k) relaxation parameter
@@ -570,6 +586,10 @@ class RILUK : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar
   //! The (original) input matrix for which to compute ILU(k).
   Teuchos::RCP<const row_matrix_type> A_;
 
+  //! Coordinates associated with rows of the input matrix
+  //! (only used for RCB distribution into streams in RILUK)
+  Teuchos::RCP<const coord_type> A_coordinates_;
+
   //! The ILU(k) graph.
   Teuchos::RCP<iluk_graph_type> Graph_;
   std::vector<Teuchos::RCP<iluk_graph_type> > Graph_v_;
@@ -625,11 +645,18 @@ class RILUK : virtual public Ifpack2::Preconditioner<typename MatrixType::scalar
   int num_streams_;
   std::vector<execution_space> exec_space_instances_;
   bool hasStreamReordered_;
+  bool hasStreamsWithRCB_;
   std::vector<typename lno_nonzero_view_t::non_const_type> perm_v_;
   std::vector<typename lno_nonzero_view_t::non_const_type> reverse_perm_v_;
   mutable std::unique_ptr<MV> Y_tmp_;
   mutable std::unique_ptr<MV> reordered_x_;
   mutable std::unique_ptr<MV> reordered_y_;
+  perm_view_t perm_rcb_;
+#if KOKKOS_VERSION >= 50100
+  perm_view_t reverse_perm_rcb_;
+  std::vector<local_ordinal_type> partition_sizes_rcb_;
+#endif
+  coors_view_t coors_rcb_;
 };
 
 // NOTE (mfh 11 Feb 2015) This used to exist in order to deal with

@@ -98,17 +98,17 @@ TEST(stkMeshHowTo, ngpFieldAsyncCopy)
 
   {
     stk::mesh::Entity elem = bulk.get_entity(stk::topology::ELEM_RANK, 1u);
-    auto doubleFieldData = doubleField.data(execSpaceWithStream1.get_execution_space());
+    auto doubleFieldData = doubleField.data<stk::mesh::ReadWrite>(execSpaceWithStream1.get_execution_space());
     auto doubleData = doubleFieldData.entity_values(elem);
     doubleData() = initialDoubleFieldValue*2;
 
-    auto intFieldData = intField.data(execSpaceWithStream2.get_execution_space());
+    auto intFieldData = intField.data<stk::mesh::ReadWrite>(execSpaceWithStream2.get_execution_space());
     auto intData = intFieldData.entity_values(elem);
     intData() = initialIntFieldValue*2;
   }
 
-  auto doubleFieldData = doubleField.data<stk::mesh::ReadOnly, stk::ngp::MemSpace>(execSpaceWithStream1.get_execution_space());
-  auto intFieldData = intField.data<stk::mesh::ReadOnly, stk::ngp::MemSpace>(execSpaceWithStream2.get_execution_space());
+  auto doubleFieldData = doubleField.data<stk::mesh::ReadOnly, stk::ngp::DeviceSpace>(execSpaceWithStream1.get_execution_space());
+  auto intFieldData = intField.data<stk::mesh::ReadOnly, stk::ngp::DeviceSpace>(execSpaceWithStream2.get_execution_space());
 
   check_field_data_on_device(bulk, doubleFieldData, intFieldData, modifiedDoubleFieldValue, modifiedIntFieldValue);
 }

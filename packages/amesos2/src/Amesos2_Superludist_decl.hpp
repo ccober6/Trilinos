@@ -250,6 +250,14 @@ private:
   bool loadA_impl(EPhase current_phase);
 
 
+  /** 
+   * \brief Prints the status information about the current solver with some level
+   * of verbosity
+   */
+  void describe_impl(Teuchos::FancyOStream &out,
+                     const Teuchos::EVerbosityLevel verbLevel) const;
+
+
   // struct holds all data necessary to make a superlu factorization or solve call
   mutable struct SLUData {
     SLUD::SuperMatrix A;
@@ -281,7 +289,7 @@ private:
 
     Teuchos::Array<magnitude_type> R, C;       // equilibration scalings
     Teuchos::Array<magnitude_type> R1, C1;     // row-permutation scalings
-    Teuchos::Array<SLUD::int_t>    perm_r, perm_c;
+    Teuchos::Array<SLUD::perm_int_t> perm_r, perm_c;
 
     SLUD::DiagScale_t equed;    ///< Whether/what kind of equilibration to use/has been used
     bool rowequ, colequ;        ///< whether row/col equilibration has been applied to AC
@@ -303,6 +311,8 @@ private:
   mutable Teuchos::Array<slu_type> xvals_;
 
   /// \c true if this processor is in SuperLU_DISTS's 2D process grid
+  int myRank;
+  int numProcs;
   bool in_grid_;
   bool same_symbolic_;
   bool force_symbfact_;
@@ -314,7 +324,7 @@ private:
   Teuchos::RCP<const map_type> superlu_contig_colmap_;
 
   bool is_contiguous_;
-
+  int debug_level_;
 };                              // End class Superludist
 
 

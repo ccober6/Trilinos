@@ -20,7 +20,7 @@
 #include "BelosBlockGmresSolMgr.hpp"
 
 // I/O for Harwell-Boeing files
-#include <Trilinos_Util_iohb.h>
+#include <Tpetra_Util_iohb.h>
 
 #include <Teuchos_CommandLineProcessor.hpp>
 #include <Teuchos_ScalarTraits.hpp>
@@ -88,7 +88,7 @@ RCP<LinearProblem<Scalar,Tpetra::MultiVector<Scalar>,Tpetra::Operator<Scalar> > 
   MVT::MvRandom( *X );
   B = rcp( new MV(vmap,numrhs) );
   OPT::Apply( *A, *X, *B );
-  MVT::MvInit( *X, 0.0 );
+  MVT::MvInit( *X, SCT::zero() );
   // Construct a linear problem instance with zero initial MV
   RCP<LinearProblem<Scalar,MV,OP> > problem = rcp( new LinearProblem<Scalar,MV,OP>(A,X,B) );
   problem->setLabel(Teuchos::typeName(SCT::one()));
@@ -186,7 +186,7 @@ int main(int argc, char *argv[])
   //
   // Get test parameters from command-line processor
   //
-  bool verbose = false, debug = false;
+  bool verbose = true, debug = true;
   int frequency = -1;  // how often residuals are printed by solver
   int maxiters = -1;   // maximum number of iterations for solver to use
   numrhs = 1;      // total number of right-hand sides to solve for
@@ -228,7 +228,7 @@ int main(int argc, char *argv[])
   nnz = -1;
   if (mptestmypid == 0) {
     int dim2;
-    info = readHB_newmat_double(filename.c_str(),&mptestdim,&dim2,&nnz,&colptr,&rowind,&dvals);
+    info = Tpetra::HB::readHB_newmat_double(filename.c_str(),&mptestdim,&dim2,&nnz,&colptr,&rowind,&dvals);
     // find maximum NNZ over all rows
     vector<int> rnnz(mptestdim,0);
     for (int *ri=rowind; ri<rowind+nnz; ++ri) {

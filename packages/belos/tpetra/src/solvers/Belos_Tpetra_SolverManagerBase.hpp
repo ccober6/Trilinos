@@ -30,10 +30,12 @@ template<class SC = Tpetra::MultiVector<>::scalar_type,
 	 class MV = Tpetra::MultiVector<SC>,
 	 class OP = Tpetra::Operator<SC>>
 class SolverManagerBase :
-    public Belos::SolverManager<SC, MV, OP>
+  public Belos::SolverManager<SC, MV, OP, Teuchos::SerialDenseMatrix<int, SC>>
 {
+  using DM = Teuchos::SerialDenseMatrix<int, SC>;
+
 public:
-  using linear_problem_type = Belos::LinearProblem<SC, MV, OP>;
+  using linear_problem_type = Belos::LinearProblem<SC, MV, OP, DM>;
   
   SolverManagerBase () = delete;
 
@@ -165,6 +167,7 @@ public:
        "a nonnull argument before calling this method.");
 
     lastSolverOutput_ = solver_->solve (*X, *B);
+
     return lastSolverOutput_.converged ? Belos::Converged : Belos::Unconverged;
   }
 

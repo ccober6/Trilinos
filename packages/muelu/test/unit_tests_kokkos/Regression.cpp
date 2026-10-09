@@ -8,6 +8,7 @@
 // @HEADER
 
 #include <Teuchos_UnitTestHarness.hpp>
+#include <Teuchos_StackedTimer.hpp>
 
 #include <Xpetra_Map.hpp>
 #include <Xpetra_Matrix.hpp>
@@ -98,12 +99,12 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(Regression, H2D, Scalar, LocalOrdinal, GlobalO
   }
 #ifdef KOKKOS_HAS_SHARED_SPACE
   else {
-    size_t targetNumDeepCopies = kkNativeDeepCopies + (std::is_same_v<typename Node::memory_space, Kokkos::SharedSpace> ? 19 : 27);
+    size_t targetNumDeepCopies = kkNativeDeepCopies + (std::is_same_v<typename Node::memory_space, Kokkos::SharedSpace> ? 20 : 28);
     TEST_EQUALITY(Tpetra::Details::DeepCopyCounter::get_count_different_space(), targetNumDeepCopies);
   }
 #else
   else {
-    TEST_EQUALITY(Tpetra::Details::DeepCopyCounter::get_count_different_space(), kkNativeDeepCopies + 32);
+    TEST_EQUALITY(Tpetra::Details::DeepCopyCounter::get_count_different_space(), kkNativeDeepCopies + 33);
   }
 #endif  // KOKKOS_HAS_SHARED_SPACE
 

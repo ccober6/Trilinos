@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSBATCHED_GETRS_HPP_
 #define KOKKOSBATCHED_GETRS_HPP_
 
@@ -32,15 +19,17 @@ namespace KokkosBatched {
 /// \tparam BViewType: Input type for the right-hand side and the solution,
 /// needs to be a 1D view
 ///
-/// \param A [in]: A is a m by n general matrix, a rank 2 view
-/// \param piv [in]: On exit, the pivot indices, a rank 1 view
-/// \param B [inout]: right-hand side and the solution, a rank 1 view
+/// \param[in] A : A is a m by n general matrix, a rank 2 view
+/// \param[in] piv : On exit, the pivot indices, a rank 1 view
+/// \param[inout] B : right-hand side and the solution, a rank 1 view
 ///
 /// No nested parallel_for is used inside of the function.
 ///
 
 template <typename ArgTrans, typename ArgAlgo>
 struct SerialGetrs {
+  static_assert(KokkosBlas::is_trans_v<ArgTrans>, "KokkosBatched::SerialGetrs: ArgTrans must be a KokkosBlas::Trans.");
+  static_assert(std::is_same_v<ArgAlgo, Algo::Getrs::Unblocked>, "KokkosBatched::getrs: Use Algo::Getrs::Unblocked");
   template <typename AViewType, typename PivViewType, typename BViewType>
   KOKKOS_INLINE_FUNCTION static int invoke(const AViewType &A, const PivViewType &piv, const BViewType &b);
 };
@@ -48,4 +37,4 @@ struct SerialGetrs {
 
 #include "KokkosBatched_Getrs_Serial_Impl.hpp"
 
-#endif  // KOKKOSBATCHED_GETRF_HPP_
+#endif  // KOKKOSBATCHED_GETRS_HPP_

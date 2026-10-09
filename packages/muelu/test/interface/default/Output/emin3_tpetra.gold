@@ -1,7 +1,7 @@
 Clearing old data (if any)
 
 Level 0
-Setup Smoother (MueLu::Ifpack2Smoother{type = RELAXATION})
+Setup Smoother (total, level=0) (MueLu::Ifpack2Smoother{type = RELAXATION})
 smoother -> 
  relaxation: type = Symmetric Gauss-Seidel
  relaxation: sweeps = 1
@@ -9,11 +9,13 @@ smoother ->
  timer for apply = 0
 
 Level 1
-Prolongator minimization (MueLu::EminPFactory)
-Build (MueLu::TentativePFactory)
-Build (MueLu::UncoupledAggregationFactory)
-Build (MueLu::CoalesceDropFactory)
-Build (MueLu::AmalgamationFactory)
+Prolongator minimization (total, level=1) (MueLu::EminPFactory)
+Constraint (total, level=1) (MueLu::ConstraintFactory)
+Ppattern (total, level=1) (MueLu::PatternFactory)
+Build (total, level=1) (MueLu::TentativePFactory)
+Build (total, level=0) (MueLu::UncoupledAggregationFactory)
+Build (total, level=0) (MueLu::CoalesceDropFactory)
+Build (total, level=0) (MueLu::AmalgamationFactory)
 [empty list]
 algorithm = "classical" classical algorithm = "default": threshold = 0, blocksize = 1
 lightweight wrap = 1
@@ -21,27 +23,34 @@ BuildAggregatesNonKokkos (Phase - (Dirichlet))
 BuildAggregatesNonKokkos (Phase 1 (main))
 BuildAggregatesNonKokkos (Phase 2a (secondary))
 BuildAggregatesNonKokkos (Phase 2b (expansion))
-Nullspace factory (MueLu::NullspaceFactory)
+Nullspace factory (total, level=0) (MueLu::NullspaceFactory)
 Fine level nullspace = Nullspace
-Build (MueLu::CoarseMapFactory)
+Build (total, level=0) (MueLu::CoarseMapFactory)
 matrixmatrix: kernel params -> 
  [empty list]
-Constraint (MueLu::ConstraintFactory)
-Ppattern (MueLu::PatternFactory)
-Matrix filtering (MueLu::FilteredAFactory)
+Matrix filtering (total, level=0) (MueLu::FilteredAFactory)
 Filtered matrix is not being constructed as no filtering is being done
-[empty list]
-Number of emin iterations = 1
-GMRES iterations
+PrepareLeastSquaresSolveDirect (MueLu::DenseConstraint)
+Getting P from coarseLevel
+
+*******************************************************
+***** Belos Iterative Solver:  Pseudo Block Gmres 
+***** Maximum Iterations: 1
+***** Block Size: 1
+***** Residual Test: 
+*****   Test 1 : Belos::StatusTestImpResNorm<>: (2-Norm Res Vec) , tol = 1e-08
+*******************************************************
+Iter 0, [ 1] :    6.665458e+01
+Iter 1, [ 1] :    1.473085e-16
 emin: num iterations = 1
 emin: iterative method = gmres
-Transpose P (MueLu::TransPFactory)
+Transpose P (total, level=1) (MueLu::TransPFactory)
 matrixmatrix: kernel params -> 
  [empty list]
-Computing Ac (MueLu::RAPFactory)
+Computing Ac (total, level=1) (MueLu::RAPFactory)
 matrixmatrix: kernel params -> 
  [empty list]
-Setup Smoother (MueLu::Ifpack2Smoother{type = RELAXATION})
+Setup Smoother (total, level=1) (MueLu::Ifpack2Smoother{type = RELAXATION})
 smoother -> 
  relaxation: type = Symmetric Gauss-Seidel
  relaxation: sweeps = 1
@@ -49,11 +58,13 @@ smoother ->
  timer for apply = 0
 
 Level 2
-Prolongator minimization (MueLu::EminPFactory)
-Build (MueLu::TentativePFactory)
-Build (MueLu::UncoupledAggregationFactory)
-Build (MueLu::CoalesceDropFactory)
-Build (MueLu::AmalgamationFactory)
+Prolongator minimization (total, level=2) (MueLu::EminPFactory)
+Constraint (total, level=2) (MueLu::ConstraintFactory)
+Ppattern (total, level=2) (MueLu::PatternFactory)
+Build (total, level=2) (MueLu::TentativePFactory)
+Build (total, level=1) (MueLu::UncoupledAggregationFactory)
+Build (total, level=1) (MueLu::CoalesceDropFactory)
+Build (total, level=1) (MueLu::AmalgamationFactory)
 [empty list]
 algorithm = "classical" classical algorithm = "default": threshold = 0, blocksize = 1
 lightweight wrap = 1
@@ -61,28 +72,35 @@ BuildAggregatesNonKokkos (Phase - (Dirichlet))
 BuildAggregatesNonKokkos (Phase 1 (main))
 BuildAggregatesNonKokkos (Phase 2a (secondary))
 BuildAggregatesNonKokkos (Phase 2b (expansion))
-Nullspace factory (MueLu::NullspaceFactory)
+Nullspace factory (total, level=1) (MueLu::NullspaceFactory)
 Fine level nullspace = Nullspace
-Build (MueLu::CoarseMapFactory)
+Build (total, level=1) (MueLu::CoarseMapFactory)
 matrixmatrix: kernel params -> 
  [empty list]
-Constraint (MueLu::ConstraintFactory)
-Ppattern (MueLu::PatternFactory)
-Matrix filtering (MueLu::FilteredAFactory)
+Matrix filtering (total, level=1) (MueLu::FilteredAFactory)
 Filtered matrix is not being constructed as no filtering is being done
-[empty list]
-Number of emin iterations = 1
-GMRES iterations
+PrepareLeastSquaresSolveDirect (MueLu::DenseConstraint)
+Getting P from coarseLevel
+
+*******************************************************
+***** Belos Iterative Solver:  Pseudo Block Gmres 
+***** Maximum Iterations: 1
+***** Block Size: 1
+***** Residual Test: 
+*****   Test 1 : Belos::StatusTestImpResNorm<>: (2-Norm Res Vec) , tol = 1e-08
+*******************************************************
+Iter 0, [ 1] :    4.275004e+00
+Iter 1, [ 1] :    7.060568e-17
 emin: num iterations = 1
 emin: iterative method = gmres
-Transpose P (MueLu::TransPFactory)
+Transpose P (total, level=2) (MueLu::TransPFactory)
 matrixmatrix: kernel params -> 
  [empty list]
-Computing Ac (MueLu::RAPFactory)
+Computing Ac (total, level=2) (MueLu::RAPFactory)
 matrixmatrix: kernel params -> 
  [empty list]
 Max coarse size (<= 2000) achieved
-Setup Smoother (MueLu::Amesos2Smoother{type = <ignored>})
+Setup Smoother (total, level=2) (MueLu::Amesos2Smoother{type = <ignored>})
 presmoother -> 
  Amesos2 -> 
   [empty list]
@@ -91,18 +109,18 @@ presmoother ->
 ---                            Multigrid Summary                             ---
 --------------------------------------------------------------------------------
 Number of levels    = 3
-Operator complexity = 1.44
+Operator complexity = 0.00
 Smoother complexity = <ignored>
 Cycle type          = V
 
-level  rows  nnz    nnz/row  c ratio  procs
-  0  9999  29995  3.00                  1  
-  1  3333  9997   3.00     3.00         1  
-  2  1111  3331   3.00     3.00         1  
+level  rows    nnz  nnz/row  c ratio  procs
+  0    9999  29995     3.00               1
+  1    3333    N/A              3.00      1
+  2    1111   3331     3.00     3.00      1
 
 Smoother (level 0) both : "Ifpack2::Relaxation": {Initialized: true, Computed: true, Type: Symmetric Gauss-Seidel, sweeps: 1, damping factor: 1, Global matrix dimensions: [9999, 9999], Global nnz: 29995}
 
-Smoother (level 1) both : "Ifpack2::Relaxation": {Initialized: true, Computed: true, Type: Symmetric Gauss-Seidel, sweeps: 1, damping factor: 1, Global matrix dimensions: [3333, 3333], Global nnz: 9997}
+Smoother (level 1) both : "Ifpack2::Relaxation": {Initialized: true, Computed: true, Type: Symmetric Gauss-Seidel, sweeps: 1, damping factor: 1, Global matrix dimensions: [3333, 3333]}
 
 Smoother (level 2) pre  : <Direct> solver interface
 Smoother (level 2) post : no smoother

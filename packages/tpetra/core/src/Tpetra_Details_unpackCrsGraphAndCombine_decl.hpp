@@ -38,11 +38,13 @@
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace Teuchos {
 // Forward declaration of Array
-template<class T> class Array;
+template <class T>
+class Array;
 // Forward declaration of ArrayView
-template<class T> class ArrayView;
-} // namespace Teuchos
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+template <class T>
+class ArrayView;
+}  // namespace Teuchos
+#endif  // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace Tpetra {
 
@@ -92,7 +94,9 @@ namespace Details {
 ///
 /// \warning The allowed \c combineMode are:
 ///   ADD, REPLACE, and ABSMAX. INSERT is not allowed.
-//
+///
+/// \param numSameIDs [in] Number of IDs that are the same.
+///
 /// \warning This method is intended for expert developer use
 ///   only, and should never be called by user code.
 ///
@@ -101,12 +105,12 @@ namespace Details {
 /// copies back in to the Teuchos::ArrayView objects, if needed).  When
 /// CrsGraph migrates fully to adopting Kokkos::DualView objects for its storage
 /// of data, this procedure could be bypassed.
-template<class LO, class GO, class NT>
+template <class LO, class GO, class NT>
 size_t
 unpackAndCombineWithOwningPIDsCount(
-    const CrsGraph<LO, GO, NT> & sourceGraph,
-    const Teuchos::ArrayView<const LO> &importLIDs,
-    const Teuchos::ArrayView<const typename CrsGraph<LO,GO,NT>::packet_type> &imports,
+    const CrsGraph<LO, GO, NT>& sourceGraph,
+    const Teuchos::ArrayView<const LO>& importLIDs,
+    const Teuchos::ArrayView<const typename CrsGraph<LO, GO, NT>::packet_type>& imports,
     const Teuchos::ArrayView<const size_t>& numPacketsPerLID,
     size_t constantNumPackets,
     CombineMode combineMode,
@@ -128,12 +132,11 @@ unpackAndCombineWithOwningPIDsCount(
 /// Note: The TargetPids vector (on output) will contain owning PIDs
 /// for each entry in the graph, with the "-1 for local" for locally
 /// owned entries.
-template<class LO, class GO, class NT>
-void
-unpackAndCombineIntoCrsArrays(
-    const CrsGraph<LO, GO, NT> & sourceGraph,
+template <class LO, class GO, class NT>
+void unpackAndCombineIntoCrsArrays(
+    const CrsGraph<LO, GO, NT>& sourceGraph,
     const Teuchos::ArrayView<const LO>& importLIDs,
-    const Teuchos::ArrayView<const typename CrsGraph<LO,GO,NT>::packet_type>& imports,
+    const Teuchos::ArrayView<const typename CrsGraph<LO, GO, NT>::packet_type>& imports,
     const Teuchos::ArrayView<const size_t>& numPacketsPerLID,
     const size_t constantNumPackets,
     const CombineMode combineMode,
@@ -148,7 +151,7 @@ unpackAndCombineIntoCrsArrays(
     const Teuchos::ArrayView<const int>& SourcePids,
     Teuchos::Array<int>& TargetPids);
 
-} // namespace Details
-} // namespace Tpetra
+}  // namespace Details
+}  // namespace Tpetra
 
-#endif // TPETRA_DETAILS_UNPACKCRSGRAPHANDCOMBINE_DECL_HPP
+#endif  // TPETRA_DETAILS_UNPACKCRSGRAPHANDCOMBINE_DECL_HPP

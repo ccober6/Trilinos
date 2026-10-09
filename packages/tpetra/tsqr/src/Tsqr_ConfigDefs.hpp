@@ -16,6 +16,7 @@
 // Users should not include TpetraTSQR_config.h directly.
 // Include Tsqr_ConfigDefs.hpp instead.
 #include "TpetraTSQR_config.h"
+#include "Tsqr_DLLExportMacro.h"  // IWYU pragma: keep
 
 /// \namespace TSQR
 /// \brief Implementation of the Tall Skinny QR (TSQR) factorization.
@@ -39,22 +40,22 @@
 /// factorizations."  SIAM Journal on Scientific Computing, Volume 34,
 /// Issue 1, 2012.
 namespace TSQR {
-  //
-  // We declare the TSQR namespace here so that Doxygen will find it
-  // and pull in all its documentation.
-  //
+//
+// We declare the TSQR namespace here so that Doxygen will find it
+// and pull in all its documentation.
+//
 
-  /// \namespace TSQR::Test
-  /// \brief Accuracy and performance tests for TSQR.
-  ///
-  /// The classes and routines here are not intended for consumers of
-  /// TSQR, but may be helpful as examples.
-  namespace Test {
-    //
-    // We declare the TSQR::Test namespace here so that Doxygen will
-    // find it and pull in all its documentation.
-    //
-  } // namespace Test
-} // namespace TSQR
+/// \namespace TSQR::Test
+/// \brief Accuracy and performance tests for TSQR.
+///
+/// The classes and routines here are not intended for consumers of
+/// TSQR, but may be helpful as examples.
+namespace Test {
+//
+// We declare the TSQR::Test namespace here so that Doxygen will
+// find it and pull in all its documentation.
+//
+}  // namespace Test
+}  // namespace TSQR
 
-#endif // TSQR_CONFIGDEFS_HPP
+#endif  // TSQR_CONFIGDEFS_HPP

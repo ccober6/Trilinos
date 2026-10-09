@@ -111,6 +111,16 @@ using TopologyErrorHandler = std::function<void(stk::mesh::Part &part)>;
 stk::mesh::EntityRank get_entity_rank(const Ioss::GroupingEntity *entity,
                                       const stk::mesh::MetaData &meta);
 
+bool should_use_all_face_sides(const Ioss::EntityBlock* entity);
+
+bool should_use_all_face_sides(const Ioss::SideBlock* block);
+
+int get_max_par_dimension(const Ioss::SideBlock* block);
+
+int get_max_par_dimension(const Ioss::SideSet* sset);
+
+stk::mesh::EntityRank get_side_rank(const Ioss::SideBlock *block);                                      
+
 struct GlobalAnyVariable {
   GlobalAnyVariable(const std::string &name, const std::any *value, stk::util::ParameterType::Type type)
     : m_name(name), m_value(value), m_type(type)
@@ -581,6 +591,7 @@ void set_field_output_variable_type(stk::mesh::FieldBase & field, const Ioss::Va
 const Ioss::VariableType * get_field_output_variable_type(const stk::mesh::FieldBase & field);
 
 std::vector<std::string> get_assembly_names(const stk::mesh::MetaData& meta);
+std::vector<const stk::mesh::Part*> get_surface_assemblies(const stk::mesh::MetaData& meta);
 
 std::vector<std::string> get_sub_assembly_names(const stk::mesh::MetaData& meta, const std::string& assemblyName);
 
@@ -599,7 +610,11 @@ size_t db_api_int_size(const Ioss::GroupingEntity *entity);
 
 void initialize_spatial_dimension(mesh::MetaData &meta, size_t spatial_dimension, const std::vector<std::string> &entity_rank_names);
 
-Ioss::DatabaseIO *create_database_for_subdomain(const std::string &baseFilename, int index_subdomain, int num_subdomains, bool use64Bit = false);
+Ioss::DatabaseIO *create_database_for_subdomain(const std::string &baseFilename,
+                                                int index_subdomain,
+                                                int num_subdomains,
+                                                bool use64Bit = false,
+                                                Ioss::DatabaseUsage databaseUsage = Ioss::WRITE_RESULTS);
 
 void add_properties_for_subdomain(stk::io::OutputParams& params, int index_subdomain,
                                   int num_subdomains, int global_num_nodes, int global_num_elems);
@@ -659,10 +674,13 @@ void fill_data_for_side_block( OutputParams &params,
                                stk::mesh::EntityVector &sides)
 {
     STK_ThrowRequireMsg(io.type() == Ioss::SIDEBLOCK, "Input GroupingEntity must be of type Ioss::SIDEBLOCK");
+    Ioss::SideBlock* sb = dynamic_cast<Ioss::SideBlock*>(&io);
 
-    bool useShellAllFaceSides = io.get_database()->get_region()->property_exists("ENABLE_ALL_FACE_SIDES_SHELL");
+    // Ideally this would be should_use_all_face_sides(sb->parent_block()), but sb->parent_block() can return
+    // the nullptr sometimes
+    bool useShellAllFaceSides = element_topology->is_shell() && io.get_database()->get_region()->property_exists("ENABLE_ALL_FACE_SIDES_SHELL");    
     stk::topology stk_elem_topology = map_ioss_topology_to_stk(element_topology, params.bulk_data().mesh_meta_data().spatial_dimension(), useShellAllFaceSides);
-
+ 
     const stk::mesh::Part *parentElementBlock = get_parent_element_block(params.bulk_data(), params.io_region(), part->name());
 
     if(nullptr == parentElementBlock) {
@@ -672,7 +690,6 @@ void fill_data_for_side_block( OutputParams &params,
     // An offset required to translate Ioss's interpretation of shell ordinals 
     INT sideOrdOffset = 0;
     if(io.type() == Ioss::SIDEBLOCK) {
-      Ioss::SideBlock* sb = dynamic_cast<Ioss::SideBlock*>(&io);
       sideOrdOffset = get_side_offset(sb);
     }
     

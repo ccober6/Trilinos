@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSSPARSE_SORTCRS_IMPL_HPP
 #define KOKKOSSPARSE_SORTCRS_IMPL_HPP
 
@@ -20,16 +7,55 @@
 #include "Kokkos_Sort.hpp"
 #include "KokkosKernels_Sorting.hpp"
 
-// Workaround for issue with Kokkos::Experimental::sort_by_key, with nvcc and OpenMP enabled
-// (Kokkos issue #7036, fixed in 4.4 release)
-// Once support for Kokkos < 4.4 is dropped,
-// all code inside "ifdef KK_DISABLE_BULK_SORT_BY_KEY" can be deleted.
-#if (KOKKOS_VERSION < 40400) && defined(KOKKOS_ENABLE_CUDA)
-#define KK_DISABLE_BULK_SORT_BY_KEY
-#endif
-
 namespace KokkosSparse {
 namespace Impl {
+
+template <typename rowmap_t, typename entries_t, typename values_t, bool permute_values_array>
+struct MatrixShellSortFunctor {
+  typedef typename entries_t::non_const_value_type ordinal_type;
+  typedef typename values_t::non_const_value_type scalar_type;
+
+  MatrixShellSortFunctor(const rowmap_t& ptr, const entries_t& ind, const values_t& val)
+      : ptr_(ptr), ind_(ind), val_(val) {
+    static_assert(std::is_signed<ordinal_type>::value,
+                  "The type of each "
+                  "column index -- that is, the type of each entry of ind "
+                  "-- must be signed in order for this functor to work.");
+  }
+
+  KOKKOS_FUNCTION void operator()(const size_t i) const {
+    const size_t start   = ptr_(i);
+    const ordinal_type n = static_cast<ordinal_type>(ptr_(i + 1) - start);
+    ordinal_type m       = 1;
+    while (m < n) m = m * 3 + 1;
+    m /= 3;
+
+    while (m > 0) {
+      ordinal_type max = n - m;
+      for (ordinal_type j = 0; j < max; j++) {
+        for (ordinal_type k = j; k >= 0; k -= m) {
+          const size_t sk = start + k;
+          if (ind_(sk + m) >= ind_(sk)) {
+            break;
+          }
+          if constexpr (permute_values_array) {
+            const scalar_type dtemp = val_(sk + m);
+            val_(sk + m)            = val_(sk);
+            val_(sk)                = dtemp;
+          }
+          const ordinal_type itemp = ind_(sk + m);
+          ind_(sk + m)             = ind_(sk);
+          ind_(sk)                 = itemp;
+        }
+      }
+      m = m / 3;
+    }
+  }
+
+  rowmap_t ptr_;
+  entries_t ind_;
+  values_t val_;
+};
 
 template <typename rowmap_t, typename entries_t, typename values_t>
 struct MatrixRadixSortFunctor {
@@ -86,6 +112,62 @@ struct MatrixThreadSortFunctor {
   rowmap_t rowmap;
   entries_t entries;
   values_t values;
+};
+
+template <typename rowmap_t, typename entries_t>
+struct GraphShellSortFunctor {
+  typedef typename entries_t::non_const_value_type ordinal_type;
+
+  GraphShellSortFunctor(const rowmap_t& ptr, const entries_t& ind) : ptr_(ptr), ind_(ind) {
+    static_assert(std::is_signed<ordinal_type>::value,
+                  "The type of each "
+                  "column index -- that is, the type of each entry of ind "
+                  "-- must be signed in order for this functor to work.");
+  }
+
+  KOKKOS_FUNCTION void operator()(const size_t i) const {
+    const size_t start = ptr_(i);
+
+    const ordinal_type n = static_cast<ordinal_type>(ptr_(i + 1) - start);
+    ordinal_type m       = 1;
+    while (m < n) m = m * 3 + 1;
+    m /= 3;
+
+    while (m > 0) {
+      ordinal_type max = n - m;
+      for (ordinal_type j = 0; j < max; j++) {
+        for (ordinal_type k = j; k >= 0; k -= m) {
+          const size_t sk = start + k;
+          if (ind_(sk + m) >= ind_(sk)) {
+            break;
+          }
+          const ordinal_type itemp = ind_(sk + m);
+          ind_(sk + m)             = ind_(sk);
+          ind_(sk)                 = itemp;
+        }
+      }
+      m = m / 3;
+    }
+  }
+
+  rowmap_t ptr_;
+  entries_t ind_;
+};
+
+template <typename rowmap_t, typename entries_t>
+struct GraphStdSortFunctor {
+  typedef typename entries_t::non_const_value_type ordinal_type;
+
+  GraphStdSortFunctor(const rowmap_t& ptr, const entries_t& ind) : ptr_(ptr), ind_(ind) {}
+
+  void operator()(const size_t i) const {
+    const size_t start = ptr_(i);
+    const size_t end   = ptr_(i + 1);
+    std::sort(ind_.data() + start, ind_.data() + end);
+  }
+
+  rowmap_t ptr_;
+  entries_t ind_;
 };
 
 template <typename rowmap_t, typename entries_t>
@@ -314,7 +396,6 @@ Kokkos::View<uint64_t*, ExecSpace> generateBulkCrsKeys(const ExecSpace& exec, co
   return keys;
 }
 
-#ifndef KK_DISABLE_BULK_SORT_BY_KEY
 template <typename ExecSpace, typename Rowmap, typename Entries>
 Kokkos::View<typename Rowmap::non_const_value_type*, ExecSpace> computeEntryPermutation(
     const ExecSpace& exec, const Rowmap& rowmap, const Entries& entries, typename Entries::non_const_value_type ncols) {
@@ -356,7 +437,6 @@ bool useBulkSortHeuristic(Ordinal avgDeg, Ordinal maxDeg) {
     return (maxDeg / 10 > avgDeg) || (maxDeg > 1024);
   }
 }
-#endif
 
 template <typename ExecSpace, typename Permutation, typename InView, typename OutView>
 void applyPermutation(const ExecSpace& exec, const Permutation& permutation, const InView& in, const OutView& out) {

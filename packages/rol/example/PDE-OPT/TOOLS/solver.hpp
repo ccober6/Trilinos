@@ -15,7 +15,7 @@
 #ifndef ROL_PDEOPT_SOLVER_H
 #define ROL_PDEOPT_SOLVER_H
 
-#include "Teuchos_GlobalMPISession.hpp"
+#include "ROL_GlobalMPISession.hpp"
 #include "Teuchos_TimeMonitor.hpp"
 
 #include "Tpetra_MultiVector.hpp"
@@ -26,6 +26,9 @@
 #include "Tpetra_RowMatrixTransposer.hpp"
 #include "TpetraExt_MatrixMatrix.hpp"
 #include "MatrixMarket_Tpetra.hpp"
+
+#include "BelosBlockGmresSolMgr.hpp"
+#include "BelosLinearProblem.hpp"
 
 #include "ROL_Ptr.hpp"
 
@@ -41,11 +44,6 @@ namespace MueLu {
 
 namespace Ifpack2 {
   template <typename tSC, typename tLO, typename tGO, typename tNO> class Preconditioner;
-}
-
-namespace Belos {
-  template <typename tSC, typename tMV, typename tOP> class BlockGmresSolMgr;
-  template <typename tSC, typename tMV, typename tOP> class LinearProblem;
 }
 
 

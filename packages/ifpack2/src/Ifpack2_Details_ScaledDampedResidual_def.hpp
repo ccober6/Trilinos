@@ -16,7 +16,7 @@
 #include "Tpetra_Vector.hpp"
 #include "Tpetra_Export_decl.hpp"
 #include "Tpetra_Import_decl.hpp"
-#include "Kokkos_ArithTraits.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "Teuchos_Assert.hpp"
 #include <type_traits>
 #include "KokkosSparse_spmv_impl.hpp"
@@ -51,7 +51,7 @@ struct ScaledDampedResidualVectorFunctor {
   using value_type      = typename AMatrix::non_const_value_type;
   using team_policy     = typename Kokkos::TeamPolicy<execution_space>;
   using team_member     = typename team_policy::member_type;
-  using ATV             = Kokkos::ArithTraits<value_type>;
+  using ATV             = KokkosKernels::ArithTraits<value_type>;
 
   const Scalar alpha;
   WVector m_w;
@@ -91,7 +91,7 @@ struct ScaledDampedResidualVectorFunctor {
   KOKKOS_INLINE_FUNCTION
   void operator()(const team_member& dev) const {
     using residual_value_type = typename BVector::non_const_value_type;
-    using KAT                 = Kokkos::ArithTraits<residual_value_type>;
+    using KAT                 = KokkosKernels::ArithTraits<residual_value_type>;
 
     Kokkos::parallel_for(Kokkos::TeamThreadRange(dev, 0, rows_per_team),
                          [&](const LO& loop) {
@@ -177,9 +177,9 @@ scaled_damped_residual_vector(const Scalar& alpha,
   using b_vec_type  = typename BVector::const_type;
   using matrix_type = AMatrix;
   using x_vec_type  = typename XVector::const_type;
-  using scalar_type = typename Kokkos::ArithTraits<Scalar>::val_type;
+  using scalar_type = typename KokkosKernels::ArithTraits<Scalar>::val_type;
 
-  if (beta == Kokkos::ArithTraits<Scalar>::zero()) {
+  if (beta == KokkosKernels::ArithTraits<Scalar>::zero()) {
     constexpr bool use_beta = false;
     using functor_type =
         ScaledDampedResidualVectorFunctor<w_vec_type, d_vec_type,

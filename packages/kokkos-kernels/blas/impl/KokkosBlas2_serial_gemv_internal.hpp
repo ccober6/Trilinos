@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSBLAS_GEMV_SERIAL_INTERNAL_HPP
 #define KOKKOSBLAS_GEMV_SERIAL_INTERNAL_HPP
 
@@ -95,8 +82,6 @@ KOKKOS_INLINE_FUNCTION int SerialGemvInternal<Algo::Gemv::Blocked>::invoke(
   // y = beta y + alpha A x
   // y (m), A(m x n), B(n)
 
-  constexpr int mbAlgo = Algo::Gemv::Blocked::mb();
-
   if (beta == zero)
     Impl::SerialSetInternal::invoke(m, zero, y, ys0);
   else if (beta != one)
@@ -105,10 +90,15 @@ KOKKOS_INLINE_FUNCTION int SerialGemvInternal<Algo::Gemv::Blocked>::invoke(
   if (alpha != zero) {
     if (m <= 0 || n <= 0) return 0;
 
-    Impl::InnerMultipleDotProduct<mbAlgo> inner(as0, as1, xs0, ys0);
-    const int mb = mbAlgo;
-    for (int i = 0; i < m; i += mb)
-      inner.serial_invoke<OpA>(alpha, A + i * as0, x, (i + mb) > m ? (m - i) : mb, n, y + i * ys0);
+    auto host_or_device = [&](auto tag) {
+      constexpr int mbAlgo = Algo::Gemv::Blocked::Impl::mb<decltype(tag)>();
+      Impl::InnerMultipleDotProduct<mbAlgo> inner(as0, as1, xs0, ys0);
+      const int mb = mbAlgo;
+      for (int i = 0; i < m; i += mb)
+        inner.template serial_invoke<OpA>(alpha, A + i * as0, x, (i + mb) > m ? (m - i) : mb, n, y + i * ys0);
+    };
+    KOKKOS_IF_ON_HOST((host_or_device(Algo::Gemv::Blocked::Impl::Host{});))
+    KOKKOS_IF_ON_DEVICE((host_or_device(Algo::Gemv::Blocked::Impl::Device{});))
   }
   return 0;
 }

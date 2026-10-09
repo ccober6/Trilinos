@@ -66,10 +66,10 @@ namespace FROSch {
 
         // BasisMapUnique - First, we check if any of the unassembled unique maps is null. In case, we re-build a unique map
         bool buildUniqueMap = false;
-        UN i=0;
-        while (!buildUniqueMap && i<UnassembledBasesMapsUnique_.size()) {
-            buildUniqueMap = UnassembledBasesMapsUnique_[i].is_null();
-            i++;
+        UN ii=0;
+        while (!buildUniqueMap && ii<UnassembledBasesMapsUnique_.size()) {
+            buildUniqueMap = UnassembledBasesMapsUnique_[ii].is_null();
+            ii++;
         }
         int buildUniqueMapMax = 0;
         reduceAll(*this->MpiComm_,REDUCE_MAX,int(buildUniqueMap),ptr(&buildUniqueMapMax));
@@ -82,6 +82,7 @@ namespace FROSch {
         }
         FROSCH_ASSERT(AssembledBasisMap_->getMaxAllGlobalIndex()==AssembledBasisMapUnique_->getMaxAllGlobalIndex(),"FROSch::CoarseSpace: AssembledBasisMap_->getMaxAllGlobalIndex()!=AssembledBasisMapUnique_->getMaxAllGlobalIndex()");
         FROSCH_ASSERT(AssembledBasisMap_->getMinAllGlobalIndex()==AssembledBasisMapUnique_->getMinAllGlobalIndex(),"FROSch::CoarseSpace: AssembledBasisMap_->getMinAllGlobalIndex()!=AssembledBasisMapUnique_->getMinAllGlobalIndex()");
+        FROSCH_ASSERT(GO(AssembledBasisMapUnique_->getGlobalNumElements())>0,"FROSch::CoarseSpace: No basis function found for AssembledBasisMapUnique");
         FROSCH_ASSERT(GO(AssembledBasisMapUnique_->getGlobalNumElements())==GO(AssembledBasisMapUnique_->getMaxAllGlobalIndex()+1),"FROSch::CoarseSpace: AssembledBasisMapUnique_->getGlobalNumElements()!=(AssembledBasisMapUnique_->getMaxAllGlobalIndex()+1)");
 
         // Basis
@@ -94,7 +95,6 @@ namespace FROSch {
                 XMapPtr serialMap = MapFactory<LO,GO,NO>::Build(AssembledBasisMap_->lib(),totalSize,0,this->SerialComm_);
 
                 AssembledBasis_ = MultiVectorFactory<SC,LO,GO,NO >::Build(serialMap,AssembledBasisMap_->getLocalNumElements());
-                #if defined(HAVE_XPETRA_TPETRA)
                 if (AssembledBasis_->getMap()->lib() == UseTpetra) {
                     using execution_space = typename XMap::local_map_type::execution_space;
                     // Xpetra wrapper for Tpetra MV
@@ -105,14 +105,14 @@ namespace FROSch {
                     auto assembledView = assembledTpetraMVector->getLocalViewDevice(Tpetra::Access::ReadWrite);
                     auto assembledCols = Tpetra::getMultiVectorWhichVectors(*  assembledTpetraMVector);
 
-                    UN itmp = 0;
+                    UN itmp2 = 0;
                     for (UN i=0; i<UnassembledSubspaceBases_.size(); i++) {
                         if (!UnassembledSubspaceBases_[i].is_null()) {
                             const UN Offset_i = Offsets_[i];
                             const UN NumVectors_i = UnassembledSubspaceBases_[i]->getNumVectors();
                             const UN LocalLength_i = UnassembledSubspaceBases_[i]->getLocalLength();
 
-                            FROSCH_ASSERT(NumVectors_i+itmp <= AssembledBasis_->getNumVectors(),"FROSch::CoarseSpace: NumVectors_i+itmp <= AssembledBasis_->getNumVectors()");
+                            FROSCH_ASSERT(NumVectors_i+itmp2 <= AssembledBasis_->getNumVectors(),"FROSch::CoarseSpace: NumVectors_i+itmp <= AssembledBasis_->getNumVectors()");
                             FROSCH_ASSERT(LocalLength_i+Offsets_[i] <= AssembledBasis_->getLocalLength(),"FROSch::CoarseSpace: LocalLength_i+Offsets_[i] <= AssembledBasis_");
 
                             Kokkos::RangePolicy<execution_space> policy (0, LocalLength_i);
@@ -125,19 +125,18 @@ namespace FROSch {
                             auto unassembledCols = Tpetra::getMultiVectorWhichVectors(*unassembledTpetraMVector);
                             for (UN j=0; j < NumVectors_i; j++) {
                                 int col_in  = unassembledTpetraMVector->isConstantStride() ? j      : unassembledCols[j];
-                                int col_out =   assembledTpetraMVector->isConstantStride() ? j+itmp :   assembledCols[j+itmp];
+                                int col_out =   assembledTpetraMVector->isConstantStride() ? j+itmp2 :   assembledCols[j+itmp2];
                                 Kokkos::parallel_for(
                                     "FROSch_CoarseSpace::assembleCoarseSpace", policy,
                                     KOKKOS_LAMBDA(const UN k) {
                                         assembledView(k+Offset_i, col_out) = unassembledView(k, col_in);
                                     });
                             }
-                            itmp += NumVectors_i;
+                            itmp2 += NumVectors_i;
                         }
                     }
                     Kokkos::fence();
                 } else
-                #endif
                 {
                     for (UN i=0; i<UnassembledSubspaceBases_.size(); i++) {
                         if (!UnassembledSubspaceBases_[i].is_null()) {
@@ -185,7 +184,6 @@ namespace FROSch {
         FROSCH_ASSERT(!AssembledBasisMap_.is_null(),"FROSch::CoarseSpace: AssembledBasisMap_.is_null().");
         FROSCH_ASSERT(!AssembledBasis_.is_null(),"FROSch::CoarseSpace: AssembledBasis_.is_null().");
 
-#if defined(HAVE_XPETRA_TPETRA)
         if (rowMap->lib() == UseTpetra) {
             UN numRows = AssembledBasis_->getLocalLength();
             UN numCols = AssembledBasis_->getNumVectors();
@@ -202,7 +200,7 @@ namespace FROSch {
 
             auto repeatedLocalMap = repeatedMap->getLocalMap();
             auto rowLocalMap = rowMap->getLocalMap();
-            auto AssembledBasisView = AssembledBasis_->getLocalViewDevice(Access::ReadOnly);
+            auto AssembledBasisView = AssembledBasis_->getLocalViewDevice(Tpetra::Access::ReadOnly);
 
             // count number of nonzeros per row
             UN numLocalRows = rowMap->getLocalNumElements();
@@ -232,11 +230,10 @@ namespace FROSch {
             Kokkos::fence();
 
             // make it into offsets
-#if KOKKOSKERNELS_VERSION >= 40199
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
-              (1+numLocalRows, Rowptr);
+#if KOKKOSKERNELS_VERSION >= 50299
+            KokkosKernels::inclusive_parallel_prefix_sum(execution_space(), Rowptr);
 #else
-            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<rowptr_type, execution_space>
+            KokkosKernels::Impl::kk_inclusive_parallel_prefix_sum<execution_space>
               (1+numLocalRows, Rowptr);
 #endif
 
@@ -276,29 +273,8 @@ namespace FROSch {
                                                                    AssembledBasisMapUnique_, rangeMap,
                                                                    params);
         } else
-#endif
         {
-            if (rowMap->lib()==UseEpetra) {
-                GlobalBasisMatrix_ = MatrixFactory<SC,LO,GO,NO>::Build(rowMap,AssembledBasisMap_->getLocalNumElements()); // Nonzeroes abhängig von dim/dofs!!!
-                LO iD;
-                SC valueTmp;
-                for (UN i=0; i<AssembledBasis_->getLocalLength(); i++) {
-                    GOVec indices;
-                    SCVec values;
-                    for (UN j=0; j<AssembledBasis_->getNumVectors(); j++) {
-                        valueTmp=AssembledBasis_->getData(j)[i];
-                        if (fabs(valueTmp)>tresholdDropping) {
-                            indices.push_back(AssembledBasisMap_->getGlobalElement(j));
-                            values.push_back(valueTmp);
-                        }
-                    }
-                    iD = repeatedMap->getGlobalElement(i);
-
-                    if (rowMap->getLocalElement(iD)!=-1) { // This should prevent duplicate entries on the interface
-                        GlobalBasisMatrix_->insertGlobalValues(iD,indices(),values());
-                    }
-                }
-            } else {
+            {
                 GlobalBasisMatrix_ = MatrixFactory<SC,LO,GO,NO>::Build(rowMap,AssembledBasisMap_,AssembledBasisMap_->getLocalNumElements()); // Nonzeroes abhängig von dim/dofs!!!
                 LO iD;
                 SC valueTmp;

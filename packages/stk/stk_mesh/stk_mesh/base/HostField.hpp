@@ -39,7 +39,6 @@
 #include "stk_mesh/base/Ngp.hpp"
 #include "stk_mesh/base/NgpFieldBase.hpp"
 #include "stk_mesh/base/BulkData.hpp"
-#include "stk_mesh/base/Field.hpp"
 #include "stk_mesh/base/FieldData.hpp"
 #include "stk_mesh/base/Types.hpp"
 #include "stk_mesh/base/NgpForEachEntity.hpp"
@@ -47,7 +46,6 @@
 #include "stk_mesh/base/NgpProfilingBlock.hpp"
 #include "stk_mesh/base/NgpUtils.hpp"
 #include "stk_mesh/base/EntityFieldData.hpp"
-#include "stk_mesh/baseImpl/NgpFieldAux.hpp"
 
 namespace stk {
 namespace mesh {
@@ -166,7 +164,7 @@ class HostField : public NgpFieldBase
   void set_all(const HostMesh& ngpMesh, const T& value)
   {
 #ifdef STK_UNIFIED_MEMORY  // Layout::Left
-    auto fieldData = m_hostField->data<T, Unsynchronized, stk::ngp::HostMemSpace, Layout::Left>();
+    auto fieldData = m_hostField->data<T, Unsynchronized, stk::ngp::HostSpace, Layout::Left>();
     stk::mesh::for_each_entity_run(ngpMesh, m_hostField->entity_rank(), *m_hostField,
       [&](const FastMeshIndex& entity) {
         auto entityValues = fieldData.entity_values(entity);
@@ -176,7 +174,7 @@ class HostField : public NgpFieldBase
       }
     );
 #else  // Layout::Right
-    auto fieldData = m_hostField->data<T, Unsynchronized, stk::ngp::HostMemSpace, Layout::Right>();
+    auto fieldData = m_hostField->data<T, Unsynchronized, stk::ngp::HostSpace, Layout::Right>();
     stk::mesh::for_each_entity_run(ngpMesh, m_hostField->entity_rank(), *m_hostField,
       [&](const FastMeshIndex& entity) {
         auto entityValues = fieldData.entity_values(entity);
@@ -244,8 +242,6 @@ class HostField : public NgpFieldBase
   {
     sync_to_device(execSpace);
   }
-
-  size_t synchronized_count() const override { return m_hostField->synchronized_count(); }
 
   FieldState state() const { return m_hostField->state(); }
 

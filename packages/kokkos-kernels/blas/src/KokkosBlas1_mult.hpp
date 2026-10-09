@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSBLAS1_MULT_HPP_
 #define KOKKOSBLAS1_MULT_HPP_
@@ -71,12 +58,21 @@ void mult(const execution_space& space, typename YMV::const_value_type& gamma, c
   static_assert(AV::rank == 1, "KokkosBlas::mult: A must have rank 1.");
 
   // Check compatibility of dimensions at run time.
-  if (Y.extent(0) != A.extent(0) || Y.extent(0) != X.extent(0) || Y.extent(1) != X.extent(1)) {
-    std::ostringstream os;
-    os << "KokkosBlas::mult: Dimensions do not match: "
-       << "Y: " << Y.extent(0) << " x " << Y.extent(1) << ", A: " << A.extent(0) << " x " << A.extent(0)
-       << ", X: " << X.extent(0) << " x " << X.extent(1);
-    KokkosKernels::Impl::throw_runtime_exception(os.str());
+  if constexpr (XMV::rank == 1 && YMV::rank == 1) {
+    if (Y.extent(0) != A.extent(0) || Y.extent(0) != X.extent(0)) {
+      std::ostringstream os;
+      os << "KokkosBlas::mult: Dimensions do not match: "
+         << "Y: " << Y.extent(0) << " x " << Y.extent(1) << ", A: " << A.extent(0) << ", X: " << X.extent(0);
+      KokkosKernels::Impl::throw_runtime_exception(os.str());
+    }
+  } else if constexpr (XMV::rank == 2 && YMV::rank == 2) {
+    if (Y.extent(0) != A.extent(0) || Y.extent(0) != X.extent(0) || Y.extent(1) != X.extent(1)) {
+      std::ostringstream os;
+      os << "KokkosBlas::mult: Dimensions do not match: "
+         << "Y: " << Y.extent(0) << " x " << Y.extent(1) << ", A: " << A.extent(0) << " x " << A.extent(0)
+         << ", X: " << X.extent(0) << " x " << X.extent(1);
+      KokkosKernels::Impl::throw_runtime_exception(os.str());
+    }
   }
 
   using YUnifiedLayout = typename KokkosKernels::Impl::GetUnifiedLayout<YMV>::array_layout;

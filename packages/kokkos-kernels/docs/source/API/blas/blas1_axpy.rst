@@ -11,14 +11,23 @@ Defined in header: :code:`KokkosBlas1_axpby.hpp`
   template <class AV, class XMV, class YMV>
   void axpy(const AV& a, const XMV& X, const YMV& Y)
 
-Add entries of :code:`X` scaled by coeffecient :code:`a` to entries of :code:`Y`: ``Y += a*X``
+Add entries of :code:`X` scaled by coefficient :code:`a` to entries of :code:`Y`: ``Y += a*X``
 
 1. iterate over the entries of ``Y`` and add the corresponding entries of ``X`` scaled by ``a`` using the resources of ``space``
 2. iterate over the entries of ``Y`` and add the corresponding entries of ``X`` scaled by ``a`` using the resources of the default instance of ``typename XMV::execution_space``
 
+``a`` may each be any of the following:
+  - a scalar value
+  - a rank-0 host-accessible ``Kokkos::View``
+  - a rank-0 device-accessible ``Kokkos::View``
+  - a rank-1 device-accessible ``Kokkos::View`` with extent 1 (the coefficient will be applied to all columns)
+  - a rank-1 device-accessible ``Kokkos::View`` with extent ``Y.extent(1)`` (one coefficient per column)
+
 The function will throw a runtime exception if any of the following conditions are **not** met:
   - ``Y.extent(0) == X.extent(0) && Y.extent(1) == X.extent(1)``
-  - ``Kokkos::is_view_v<AV> && (a.extent(0) == 1 || a.extent(0) == X.extent(1)``
+
+If ``a`` is a rank-1 ``View``:
+  - ``a.extent(0) != 1 && a.extent(0) != X.extent(1)``
 
 Parameters
 ==========
@@ -44,41 +53,19 @@ Type Requirements
   - ``std::is_same_v<typename YMV::value_type, typename YMV::non_const_value_type> == true``
   - ``Kokkos::SpaceAccessibility<execution_space, typename YMV::memory_space>::accessible == true``
 
-- `AV` must be a scalar or a Kokkos `View <https://kokkos.org/kokkos-core-wiki/API/core/view/view.html>`_ that satisfies
+- `AV` must be a scalar or a Kokkos `View <https://kokkos.org/kokkos-core-wiki/API/core/view/view.html>`_ that satisfies one of the following:
 
-  - ``(AV::rank == XMV::rank - 1) || (AV::rank == 0)``
-  - ``Kokkos::SpaceAccessibility<execution_space, typename YMV::memory_space>::accessible == true``
+  - ``AV::rank == 0`` 
+  - ``AV::rank == 1 && Kokkos::SpaceAccessibility<execution_space, typename YMV::memory_space>::accessible``
 
 Example
 =======
 
-.. code:: c++
+.. literalinclude:: ../../../../example/wiki/blas/KokkosBlas1_wiki_axpy.cpp
+  :language: c++
 
-  #include<Kokkos_Core.hpp>
-  #include<KokkosBlas1_axpby.hpp>
+output:
 
-  int main(int argc, char* argv[]) {
-    Kokkos::initialize();
-    {
+.. code::
 
-      int N = atoi(argv[1]);
-
-      Kokkos::View<double*> x("X",N);
-      Kokkos::View<double*> y("Y",N);
-      Kokkos::deep_copy(x,3.0);
-      Kokkos::deep_copy(y,2.0);
-
-      double alpha = 1.5;
-
-      KokkosBlas::axpy(alpha,x,y);
-
-      double sum = 0.0;
-      Kokkos::parallel_reduce("CheckValue", N, KOKKOS_LAMBDA (const int& i, double& lsum) {
-        lsum += y(i);
-      },sum);
-
-      printf("Sum: %lf Expected: %lf Diff: %e\n",sum,1.0*N*(2.0+1.5*3.0),sum-1.0*N);
-    }
-
-    Kokkos::finalize();
-  }
+  Sum: 65, Expected: 65, Diff: 0

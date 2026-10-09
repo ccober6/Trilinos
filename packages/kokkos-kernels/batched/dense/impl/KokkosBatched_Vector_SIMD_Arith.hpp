@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSBATCHED_VECTOR_SIMD_ARITH_HPP
 #define KOKKOSBATCHED_VECTOR_SIMD_ARITH_HPP
 
@@ -105,7 +92,7 @@ static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(float, 4) operator+(const Vector<SIM
 KOKKOS_FORCEINLINE_FUNCTION
 static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(double, 4) operator+(const Vector<SIMD<double>, 4> &a,
                                                                  const Vector<SIMD<double>, 4> &b) {
-  double4 r_val;
+  KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(double, 4)::data_type r_val;
   r_val.x = a.double4().x + b.double4().x;
   r_val.y = a.double4().y + b.double4().y;
   r_val.z = a.double4().z + b.double4().z;
@@ -146,14 +133,14 @@ KOKKOS_FORCEINLINE_FUNCTION static KOKKOSKERNELS_SIMD_ARITH_RETURN_REFERENCE_TYP
 template <typename T, int l>
 KOKKOS_FORCEINLINE_FUNCTION static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(T, l) operator++(Vector<SIMD<T>, l> &a, int) {
   Vector<SIMD<T>, l> a0 = a;
-  a                     = a + typename Kokkos::ArithTraits<T>::mag_type(1);
+  a                     = a + typename KokkosKernels::ArithTraits<T>::mag_type(1);
   return a0;
 }
 
 template <typename T, int l>
 KOKKOS_FORCEINLINE_FUNCTION static KOKKOSKERNELS_SIMD_ARITH_RETURN_REFERENCE_TYPE(T, l) operator++(
     Vector<SIMD<T>, l> &a) {
-  a = a + typename Kokkos::ArithTraits<T>::mag_type(1);
+  a = a + typename KokkosKernels::ArithTraits<T>::mag_type(1);
   return a;
 }
 
@@ -281,7 +268,7 @@ static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(float, 4) operator-(const Vector<SIM
 KOKKOS_FORCEINLINE_FUNCTION
 static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(double, 4) operator-(const Vector<SIMD<double>, 4> &a,
                                                                  const Vector<SIMD<double>, 4> &b) {
-  double4 r_val;
+  KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(double, 4)::data_type r_val;
   r_val.x = a.double4().x - b.double4().x;
   r_val.y = a.double4().y - b.double4().y;
   r_val.z = a.double4().z - b.double4().z;
@@ -333,14 +320,14 @@ KOKKOS_FORCEINLINE_FUNCTION static KOKKOSKERNELS_SIMD_ARITH_RETURN_REFERENCE_TYP
 template <typename T, int l>
 KOKKOS_FORCEINLINE_FUNCTION static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(T, l) operator--(Vector<SIMD<T>, l> &a, int) {
   Vector<SIMD<T>, l> a0 = a;
-  a                     = a - typename Kokkos::ArithTraits<T>::mag_type(1);
+  a                     = a - typename KokkosKernels::ArithTraits<T>::mag_type(1);
   return a0;
 }
 
 template <typename T, int l>
 KOKKOS_FORCEINLINE_FUNCTION static KOKKOSKERNELS_SIMD_ARITH_RETURN_REFERENCE_TYPE(T, l) operator--(
     Vector<SIMD<T>, l> &a) {
-  a = a - typename Kokkos::ArithTraits<T>::mag_type(1);
+  a = a - typename KokkosKernels::ArithTraits<T>::mag_type(1);
   return a;
 }
 
@@ -487,7 +474,7 @@ static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(float, 4) operator*(const Vector<SIM
 KOKKOS_FORCEINLINE_FUNCTION
 static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(double, 4) operator*(const Vector<SIMD<double>, 4> &a,
                                                                  const Vector<SIMD<double>, 4> &b) {
-  double4 r_val;
+  KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(double, 4)::data_type r_val;
   r_val.x = a.double4().x * b.double4().x;
   r_val.y = a.double4().y * b.double4().y;
   r_val.z = a.double4().z * b.double4().z;
@@ -729,7 +716,7 @@ static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(float, 4) operator/(const Vector<SIM
 KOKKOS_FORCEINLINE_FUNCTION
 static KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(double, 4) operator/(const Vector<SIMD<double>, 4> &a,
                                                                  const Vector<SIMD<double>, 4> &b) {
-  double4 r_val;
+  KOKKOSKERNELS_SIMD_ARITH_RETURN_TYPE(double, 4)::data_type r_val;
   r_val.x = a.double4().x / b.double4().x;
   r_val.y = a.double4().y / b.double4().y;
   r_val.z = a.double4().z / b.double4().z;

@@ -57,7 +57,8 @@ void filter_refinement_marker(const RefinementManager & refinement, const stk::m
 void perform_multilevel_adaptivity(RefinementManager & refinement,
     stk::mesh::BulkData & mesh,
     const std::function<void(int)> & marker_function,
-    const stk::mesh::Selector & do_not_refine_selector)
+    const stk::mesh::Selector & do_not_refine_selector,
+    const int rebalanceInterval)
 {
   Tracespec trace__("perform_multilevel_adaptivity()");
 
@@ -103,15 +104,13 @@ void perform_multilevel_adaptivity(RefinementManager & refinement,
       krinolog << "Skipping/Terminating refinement because no elements are marked for refinement.\n";
       done = true;
     }
-  }
 
-  if (refinement.require_post_refinement_fixups())
-  {
-    // This probably should not be needed.
-    CDMesh::fixup_adapted_element_parts(mesh);
-
-    // This probably should not be needed.
-    attach_sides_to_elements(mesh);
+    if (rebalanceInterval > 0 && num_refinements%rebalanceInterval == 0)
+    {
+      const bool didRebal = refinement.do_rebalance();
+      if (didRebal)
+        parallel_sync_all_fields(mesh);
+    }
   }
 }
 }

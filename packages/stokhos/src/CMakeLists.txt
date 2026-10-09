@@ -516,6 +516,13 @@ IF (Stokhos_ENABLE_EpetraExt)
     )
 ENDIF()
 
+IF (Stokhos_ENABLE_Tpetra)
+  TRIBITS_INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/tpetra)
+  SET(HEADERS ${HEADERS}
+    tpetra/Stokhos_Tpetra_Sparse3TensorUtilities.hpp
+  )
+ENDIF()
+
 TRIBITS_INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/kokkos)
 TRIBITS_INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/kokkos/kl)
 SET(HEADERS ${HEADERS}
@@ -632,25 +639,23 @@ IF (Stokhos_ENABLE_Sacado)
   SET(SACADO_HEADERS "")
   SET(SACADO_SOURCES "")
   SET(STOKHOS_DEPLIBS stokhos)
-  IF(Stokhos_ENABLE_PCE_Scalar_Type)
-    LIST(APPEND SACADO_HEADERS
-      sacado/Stokhos_Sacado.hpp
-      sacado/Stokhos_Sacado_MathFunctions.hpp
-      sacado/Sacado_PCE_OrthogPoly.hpp
-      sacado/Sacado_PCE_OrthogPolyImp.hpp
-      sacado/Sacado_PCE_OrthogPolyTraits.hpp
-      sacado/Sacado_PCE_ScalarTraitsImp.hpp
-      sacado/Sacado_ETPCE_OrthogPoly.hpp
-      sacado/Sacado_ETPCE_OrthogPolyImp.hpp
-      sacado/Sacado_ETPCE_OrthogPolyTraits.hpp
-      sacado/Sacado_ETPCE_OrthogPolyOps.hpp
-      sacado/Sacado_ETPCE_ExpressionTraits.hpp
-      )
-    LIST(APPEND SACADO_SOURCES
-      sacado/Sacado_PCE_OrthogPoly.cpp
-      sacado/Sacado_ETPCE_OrthogPoly.cpp
-      )
-  ENDIF()
+  LIST(APPEND SACADO_HEADERS
+    sacado/Stokhos_Sacado.hpp
+    sacado/Stokhos_Sacado_MathFunctions.hpp
+    sacado/Sacado_PCE_OrthogPoly.hpp
+    sacado/Sacado_PCE_OrthogPolyImp.hpp
+    sacado/Sacado_PCE_OrthogPolyTraits.hpp
+    sacado/Sacado_PCE_ScalarTraitsImp.hpp
+    sacado/Sacado_ETPCE_OrthogPoly.hpp
+    sacado/Sacado_ETPCE_OrthogPolyImp.hpp
+    sacado/Sacado_ETPCE_OrthogPolyTraits.hpp
+    sacado/Sacado_ETPCE_OrthogPolyOps.hpp
+    sacado/Sacado_ETPCE_ExpressionTraits.hpp
+    )
+  LIST(APPEND SACADO_SOURCES
+    sacado/Sacado_PCE_OrthogPoly.cpp
+    sacado/Sacado_ETPCE_OrthogPoly.cpp
+    )
   TRIBITS_INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/sacado/kokkos)
   LIST(APPEND SACADO_HEADERS
     sacado/kokkos/Stokhos_Sacado_Kokkos.hpp
@@ -719,15 +724,6 @@ IF (Stokhos_ENABLE_Sacado)
 
     TRIBITS_INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/sacado/kokkos/vector/Fad)
     LIST(APPEND SACADO_HEADERS
-      sacado/kokkos/vector/Fad/Sacado_Fad_ExprSpec_MP_Vector.hpp
-      sacado/kokkos/vector/Fad/Sacado_Fad_Expr_MP_Vector.hpp
-      sacado/kokkos/vector/Fad/Sacado_Fad_GeneralFad_MP_Vector.hpp
-      sacado/kokkos/vector/Fad/Sacado_Fad_Ops_MP_Vector.hpp
-      sacado/kokkos/vector/Fad/Sacado_Fad_DFad_MP_Vector.hpp
-      sacado/kokkos/vector/Fad/Sacado_Fad_SFad_MP_Vector.hpp
-      sacado/kokkos/vector/Fad/Sacado_Fad_SLFad_MP_Vector.hpp
-      sacado/kokkos/vector/Fad/Sacado_Fad_ViewFad_MP_Vector.hpp
-      sacado/kokkos/vector/Fad/Sacado_Fad_Exp_MP_Vector.hpp
       sacado/kokkos/vector/Fad/Sacado_Fad_MP_Vector.hpp
       )
   ENDIF()
@@ -758,8 +754,8 @@ IF (Stokhos_ENABLE_Sacado)
         sacado/kokkos/vector/linalg/Kokkos_Blas1_MP_Vector.hpp
         sacado/kokkos/vector/linalg/Kokkos_CrsMatrix_MP_Vector.hpp
         sacado/kokkos/vector/linalg/Kokkos_CrsMatrix_MP_Vector_Cuda.hpp
-        sacado/kokkos/vector/linalg/Kokkos_ArithTraits_MP_Vector.hpp
-        sacado/kokkos/vector/linalg/Kokkos_InnerProductSpaceTraits_MP_Vector.hpp
+        sacado/kokkos/vector/linalg/KokkosKernels_ArithTraits_MP_Vector.hpp
+        sacado/kokkos/vector/linalg/KokkosKernels_InnerProductSpaceTraits_MP_Vector.hpp
         )
     ENDIF()
     IF(Stokhos_ENABLE_PCE_Scalar_Type)
@@ -837,10 +833,14 @@ IF (Stokhos_ENABLE_Sacado)
         replaceDiagonalCrsMatrix
         BlockCrsMatrix_Helpers
         computeRowAndColumnOneNorms
+        leftAndOrRightScaleCrsMatrix
         )
       SET(TPETRAEXT_ETI_CLASSES
         MatrixMatrix
         TripleMatrixMultiply
+        )
+      SET(TPETRAINOUT_ETI_CLASSES
+        MatrixMarket
         )
       SET(TPETRA_SD_ETI_CLASSES
         LocalCrsMatrixOperator
@@ -887,6 +887,19 @@ IF (Stokhos_ENABLE_Sacado)
           "TpetraExt"
           TRUE
           "${STOKHOS_TPETRAEXT_DEPS}"
+          DEPLIBS_OUT)
+        LIST(APPEND STOKHOS_TPETRA_DEPLIBS ${DEPLIBS_OUT})
+        # TpetraInOut depends on Tpetra
+        SET(STOKHOS_TPETRAINOUT_DEPS ${STOKHOS_DEPLIBS} ${STOKHOS_TPETRA_DEPLIBS})
+        PROCESS_ENSEMBLE_ETI(
+          "${Stokhos_ETI_Ensemble_Sizes}"
+          "${TPETRAINOUT_ETI_CLASSES}"
+          ""
+          ""
+          "sacado/kokkos/vector/tpetra"
+          "TpetraInOut"
+          TRUE
+          "${STOKHOS_TPETRAINOUT_DEPS}"
           DEPLIBS_OUT)
         LIST(APPEND STOKHOS_TPETRA_DEPLIBS ${DEPLIBS_OUT})
       ENDIF()
@@ -938,6 +951,20 @@ IF (Stokhos_ENABLE_Sacado)
           "TpetraExt"
           TRUE
           "${STOKHOS_TPETRAEXT_DEPS}"
+          DEPLIBS_OUT)
+        LIST(APPEND STOKHOS_TPETRA_DEPLIBS ${DEPLIBS_OUT})
+
+        # TpetraInOut depends on Tpetra
+        SET(STOKHOS_TPETRAINOUT_DEPS ${STOKHOS_DEPLIBS} ${STOKHOS_TPETRA_DEPLIBS})
+        PROCESS_PCE_ETI(
+          "${TPETRAINOUT_ETI_CLASSES}"
+          ""
+          ""
+          ""
+          "sacado/kokkos/pce/tpetra"
+          "TpetraInOut"
+          TRUE
+          "${STOKHOS_TPETRAINOUT_DEPS}"
           DEPLIBS_OUT)
         LIST(APPEND STOKHOS_TPETRA_DEPLIBS ${DEPLIBS_OUT})
       ENDIF()

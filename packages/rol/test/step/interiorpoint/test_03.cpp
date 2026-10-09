@@ -9,7 +9,7 @@
 
 #define OPTIMIZATION_PROBLEM_REFACTOR
 
-#include "Teuchos_GlobalMPISession.hpp"
+#include "ROL_GlobalMPISession.hpp"
 
 #include "ROL_RandomVector.hpp"
 #include "ROL_StdVector.hpp"
@@ -66,11 +66,11 @@ template<class Real>
 void printMatrix( const std::vector<ROL::Ptr<ROL::Vector<Real> > > &A,
                   const std::vector<ROL::Ptr<ROL::Vector<Real> > > &I,
                   std::ostream &outStream ) {
-  typedef typename std::vector<Real>::size_type uint;
-  uint dim = A.size();
+  typedef typename std::vector<Real>::size_type luint;
+  luint dim = A.size();
    
-  for( uint i=0; i<dim; ++i ) {
-    for( uint j=0; j<dim; ++j ) {
+  for( luint i=0; i<dim; ++i ) {
+    for( luint j=0; j<dim; ++j ) {
       outStream << std::setw(6) << A[j]->dot(*(I[i])); 
     }
     outStream << std::endl;
@@ -112,7 +112,7 @@ int main(int argc, char *argv[]) {
 
    
 
-  Teuchos::GlobalMPISession mpiSession(&argc, &argv);
+  ROL::GlobalMPISession mpiSession(&argc, &argv);
 
   int iprint = argc - 1;
   ROL::Ptr<std::ostream> outStream;

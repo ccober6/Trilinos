@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSBLAS3_GEMM_TPL_SPEC_DECL_HPP_
 #define KOKKOSBLAS3_GEMM_TPL_SPEC_DECL_HPP_
@@ -261,23 +248,23 @@ namespace KokkosBlas {
 namespace Impl {
 
 #define KOKKOSBLAS3_XGEMM_ROCBLAS(SCALAR_TYPE, ROCBLAS_SCALAR_TYPE, ROCBLAS_FN, LAYOUT, MEM_SPACE, ETI_SPEC_AVAIL)  \
-  template <class ExecSpace>                                                                                        \
-  struct GEMM<ExecSpace,                                                                                            \
-              Kokkos::View<const SCALAR_TYPE**, LAYOUT, Kokkos::Device<ExecSpace, MEM_SPACE>,                       \
+  template <>                                                                                                       \
+  struct GEMM<Kokkos::HIP,                                                                                          \
+              Kokkos::View<const SCALAR_TYPE**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                     \
                            Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                               \
-              Kokkos::View<const SCALAR_TYPE**, LAYOUT, Kokkos::Device<ExecSpace, MEM_SPACE>,                       \
+              Kokkos::View<const SCALAR_TYPE**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                     \
                            Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                               \
-              Kokkos::View<SCALAR_TYPE**, LAYOUT, Kokkos::Device<ExecSpace, MEM_SPACE>,                             \
+              Kokkos::View<SCALAR_TYPE**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                           \
                            Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                               \
               true, ETI_SPEC_AVAIL> {                                                                               \
     typedef SCALAR_TYPE SCALAR;                                                                                     \
-    typedef Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<ExecSpace, MEM_SPACE>,                              \
+    typedef Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                            \
                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >                                                  \
         AViewType;                                                                                                  \
-    typedef Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<ExecSpace, MEM_SPACE>,                              \
+    typedef Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                            \
                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >                                                  \
         BViewType;                                                                                                  \
-    typedef Kokkos::View<SCALAR**, LAYOUT, Kokkos::Device<ExecSpace, MEM_SPACE>,                                    \
+    typedef Kokkos::View<SCALAR**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                                  \
                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >                                                  \
         CViewType;                                                                                                  \
                                                                                                                     \
@@ -306,7 +293,7 @@ namespace Impl {
            M * N < numDotsLayoutLeftThreshold) ||                                                                   \
           (is_lr && transa != rocblas_operation_none && transb == rocblas_operation_none &&                         \
            M * N < numDotsLayoutRightThreshold)) {                                                                  \
-        DotBasedGEMM<ExecSpace, AViewType, BViewType, CViewType> gemm(alpha, A, B, beta, C);                        \
+        DotBasedGEMM<Kokkos::HIP, AViewType, BViewType, CViewType> gemm(alpha, A, B, beta, C);                      \
         bool conjT = (std::is_same<SCALAR, double>::value || std::is_same<SCALAR, float>::value)                    \
                          ? false                                                                                    \
                          : (transa == rocblas_operation_conjugate_transpose ? true : false);                        \

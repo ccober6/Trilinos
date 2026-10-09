@@ -19,11 +19,11 @@
 #include "Xpetra_DistObject.hpp"
 #include "Xpetra_Map_decl.hpp"
 
-#include "Xpetra_Access.hpp"
+#include "Tpetra_Access.hpp"
 
 #include <Kokkos_Core.hpp>
 #include <Kokkos_DualView.hpp>
-#include <Kokkos_ArithTraits.hpp>
+#include <KokkosKernels_ArithTraits.hpp>
 
 namespace Xpetra {
 
@@ -231,13 +231,13 @@ class MultiVector
   //! Set multi-vector values to random numbers. XPetra implementation
   virtual void Xpetra_randomize(const Scalar& minVal, const Scalar& maxVal);
 
-  using impl_scalar_type     = typename Kokkos::ArithTraits<Scalar>::val_type;
+  using impl_scalar_type     = typename KokkosKernels::ArithTraits<Scalar>::val_type;
   using dual_view_type       = Kokkos::DualView<impl_scalar_type**, Kokkos::LayoutStride, typename node_type::device_type, Kokkos::MemoryUnmanaged>;
   using dual_view_type_const = Kokkos::DualView<const impl_scalar_type**, Kokkos::LayoutStride, typename node_type::device_type, Kokkos::MemoryUnmanaged>;
   using host_execution_space = typename dual_view_type::host_mirror_space;
   using dev_execution_space  = typename dual_view_type::t_dev::execution_space;
 
-  virtual typename dual_view_type::t_host_const_um getLocalViewHost(Access::ReadOnlyStruct) const {
+  virtual typename dual_view_type::t_host_const_um getLocalViewHost(Tpetra::Access::ReadOnlyStruct) const {
     throw std::runtime_error("Dummy function getLocalViewHost(Access::ReadOnlyStruct), should be overwritten at" + std::string(__FILE__) + ":" + std::to_string(__LINE__));
 #ifndef __NVCC__
     typename dual_view_type::t_host_um test;
@@ -245,7 +245,7 @@ class MultiVector
     TEUCHOS_UNREACHABLE_RETURN(test);
   }
 
-  virtual typename dual_view_type::t_dev_const_um getLocalViewDevice(Access::ReadOnlyStruct) const {
+  virtual typename dual_view_type::t_dev_const_um getLocalViewDevice(Tpetra::Access::ReadOnlyStruct) const {
     throw std::runtime_error("Dummy function getLocalViewDevice(Access::ReadOnlyStruct), should be overwritten at" + std::string(__FILE__) + ":" + std::to_string(__LINE__));
 #ifndef __NVCC__
     typename dual_view_type::t_dev_um test;
@@ -253,7 +253,7 @@ class MultiVector
     TEUCHOS_UNREACHABLE_RETURN(test);
   }
 
-  virtual typename dual_view_type::t_host_um getLocalViewHost(Access::OverwriteAllStruct) const {
+  virtual typename dual_view_type::t_host_um getLocalViewHost(Tpetra::Access::OverwriteAllStruct) const {
     throw std::runtime_error("Dummy function getLocalViewHost(Access::OverwriteAllStruct), should be overwritten at" + std::string(__FILE__) + ":" + std::to_string(__LINE__));
 #ifndef __NVCC__
     typename dual_view_type::t_host_um test;
@@ -261,7 +261,7 @@ class MultiVector
     TEUCHOS_UNREACHABLE_RETURN(test);
   }
 
-  virtual typename dual_view_type::t_dev_um getLocalViewDevice(Access::OverwriteAllStruct) const {
+  virtual typename dual_view_type::t_dev_um getLocalViewDevice(Tpetra::Access::OverwriteAllStruct) const {
     throw std::runtime_error("Dummy function getLocalViewDevice(Access::OverwriteAllStruct), should be overwritten at" + std::string(__FILE__) + ":" + std::to_string(__LINE__));
 #ifndef __NVCC__
     typename dual_view_type::t_dev_um test;
@@ -269,7 +269,7 @@ class MultiVector
     TEUCHOS_UNREACHABLE_RETURN(test);
   }
 
-  virtual typename dual_view_type::t_host_um getLocalViewHost(Access::ReadWriteStruct) const {
+  virtual typename dual_view_type::t_host_um getLocalViewHost(Tpetra::Access::ReadWriteStruct) const {
     throw std::runtime_error("Dummy function getLocalViewHost(Access::ReadWriteStruct), should be overwritten at" + std::string(__FILE__) + ":" + std::to_string(__LINE__));
 #ifndef __NVCC__
     typename dual_view_type::t_host_um test;
@@ -277,7 +277,7 @@ class MultiVector
     TEUCHOS_UNREACHABLE_RETURN(test);
   }
 
-  virtual typename dual_view_type::t_dev_um getLocalViewDevice(Access::ReadWriteStruct) const {
+  virtual typename dual_view_type::t_dev_um getLocalViewDevice(Tpetra::Access::ReadWriteStruct) const {
     throw std::runtime_error("Dummy function getLocalViewDevice(Access::ReadWriteStruct), should be overwritten at" + std::string(__FILE__) + ":" + std::to_string(__LINE__));
 #ifndef __NVCC__
     typename dual_view_type::t_dev_um test;

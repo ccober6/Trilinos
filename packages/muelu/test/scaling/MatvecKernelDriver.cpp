@@ -376,7 +376,7 @@ class MagmaSparse_SpmV_Pack<double, LocalOrdinal, GlobalOrdinal, Tpetra::KokkosC
                         const vector_type& X,
                         vector_type& Y) {
     // data access common to other TPLs
-    const KCRS& Amat          = A.getLocalMatrixHost();
+    const KCRS Amat           = A.getLocalMatrixHost();
     c_lno_view_t Arowptr      = Amat.graph.row_map;
     c_lno_nnz_view_t Acolind  = Amat.graph.entries;
     const scalar_view_t Avals = Amat.values;
@@ -522,7 +522,7 @@ class CuSparse_SpmV_Pack<double, LocalOrdinal, GlobalOrdinal, Tpetra::KokkosComp
                      const vector_type& X,
                      vector_type& Y) {
     // data access common to other TPLs
-    const KCRS& Amat          = A.getLocalMatrixDevice();
+    const KCRS Amat           = A.getLocalMatrixDevice();
     c_lno_view_t Arowptr      = Amat.graph.row_map;
     c_lno_nnz_view_t Acolind  = Amat.graph.entries;
     const scalar_view_t Avals = Amat.values;
@@ -680,9 +680,9 @@ void MV_Tpetra(const Tpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void MV_KK(const Tpetra::CrsMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>& A, const Tpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>& x, Tpetra::MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>& y) {
   typedef typename Node::device_type device_type;
-  const auto& AK = A.getLocalMatrixDevice();
-  auto X_lcl     = x.getLocalViewDevice(Tpetra::Access::ReadOnly);
-  auto Y_lcl     = y.getLocalViewDevice(Tpetra::Access::OverwriteAll);
+  const auto AK = A.getLocalMatrixDevice();
+  auto X_lcl    = x.getLocalViewDevice(Tpetra::Access::ReadOnly);
+  auto Y_lcl    = y.getLocalViewDevice(Tpetra::Access::OverwriteAll);
   KokkosSparse::spmv(KokkosSparse::NoTranspose, Teuchos::ScalarTraits<Scalar>::one(), AK, X_lcl, Teuchos::ScalarTraits<Scalar>::zero(), Y_lcl);
   Kokkos::fence();
 }
@@ -791,7 +791,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
     clp.setOption("report_error_norms", "noreport_error_norms", &report_error_norms, "Report L2 norms for the solution");
 
     std::ostringstream galeriStream;
-    std::string rhsFile, coordFile, coordMapFile, nullFile, materialFile, blockNumberFile;  // unused
+    std::string rhsFile, coordFile, coordMapFile, nullFile, materialFile, blockNumberFile, massFile;  // unused
     typedef typename Teuchos::ScalarTraits<SC>::magnitudeType real_type;
     typedef Xpetra::MultiVector<real_type, LO, GO, NO> RealValuedMultiVector;
     RCP<RealValuedMultiVector> coordinates;
@@ -799,6 +799,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
     RCP<LOVector> blocknumber;
     RCP<Matrix> A;
     RCP<const Map> map;
+    RCP<Matrix> mass;
 
     switch (clp.parse(argc, argv)) {
       case Teuchos::CommandLineProcessor::PARSE_HELP_PRINTED: return EXIT_SUCCESS;
@@ -808,7 +809,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
     }
 
     // Load the matrix off disk (or generate it via Galeri), assuming only one right hand side is loaded.
-    MatrixLoad<SC, LO, GO, NO>(comm, lib, binaryFormat, matrixFile, rhsFile, rowMapFile, colMapFile, domainMapFile, rangeMapFile, coordFile, coordMapFile, nullFile, materialFile, blockNumberFile, map, A, coordinates, nullspace, material, blocknumber, x, b, 1, galeriParameters, xpetraParameters, galeriStream);
+    MatrixLoad<SC, LO, GO, NO>(comm, lib, binaryFormat, matrixFile, rhsFile, rowMapFile, colMapFile, domainMapFile, rangeMapFile, coordFile, coordMapFile, nullFile, materialFile, blockNumberFile, massFile, map, A, coordinates, nullspace, material, blocknumber, mass, x, b, 1, galeriParameters, xpetraParameters, galeriStream);
 
     if (do_kk && comm->getSize() > 1) {
       out << "KK was requested, but this kernel this cannot be run on more than one rank. Disabling..." << endl;
@@ -986,7 +987,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
     typedef typename Node::device_type device_type;
 
     // data access common to other TPLs
-    const KCRS& Amat          = At->getLocalMatrixHost();
+    const KCRS Amat           = At->getLocalMatrixHost();
     c_lno_view_t Arowptr      = Amat.graph.row_map;
     c_lno_nnz_view_t Acolind  = Amat.graph.entries;
     const scalar_view_t Avals = Amat.values;

@@ -124,6 +124,10 @@ public:
   const std::vector<Surface_Identifier> & get_surface_identifiers() const override { return mySurfaceIdentifiers; }
   FieldRef get_coordinates_field(const stk::mesh::BulkData & mesh) const;
 
+  virtual double estimate_curvature_times_element_size(const stk::mesh::BulkData & mesh, stk::mesh::Entity element) const override;
+
+  virtual stk::math::Vector3d compute_interface_normal(const stk::mesh::BulkData & mesh, const Surface_Identifier surfaceIdentifier, const stk::mesh::Entity element) const override;
+
 protected:
   const stk::mesh::Part & get_active_part() const { return myActivePart; }
   const CDFEM_Support & get_cdfem_support() const { return myCdfemSupport; }

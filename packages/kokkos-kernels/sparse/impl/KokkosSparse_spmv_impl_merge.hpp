@@ -1,28 +1,15 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSSPARSE_SPMV_IMPL_MERGE_HPP
 #define KOKKOSSPARSE_SPMV_IMPL_MERGE_HPP
 
 #include <sstream>
 
+#include "KokkosKernels_ExecSpaceUtils.hpp"
 #include "KokkosKernels_Iota.hpp"
 #include "KokkosKernels_AlwaysFalse.hpp"
-
-#include "KokkosSparse_merge_matrix.hpp"
+#include "KokkosGraph_MergePath_impl.hpp"
 
 namespace KokkosSparse::Impl {
 
@@ -57,9 +44,10 @@ struct SpmvMergeHierarchical {
 
   using iota_type = KokkosKernels::Impl::Iota<A_size_type, A_size_type>;
 
-  using DSR = typename KokkosSparse::Impl::MergeMatrixDiagonal<um_row_map_type, iota_type>::position_type;
+  using DSR =
+      KokkosGraph::Impl::DiagonalSearchResult<typename um_row_map_type::size_type, typename iota_type::size_type>;
 
-  using KAT = Kokkos::ArithTraits<A_value_type>;
+  using KAT = KokkosKernels::ArithTraits<A_value_type>;
 
   // results of a lower-bound and upper-bound diagonal search
   struct Chunk {
@@ -100,7 +88,7 @@ struct SpmvMergeHierarchical {
       // thread 0 does the lower bound, thread 1 does the upper bound
       if (0 == thread.team_rank() || 1 == thread.team_rank()) {
         const A_size_type d = thread.team_rank() ? teamDEnd : teamD;
-        DSR dsr             = diagonal_search(rowEnds, iota, d);
+        DSR dsr             = KokkosGraph::Impl::diagonal_search(rowEnds, iota, d);
         if (0 == thread.team_rank()) {
           lb = dsr;
         }
@@ -185,7 +173,7 @@ struct SpmvMergeHierarchical {
       threadD -= teamD;
 
       DSR threadLb;
-      threadLb                            = diagonal_search(teamRowEnds, teamIota, threadD);
+      threadLb                            = KokkosGraph::Impl::diagonal_search(teamRowEnds, teamIota, threadD);
       const A_size_type threadNnzBegin    = threadLb.bi + teamNnzBegin;
       const A_ordinal_type threadRowBegin = threadLb.ai + teamRowBegin;
 

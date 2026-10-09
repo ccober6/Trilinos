@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSKERNELS_PERFTEST_SPMV_INSPECTOR_HPP
 #define KOKKOSKERNELS_PERFTEST_SPMV_INSPECTOR_HPP
@@ -27,7 +14,7 @@ struct SPMV_Inspector_Functor {
   typedef typename AMatrix::non_const_size_type size_type;
   typedef typename Kokkos::TeamPolicy<execution_space> team_policy;
   typedef typename team_policy::member_type team_member;
-  typedef Kokkos::ArithTraits<value_type> ATV;
+  typedef KokkosKernels::ArithTraits<value_type> ATV;
 
   const value_type alpha;
   AMatrix m_A;
@@ -108,7 +95,7 @@ void kk_inspector_matvec(AType A, XType x, YType y, int team_size, int vector_le
     if (workset_offsets(ws - 1) < A.numRows()) {
       workset_offsets(ws) = A.numRows();
     }
-    printf("Worksets: %i %i\n", worksets, ws);
+    printf("Worksets: %zd %zd\n", (size_t)worksets, (size_t)ws);
     worksets = ws;
   }
   scalar_t s_a(1.0);

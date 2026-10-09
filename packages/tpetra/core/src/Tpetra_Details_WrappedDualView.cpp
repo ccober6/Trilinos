@@ -12,21 +12,19 @@
 namespace Tpetra {
 namespace Details {
 
-bool wdvTrackingEnabled = true;
+TPETRA_LIB_DLL_EXPORT bool wdvTrackingEnabled = true;
 
-void enableWDVTracking()
-{
-  if(wdvTrackingEnabled)
+void enableWDVTracking() {
+  if (wdvTrackingEnabled)
     throw std::runtime_error("WrappedDualView refcount tracking is already enabled!");
   wdvTrackingEnabled = true;
 }
 
-void disableWDVTracking()
-{
-  if(!wdvTrackingEnabled)
+void disableWDVTracking() {
+  if (!wdvTrackingEnabled)
     throw std::runtime_error("WrappedDualView refcount tracking is already disabled!");
   wdvTrackingEnabled = false;
 }
 
-} // namespace Details
-} // namespace Tpetra
+}  // namespace Details
+}  // namespace Tpetra

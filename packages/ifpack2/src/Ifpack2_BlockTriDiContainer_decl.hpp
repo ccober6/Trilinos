@@ -19,6 +19,7 @@
 #include "Tpetra_Map.hpp"
 #include "Tpetra_RowMatrix.hpp"
 #include "Tpetra_BlockCrsMatrix_decl.hpp"
+#include "Ifpack2_BlockHelper_ETI.hpp"
 #include <type_traits>
 #include <string>
 
@@ -73,33 +74,6 @@ namespace Ifpack2 {
 ///    a higher quality standard.
 
 ///
-/// Impl Tag
-///
-namespace BlockTriDiContainerDetails {
-///
-/// impl tag to distinguish built-in types and sacado types
-///
-struct ImplNotAvailTag {};
-struct ImplSimdTag {};
-struct ImplSacadoTag {};
-
-template <typename T>
-struct ImplTag { typedef ImplNotAvailTag type; };
-template <>
-struct ImplTag<float> { typedef ImplSimdTag type; };
-template <>
-struct ImplTag<double> { typedef ImplSimdTag type; };
-template <>
-struct ImplTag<std::complex<float> > { typedef ImplSimdTag type; };
-template <>
-struct ImplTag<std::complex<double> > { typedef ImplSimdTag type; };
-
-/// forward declaration
-template <typename MatrixType>
-struct ImplObject;
-}  // namespace BlockTriDiContainerDetails
-
-///
 /// Primary declation
 ///
 template <typename MatrixType,
@@ -127,7 +101,7 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
   //! The type of entries in the input (global) matrix.
   typedef typename MatrixType::scalar_type scalar_type;
   //! The magnitude of entries in the input (global) matrix.
-  typedef typename Kokkos::ArithTraits<scalar_type>::magnitudeType magnitude_type;
+  typedef typename KokkosKernels::ArithTraits<scalar_type>::magnitudeType magnitude_type;
   //! The type of local indices in the input (global) matrix.
   typedef typename Container<MatrixType>::local_ordinal_type local_ordinal_type;
   //! The type of global indices in the input (global) matrix.
@@ -169,7 +143,7 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
 
   /// \brief Constructor.
   ///
-  /// \brief matrix [in] The original input matrix.  This Container
+  /// \param matrix [in] The original input matrix.  This Container
   ///   will construct a local diagonal block from the rows given by
   ///   <tt>localRows</tt>.
   ///
@@ -182,6 +156,11 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
   ///   different processes. If partitions is empty, then a local
   ///   block-Jacobi preconditioner is formed; this is equivalent to
   ///   every part of partitions having size 1.
+  ///
+  /// \param importer [in] Import object for communication.
+  /// \param pointIndexed [in] If the input matrix is a \c Tpetra::BlockCrsMatrix,
+  ///    whether elements of \c partitions[k] identify rows within blocks (true) or
+  ///    whole blocks (false).
   BlockTriDiContainer(const Teuchos::RCP<const row_matrix_type>& matrix,
                       const Teuchos::Array<Teuchos::Array<local_ordinal_type> >& partitions,
                       const Teuchos::RCP<const import_type>& importer,
@@ -193,6 +172,9 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
   /// main constructor for documentation. This constructor removes the
   /// Container-general arguments that are not used in BlockTriDiContainer.
   ///
+  /// \param matrix [in] The original input matrix.
+  /// \param partitions [in] Partitioning of local rows into blocks.
+  /// \param n_subparts_per_part [in] Number of subparts per partition.
   /// \param overlapCommAndComp [in] Overlap communication and computation. This
   ///   is not always better; it depends on (at least) the MPI implementation
   ///   and the machine architecture. Defaults to false. It has to be specified
@@ -201,6 +183,8 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
   ///
   /// \param useSequentialMethod [in] This is for development and testing
   ///   purposes only.
+  /// \param block_size [in] Block size for the container.
+  /// \param explicitConversion [in] Whether to use explicit conversion.
   BlockTriDiContainer(const Teuchos::RCP<const row_matrix_type>& matrix,
                       const Teuchos::Array<Teuchos::Array<local_ordinal_type> >& partitions,
                       const int n_subparts_per_part = 1,
@@ -219,7 +203,7 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
     //! factorization, such that the entry is moved radially outward in the
     //! complex plane. N.B. that this constant modifies the matrix in the linear
     //! equation, not simply the diagonal preconditioner.
-    magnitude_type addRadiallyToDiagonal = Kokkos::ArithTraits<magnitude_type>::zero();
+    magnitude_type addRadiallyToDiagonal = KokkosKernels::ArithTraits<magnitude_type>::zero();
   };
 
   //! Input arguments to <tt>applyInverseJacobi</tt>
@@ -228,7 +212,7 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
     //! entry. Defaults to false.
     bool zeroStartingSolution = false;
     //! Damping factor. Defaults to 1.
-    scalar_type dampingFactor = Kokkos::ArithTraits<scalar_type>::one();
+    scalar_type dampingFactor = KokkosKernels::ArithTraits<scalar_type>::one();
     //! The maximum number of sweeps. If the norm-based criterion is not used,
     //! it's exactly the number of sweeps. Defaults to 1.
     int maxNumSweeps = 1;
@@ -241,7 +225,7 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
     //! the input <tt>y</tt>, often 0, and <tt>f</tt> is the maximum of the
     //! 2-norms of each degree of freedom, i.e., index of a block. Defaults to
     //! 0.
-    magnitude_type tolerance = Kokkos::ArithTraits<magnitude_type>::zero();
+    magnitude_type tolerance = KokkosKernels::ArithTraits<magnitude_type>::zero();
     //! Check the norm-based termination criterion every
     //! <tt>checkToleranceEvery</tt> iterations. Defaults to 1. A norm
     //! computation requires a global reduction, which is expensive. Hence it
@@ -281,6 +265,8 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplSimdTag>
   ComputeParameters createDefaultComputeParameters() const;
 
   /// \brief Extract the local tridiagonal block and prepare the solver.
+  ///
+  /// \param input [in] Compute parameters.
   ///
   /// This version of <tt>applyInverseJacobi</tt> is meant to be called by
   /// direct users of this class, rather than by <tt>BlockRelaxation</tt>.
@@ -400,7 +386,7 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplNotAvailTa
   : public Container<MatrixType> {
  private:
   typedef typename MatrixType::scalar_type scalar_type;
-  typedef typename Kokkos::ArithTraits<scalar_type>::magnitudeType magnitude_type;
+  typedef typename KokkosKernels::ArithTraits<scalar_type>::magnitudeType magnitude_type;
   typedef typename Container<MatrixType>::local_ordinal_type local_ordinal_type;
   typedef typename Container<MatrixType>::global_ordinal_type global_ordinal_type;
 
@@ -417,7 +403,7 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplNotAvailTa
  public:
   BlockTriDiContainer(const Teuchos::RCP<const row_matrix_type>& matrix,
                       const Teuchos::Array<Teuchos::Array<local_ordinal_type> >& partitions,
-                      const Teuchos::RCP<const import_type>& importer,
+                      const Teuchos::RCP<const import_type>& /*importer*/,
                       bool pointIndexed)
     : Container<MatrixType>(matrix, partitions, pointIndexed) {
     TEUCHOS_TEST_FOR_EXCEPT_MSG(true, "Error: BlockTriDiContainer is not available for this scalar_type");
@@ -460,7 +446,7 @@ class BlockTriDiContainer<MatrixType, BlockTriDiContainerDetails::ImplNotAvailTa
 
   void
   describe(Teuchos::FancyOStream& out,
-           const Teuchos::EVerbosityLevel verbLevel =
+           const Teuchos::EVerbosityLevel /*verbLevel*/ =
                Teuchos::Describable::verbLevel_default) const override {
     out << "Ifpack2::BlockTriDiContainer::ImplNotAvailTag";
   }

@@ -348,8 +348,8 @@ namespace FROSch {
                             CoarseMatrix_->insertGlobalValues(globalRow,indicesGlob(),values);
                         } else { // Add diagonal unit for zero rows // Todo: Do you we need to sort the coarse matrix "NodeWise"?
                             GOVec indicesGlob(1,CoarseSolveMap_->getGlobalElement(i));
-                            SCVec values(1,ScalarTraits<SC>::one());
-                            CoarseMatrix_->insertGlobalValues(globalRow,indicesGlob(),values());
+                            SCVec values2(1,ScalarTraits<SC>::one());
+                            CoarseMatrix_->insertGlobalValues(globalRow,indicesGlob(),values2());
                             numDiagonalsAdded++;
                         }
                     }
@@ -374,9 +374,9 @@ namespace FROSch {
                         if (indices.size()>0) {
                             CoarseMatrix_->insertGlobalValues(globalRow,indices,values);
                         } else { // Add diagonal unit for zero rows // Todo: Do you we need to sort the coarse matrix "NodeWise"?
-                            GOVec indices(1,globalRow);
-                            SCVec values(1,ScalarTraits<SC>::one());
-                            CoarseMatrix_->insertGlobalValues(globalRow,indices(),values());
+                            GOVec indices2(1,globalRow);
+                            SCVec values2(1,ScalarTraits<SC>::one());
+                            CoarseMatrix_->insertGlobalValues(globalRow,indices2(),values2());
                             numDiagonalsAdded++;
                         }
                     }
@@ -596,7 +596,7 @@ namespace FROSch {
 
             LO numProcsGatheringStep = this->MpiComm_->getSize();
             GO numGlobalIndices = coarseMapUnique->getMaxAllGlobalIndex();
-            if (coarseMapUnique->lib()==UseEpetra || coarseMapUnique->getGlobalNumElements()>0) {
+            if (coarseMapUnique->getGlobalNumElements()>0) {
                 numGlobalIndices += 1;
             }
             LO numMyRows;
@@ -833,7 +833,7 @@ namespace FROSch {
             GatheringMaps_[gatheringSteps-1] = Xpetra::MapFactory<LO,GO,NO>::Build(CoarseMap_->lib(),INVALID,uniEle,0,this->MpiComm_);
 
             GO numGlobalIndices = coarseMapUnique->getMaxAllGlobalIndex();
-            if (coarseMapUnique->lib()==UseEpetra || coarseMapUnique->getGlobalNumElements()>0) {
+            if (coarseMapUnique->getGlobalNumElements()>0) {
                 numGlobalIndices += 1;
             }
             LO numMyRows;
@@ -846,7 +846,7 @@ namespace FROSch {
             //
             // LO numProcsGatheringStep = this->MpiComm_->getSize();
             // GO numGlobalIndices = coarseMapUnique->getMaxAllGlobalIndex();
-            // if (coarseMapUnique->lib()==UseEpetra || coarseMapUnique->getGlobalNumElements()>0) {
+            // if (coarseMapUnique->getGlobalNumElements()>0) {
             //     numGlobalIndices += 1;
             // }
             // GO numMyRows;
@@ -887,7 +887,7 @@ namespace FROSch {
         const SC ZERO = Teuchos::ScalarTraits<SC>::zero();
 
         global = coarseMapUnique->getMaxAllGlobalIndex();
-        if (coarseMapUnique->lib()==UseEpetra || coarseMapUnique->getGlobalNumElements()>0) {
+        if (coarseMapUnique->getGlobalNumElements()>0) {
             global += 1;
         }
 
@@ -931,7 +931,7 @@ namespace FROSch {
 
         for (int i=0; i<GatheringMaps_.size(); i++) {
             global = GatheringMaps_[i]->getMaxAllGlobalIndex();
-            if (GatheringMaps_[i]->lib()==UseEpetra || GatheringMaps_[i]->getGlobalNumElements()>0) {
+            if (GatheringMaps_[i]->getGlobalNumElements()>0) {
                 global += 1;
             }
 

@@ -18,7 +18,7 @@ public:
   EntityLessCoords(const stk::mesh::BulkData& bulk)
     :mesh(bulk),
     coordsBase(bulk.mesh_meta_data().coordinate_field()),
-    coordFieldData(coordsBase->data<double,stk::mesh::ReadOnly>())
+    coordFieldData(coordsBase->data<double>())
   { }
 
   bool operator()(stk::mesh::Entity a, stk::mesh::Entity b)
@@ -91,7 +91,7 @@ protected:
   {
     EntityLessCoords entityLessCoords(get_bulk());
     stk::mesh::for_each_entity_run(get_bulk(), stk::topology::NODE_RANK,
-                                   [&entityLessCoords](const stk::mesh::BulkData& bulk, const stk::mesh::MeshIndex& meshIndex)
+                                   [&entityLessCoords](const stk::mesh::BulkData&, const stk::mesh::MeshIndex& meshIndex)
     {
       if(meshIndex.bucket_ordinal > 0) {
         EXPECT_TRUE(entityLessCoords((*meshIndex.bucket)[meshIndex.bucket_ordinal-1],

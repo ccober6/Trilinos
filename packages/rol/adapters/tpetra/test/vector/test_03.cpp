@@ -16,7 +16,7 @@
 #include "ROL_StdVector.hpp"
 
 #include "ROL_Stream.hpp"
-#include "Teuchos_GlobalMPISession.hpp"
+#include "ROL_GlobalMPISession.hpp"
 
 #include "Tpetra_Core.hpp"
 
@@ -28,13 +28,13 @@ typedef Tpetra::Map<>::global_ordinal_type GO;
 typedef Tpetra::Map<>::node_type Node;
 typedef Tpetra::Map<LO, GO, Node> Map;
 typedef Tpetra::MultiVector<RealT, LO, GO, Node> MV;
-typedef Tpetra::Vector<RealT, LO, GO, Node> V;
+typedef Tpetra::Vector<RealT, LO, GO, Node> Vec;
 typedef ROL::Ptr<MV> MVP;
-typedef ROL::Ptr<V> VP;
+typedef ROL::Ptr<Vec> VP;
 
 int main(int argc, char *argv[]) {
 
-  Teuchos::GlobalMPISession mpiSession(&argc, &argv,0);
+  ROL::GlobalMPISession mpiSession(&argc, &argv,0);
   ROL::Ptr<const Teuchos::Comm<int> > comm = Tpetra::getDefaultComm();
 
   int iprint = argc - 1;
@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
     // Create Tpetra::MultiVectors (single vectors) 
     MVP x_ptr = ROL::makePtr<MV>(map,1,true); 
     MVP y_ptr = ROL::makePtr<MV>(map,1,true); 
-    VP W_ptr = ROL::makePtr<V>(map,true);
+    VP W_ptr = ROL::makePtr<Vec>(map,true);
 
     // Random elements
     //x_ptr->randomize();

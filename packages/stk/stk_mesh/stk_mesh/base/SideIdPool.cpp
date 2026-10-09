@@ -22,14 +22,6 @@ void SideIdPool::generate_initial_ids(unsigned numIdsNeeded)
     mBulkData.generate_new_ids(mBulkData.mesh_meta_data().side_rank(), 2*numIdsNeeded, mSuggestedIds);
 }
 
-stk::mesh::EntityId SideIdPool::get_available_id()
-{
-    STK_ThrowRequireWithSierraHelpMsg(mNumIdsUsed < mSuggestedIds.size());
-    stk::mesh::EntityId availId = *(mSuggestedIds.begin() + mNumIdsUsed);
-    mNumIdsUsed++;
-    return availId;
-}
-
 void SideIdPool::generate_additional_ids_collective(size_t num_additional_ids_needed)
 {
     size_t num_available = mSuggestedIds.size() - mNumIdsUsed;
@@ -45,11 +37,6 @@ void SideIdPool::generate_additional_ids_collective(size_t num_additional_ids_ne
                                                       new_ids);
         mSuggestedIds.insert(mSuggestedIds.end(), new_ids.begin(), new_ids.end());
     }
-}
-
-void SideIdPool::reset_suggested_side_id_iter(size_t numIdsNotReallyUsed)
-{
-    mNumIdsUsed -= numIdsNotReallyUsed;
 }
 
 }

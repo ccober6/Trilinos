@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSBLAS2_TEAM_GEMV_IMPL_HPP_
 #define KOKKOSBLAS2_TEAM_GEMV_IMPL_HPP_
@@ -117,8 +104,6 @@ KOKKOS_INLINE_FUNCTION int TeamGemvInternal<Algo::Gemv::Blocked>::invoke(
   // y = beta y + alpha A x
   // y (m), A(m x n), B(n)
 
-  constexpr int mbAlgo = Algo::Gemv::Blocked::mb();
-
   if (beta == zero)
     KokkosBlas::Impl::TeamSetInternal::invoke(member, m, zero, y, ys0);
   else if (beta != one)
@@ -129,16 +114,22 @@ KOKKOS_INLINE_FUNCTION int TeamGemvInternal<Algo::Gemv::Blocked>::invoke(
 
     if (beta != one) member.team_barrier();
 
-    KokkosBlas::Impl::InnerMultipleDotProduct<mbAlgo> inner(as0, as1, xs0, ys0);
-    const int tsize = member.team_size();
-    const int mb_a = m / tsize + (m % tsize > 0), mb_b = mbAlgo;
-    // Made this non-const in order to WORKAROUND issue #349
-    int mb = mb_a < mb_b ? mb_a : mb_b, mp = m % mb;
+    auto host_or_device = [&](auto tag) {
+      constexpr int mbAlgo = Algo::Gemv::Blocked::Impl::mb<decltype(tag)>();
+      KokkosBlas::Impl::InnerMultipleDotProduct<mbAlgo> inner(as0, as1, xs0, ys0);
+      const int tsize = member.team_size();
+      const int mb_a = m / tsize + (m % tsize > 0), mb_b = mbAlgo;
+      // Made this non-const in order to WORKAROUND issue #349
+      int mb = mb_a < mb_b ? mb_a : mb_b, mp = m % mb;
 
-    Kokkos::parallel_for(Kokkos::TeamThreadRange(member, (m / mb) + (mp > 0)), [&](const int &ii) {
-      const int i = ii * mb;
-      inner.serial_invoke<OpA>(alpha, A + i * as0, x, (i + mb) > m ? (m - i) : mb, n, y + i * ys0);
-    });
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, (m / mb) + (mp > 0)), [&](const int &ii) {
+        const int i = ii * mb;
+        inner.template serial_invoke<OpA>(alpha, A + i * as0, x, (i + mb) > m ? (m - i) : mb, n, y + i * ys0);
+      });
+    };
+    KOKKOS_IF_ON_HOST((host_or_device(Algo::Gemv::Blocked::Impl::Host{});))
+    KOKKOS_IF_ON_DEVICE((host_or_device(Algo::Gemv::Blocked::Impl::Device{});))
+
     member.team_barrier();
   }
 

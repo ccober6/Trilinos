@@ -66,7 +66,8 @@ GeneratedMeshToFileWithTransientFields::GeneratedMeshToFileWithTransientFields(s
 
 void GeneratedMeshToFileWithTransientFields::write_mesh_with_field(const std::vector<double>& timeSteps,
                                                                    const FieldValueSetter &fieldValueSetter,
-                                                                   const std::string& globalVariableName)
+                                                                   const std::string& globalVariableName,
+                                                                   const double fieldValueScaleFactor)
 {
   broker.add_field(outputFileIndex, scalarField);
   broker.add_field(outputFileIndex, vectorField);
@@ -74,14 +75,15 @@ void GeneratedMeshToFileWithTransientFields::write_mesh_with_field(const std::ve
   broker.add_global(outputFileIndex, globalVariableName+"_int", Ioss::Field::INTEGER);
   int vectorLength = 3;
   broker.add_global(outputFileIndex, globalVariableName+"_real_vec", vectorLength, Ioss::Field::REAL);
+  write_mesh();
 
   for(unsigned step = 0; step < timeSteps.size(); step++)
   {
     double time = timeSteps[step];
     int timestep = step+1;
 
-    fieldValueSetter.populate_field(bulk, &scalarField, step, time);
-    fieldValueSetter.populate_field(bulk, &vectorField, step, time);
+    fieldValueSetter.populate_field(bulk, &scalarField, step, time, fieldValueScaleFactor);
+    fieldValueSetter.populate_field(bulk, &vectorField, step, time, fieldValueScaleFactor);
     broker.begin_output_step(outputFileIndex, time);
     broker.write_defined_output_fields(outputFileIndex);
     broker.write_global(outputFileIndex, globalVariableName+"_double", timeSteps[step]);

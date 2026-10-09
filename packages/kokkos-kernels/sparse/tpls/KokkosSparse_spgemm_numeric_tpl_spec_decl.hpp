@@ -1,20 +1,5 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
-*/
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSPARSE_SPGEMM_NUMERIC_TPL_SPEC_DECL_HPP_
 #define KOKKOSPARSE_SPGEMM_NUMERIC_TPL_SPEC_DECL_HPP_
@@ -38,9 +23,11 @@ namespace KokkosSparse {
 namespace Impl {
 
 #ifdef KOKKOSKERNELS_ENABLE_TPL_CUSPARSE
-#if (CUDA_VERSION >= 11040)
+#if (CUSPARSE_VERSION < 12710)
 
-// 11.4+ supports generic API with reuse (full symbolic/numeric separation)
+// CUDA 11.x and 12.x support generic API with reuse (full symbolic/numeric
+// separation). Newer cuSPARSE versions deprecate the SpGEMMreuse entry points,
+// so those versions use the non-reuse generic path below instead.
 template <typename KernelHandle, typename lno_t, typename ConstRowMapType, typename ConstEntriesType,
           typename ConstValuesType, typename EntriesType, typename ValuesType>
 void spgemm_numeric_cusparse(KernelHandle *handle, lno_t /*m*/, lno_t /*n*/, lno_t /*k*/,
@@ -94,8 +81,8 @@ void spgemm_numeric_cusparse(KernelHandle *handle, lno_t /*m*/, lno_t /*n*/, lno
   }
 
   // C' = alpha * opA(A) * opB(B) + beta * C
-  const auto alpha = Kokkos::ArithTraits<scalar_type>::one();
-  const auto beta  = Kokkos::ArithTraits<scalar_type>::zero();
+  const auto alpha = KokkosKernels::ArithTraits<scalar_type>::one();
+  const auto beta  = KokkosKernels::ArithTraits<scalar_type>::zero();
 
   // alpha, beta are on host, but since we use singleton on the cusparse
   // handle, we save/restore the pointer mode to not interference with
@@ -110,8 +97,9 @@ void spgemm_numeric_cusparse(KernelHandle *handle, lno_t /*m*/, lno_t /*n*/, lno
   handle->set_call_numeric();
 }
 
-#elif (CUDA_VERSION >= 11000)
-// 11.0-11.3 supports only the generic API, but not reuse.
+#else
+
+// cuSPARSE versions that deprecate SpGEMMreuse use this SpGEMM interface instead.
 template <typename KernelHandle, typename lno_t, typename ConstRowMapType, typename ConstEntriesType,
           typename ConstValuesType, typename EntriesType, typename ValuesType>
 void spgemm_numeric_cusparse(KernelHandle *handle, lno_t /*m*/, lno_t /*n*/, lno_t /*k*/,
@@ -127,69 +115,17 @@ void spgemm_numeric_cusparse(KernelHandle *handle, lno_t /*m*/, lno_t /*n*/, lno
       cusparseCsrSetPointers(h->descr_B, (void *)row_mapB.data(), (void *)entriesB.data(), (void *)valuesB.data()));
   KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(
       cusparseCsrSetPointers(h->descr_C, (void *)row_mapC.data(), (void *)entriesC.data(), (void *)valuesC.data()));
-  const auto alpha = Kokkos::ArithTraits<scalar_type>::one();
-  const auto beta  = Kokkos::ArithTraits<scalar_type>::zero();
-  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(
-      cusparseSpGEMM_compute(h->cusparseHandle, h->opA, h->opB, &alpha, h->descr_A, h->descr_B, &beta, h->descr_C,
-                             h->scalarType, CUSPARSE_SPGEMM_DEFAULT, h->spgemmDescr, &h->bufferSize4, h->buffer4));
+  const auto alpha = KokkosKernels::ArithTraits<scalar_type>::one();
+  const auto beta  = KokkosKernels::ArithTraits<scalar_type>::zero();
+  KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSpGEMM_compute(h->cusparseHandle, h->opA, h->opB, &alpha, h->descr_A,
+                                                              h->descr_B, &beta, h->descr_C, h->scalarType, h->alg,
+                                                              h->spgemmDescr, &h->bufferSize4, h->buffer4));
   KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSpGEMM_copy(h->cusparseHandle, h->opA, h->opB, &alpha, h->descr_A,
-                                                           h->descr_B, &beta, h->descr_C, h->scalarType,
-                                                           CUSPARSE_SPGEMM_DEFAULT, h->spgemmDescr));
+                                                           h->descr_B, &beta, h->descr_C, h->scalarType, h->alg,
+                                                           h->spgemmDescr));
   handle->set_computed_entries();
   handle->set_call_numeric();
 }
-
-#else
-
-// Generic (using overloads) wrapper for cusparseXcsrgemm (where X is S, D, C,
-// or Z). Accepts Kokkos types (e.g. Kokkos::complex<float>) for Scalar and
-// handles casting to cuSparse types internally.
-
-#define CUSPARSE_XCSRGEMM_SPEC(KokkosType, CusparseType, Abbreviation)                                                 \
-  inline cusparseStatus_t cusparseXcsrgemm(                                                                            \
-      cusparseHandle_t handle, cusparseOperation_t transA, cusparseOperation_t transB, int m, int n, int k,            \
-      const cusparseMatDescr_t descrA, const int nnzA, const KokkosType *csrSortedValA, const int *csrSortedRowPtrA,   \
-      const int *csrSortedColIndA, const cusparseMatDescr_t descrB, const int nnzB, const KokkosType *csrSortedValB,   \
-      const int *csrSortedRowPtrB, const int *csrSortedColIndB, const cusparseMatDescr_t descrC,                       \
-      KokkosType *csrSortedValC, const int *csrSortedRowPtrC, int *csrSortedColIndC) {                                 \
-    return cusparse##Abbreviation##csrgemm(                                                                            \
-        handle, transA, transB, m, n, k, descrA, nnzA, reinterpret_cast<const CusparseType *>(csrSortedValA),          \
-        csrSortedRowPtrA, csrSortedColIndA, descrB, nnzB, reinterpret_cast<const CusparseType *>(csrSortedValB),       \
-        csrSortedRowPtrB, csrSortedColIndB, descrC, reinterpret_cast<CusparseType *>(csrSortedValC), csrSortedRowPtrC, \
-        csrSortedColIndC);                                                                                             \
-  }
-
-CUSPARSE_XCSRGEMM_SPEC(float, float, S)
-CUSPARSE_XCSRGEMM_SPEC(double, double, D)
-CUSPARSE_XCSRGEMM_SPEC(Kokkos::complex<float>, cuComplex, C)
-CUSPARSE_XCSRGEMM_SPEC(Kokkos::complex<double>, cuDoubleComplex, Z)
-
-#undef CUSPARSE_XCSRGEMM_SPEC
-
-// 10.x supports the pre-generic interface.
-template <typename KernelHandle, typename lno_t, typename ConstRowMapType, typename ConstEntriesType,
-          typename ConstValuesType, typename EntriesType, typename ValuesType>
-void spgemm_numeric_cusparse(KernelHandle *handle, lno_t m, lno_t n, lno_t k, const ConstRowMapType &row_mapA,
-                             const ConstEntriesType &entriesA, const ConstValuesType &valuesA,
-                             const ConstRowMapType &row_mapB, const ConstEntriesType &entriesB,
-                             const ConstValuesType &valuesB, const ConstRowMapType &row_mapC,
-                             const EntriesType &entriesC, const ValuesType &valuesC) {
-  auto h = handle->get_cusparse_spgemm_handle();
-
-  int nnzA = entriesA.extent(0);
-  int nnzB = entriesB.extent(0);
-
-  // Only call numeric if C actually has entries
-  if (handle->get_c_nnz()) {
-    KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseXcsrgemm(
-        h->cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, m, k, n, h->generalDescr,
-        nnzA, valuesA.data(), row_mapA.data(), entriesA.data(), h->generalDescr, nnzB, valuesB.data(), row_mapB.data(),
-        entriesB.data(), h->generalDescr, valuesC.data(), row_mapC.data(), entriesC.data()));
-  }
-  handle->set_computed_entries();
-  handle->set_call_numeric();
-}
-
 #endif
 
 #define SPGEMM_NUMERIC_DECL_CUSPARSE(SCALAR, MEMSPACE, TPL_AVAIL)                                                      \
@@ -233,7 +169,8 @@ void spgemm_numeric_cusparse(KernelHandle *handle, lno_t m, lno_t n, lno_t k, co
                                c_int_view_t row_mapA, c_int_view_t entriesA, c_scalar_view_t valuesA, bool,            \
                                c_int_view_t row_mapB, c_int_view_t entriesB, c_scalar_view_t valuesB, bool,            \
                                c_int_view_t row_mapC, int_view_t entriesC, scalar_view_t valuesC) {                    \
-      std::string label = "KokkosSparse::spgemm_numeric[TPL_CUSPARSE," + Kokkos::ArithTraits<SCALAR>::name() + "]";    \
+      std::string label =                                                                                              \
+          "KokkosSparse::spgemm_numeric[TPL_CUSPARSE," + KokkosKernels::ArithTraits<SCALAR>::name() + "]";             \
       Kokkos::Profiling::pushRegion(label);                                                                            \
       spgemm_numeric_cusparse(handle->get_spgemm_handle(), m, n, k, row_mapA, entriesA, valuesA, row_mapB, entriesB,   \
                               valuesB, row_mapC, entriesC, valuesC);                                                   \
@@ -297,8 +234,8 @@ void spgemm_numeric_rocsparse(KernelHandle *handle, typename KernelHandle::nnz_l
 
   typename KernelHandle::rocSparseSpgemmHandleType *h = handle->get_rocsparse_spgemm_handle();
 
-  const auto alpha = Kokkos::ArithTraits<scalar_type>::one();
-  const auto beta  = Kokkos::ArithTraits<scalar_type>::zero();
+  const auto alpha = KokkosKernels::ArithTraits<scalar_type>::one();
+  const auto beta  = KokkosKernels::ArithTraits<scalar_type>::zero();
   rocsparse_pointer_mode oldPtrMode;
 
   auto nnz_A = colidxA.extent(0);
@@ -372,7 +309,8 @@ void spgemm_numeric_rocsparse(KernelHandle *handle, typename KernelHandle::nnz_l
                                c_int_view_t row_mapA, c_int_view_t entriesA, c_scalar_view_t valuesA, bool,           \
                                c_int_view_t row_mapB, c_int_view_t entriesB, c_scalar_view_t valuesB, bool,           \
                                c_int_view_t row_mapC, int_view_t entriesC, scalar_view_t valuesC) {                   \
-      std::string label = "KokkosSparse::spgemm_numeric[TPL_ROCSPARSE," + Kokkos::ArithTraits<SCALAR>::name() + "]";  \
+      std::string label =                                                                                             \
+          "KokkosSparse::spgemm_numeric[TPL_ROCSPARSE," + KokkosKernels::ArithTraits<SCALAR>::name() + "]";           \
       Kokkos::Profiling::pushRegion(label);                                                                           \
       spgemm_numeric_rocsparse(handle->get_spgemm_handle(), m, n, k, row_mapA, entriesA, valuesA, row_mapB, entriesB, \
                                valuesB, row_mapC, entriesC, valuesC);                                                 \
@@ -487,7 +425,7 @@ void spgemm_numeric_mkl(KernelHandle *handle, typename KernelHandle::nnz_lno_t m
                                c_int_view_t row_mapA, c_int_view_t entriesA, c_scalar_view_t valuesA, bool,            \
                                c_int_view_t row_mapB, c_int_view_t entriesB, c_scalar_view_t valuesB, bool,            \
                                c_int_view_t row_mapC, int_view_t entriesC, scalar_view_t valuesC) {                    \
-      std::string label = "KokkosSparse::spgemm_numeric[TPL_MKL," + Kokkos::ArithTraits<SCALAR>::name() + "]";         \
+      std::string label = "KokkosSparse::spgemm_numeric[TPL_MKL," + KokkosKernels::ArithTraits<SCALAR>::name() + "]";  \
       Kokkos::Profiling::pushRegion(label);                                                                            \
       spgemm_numeric_mkl(handle->get_spgemm_handle(), m, n, k, row_mapA, entriesA, valuesA, row_mapB, entriesB,        \
                          valuesB, row_mapC, entriesC, valuesC);                                                        \

@@ -31,9 +31,7 @@
 #endif
 
 // I/O for Harwell-Boeing files
-#ifdef HAVE_ANASAZI_TRIUTILS
-#include "Trilinos_Util_iohb.h"
-#endif
+#include "Tpetra_Util_iohb.h"
 
 // templated multivector and sparse matrix classes
 #include "MyMultiVec.hpp"
@@ -78,17 +76,6 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-#ifndef HAVE_ANASAZI_TRIUTILS
-  cout << "This test requires Triutils. Please configure with --enable-triutils." << endl;
-#ifdef HAVE_ANASAZI_MPI
-  MPI_Finalize() ;
-#endif
-  if (verbose && MyPID == 0) {
-    cout << "End Result: TEST FAILED" << endl;	
-  }
-  return -1;
-#endif
-
   typedef std::complex<double>                ScalarType;
   typedef ScalarTraits<ScalarType>                   SCT;
   typedef SCT::magnitudeType               MagnitudeType;
@@ -107,7 +94,7 @@ int main(int argc, char *argv[])
   double *dvals;
   int *colptr,*rowind;
   nnz = -1;
-  info = readHB_newmat_double(filename.c_str(),&dim,&dim2,&nnz,
+  info = Tpetra::HB::readHB_newmat_double(filename.c_str(),&dim,&dim2,&nnz,
                               &colptr,&rowind,&dvals);
   if (info == 0 || nnz < 0) {
     if (verbose && MyPID == 0) {

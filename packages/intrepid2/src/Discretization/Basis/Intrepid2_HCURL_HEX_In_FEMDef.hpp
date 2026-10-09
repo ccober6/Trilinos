@@ -51,15 +51,13 @@ namespace Intrepid2 {
       auto ptr3 = work.data() + 3*cardLine*npts*dim_s;   
       
       typedef typename Kokkos::DynRankView<typename InputViewType::value_type, typename WorkViewType::memory_space> ViewType;
-      auto vcprop = Kokkos::common_view_alloc_prop(input);
 
-      switch (OpType) {
-      case OPERATOR_VALUE: {
+      if constexpr (OpType == OPERATOR_VALUE) {
 
-        ViewType workLine(Kokkos::view_wrap(ptr0, vcprop), cardLine, npts);
-        ViewType outputLine_A(Kokkos::view_wrap(ptr1, vcprop), cardLine, npts);
-        ViewType outputLine_B(Kokkos::view_wrap(ptr2, vcprop), cardLine, npts);
-        ViewType outputBubble(Kokkos::view_wrap(ptr3, vcprop), cardBubble, npts);
+        ViewType workLine = createMatchingUnmanagedView<ViewType>(input, ptr0, cardLine, npts);
+        ViewType outputLine_A = createMatchingUnmanagedView<ViewType>(input, ptr1, cardLine, npts);
+        ViewType outputLine_B = createMatchingUnmanagedView<ViewType>(input, ptr2, cardLine, npts);
+        ViewType outputBubble = createMatchingUnmanagedView<ViewType>(input, ptr3, cardBubble, npts);
         
         // tensor product
         ordinal_type idx = 0;
@@ -82,9 +80,9 @@ namespace Intrepid2 {
             for (ordinal_type j=0;j<cardLine;++j) // y
               for (ordinal_type i=0;i<cardBubble;++i,++idx) // x
                 for (ordinal_type l=0;l<npts;++l) {
-                  output.access(idx,l,0) = output_x.access(i,l)*output_y.access(j,l)*output_z.access(k,l);
-                  output.access(idx,l,1) = 0.0;
-                  output.access(idx,l,2) = 0.0;
+                  output(idx,l,0) = output_x(i,l)*output_y(j,l)*output_z(k,l);
+                  output(idx,l,1) = 0.0;
+                  output(idx,l,2) = 0.0;
                 }
         }
         {
@@ -106,9 +104,9 @@ namespace Intrepid2 {
             for (ordinal_type j=0;j<cardBubble;++j) // y
               for (ordinal_type i=0;i<cardLine;++i,++idx) // x
                 for (ordinal_type l=0;l<npts;++l) {
-                  output.access(idx,l,0) = 0.0;
-                  output.access(idx,l,1) = output_x.access(i,l)*output_y.access(j,l)*output_z.access(k,l);
-                  output.access(idx,l,2) = 0.0;
+                  output(idx,l,0) = 0.0;
+                  output(idx,l,1) = output_x(i,l)*output_y(j,l)*output_z(k,l);
+                  output(idx,l,2) = 0.0;
                 }
         }
         {
@@ -130,24 +128,23 @@ namespace Intrepid2 {
             for (ordinal_type j=0;j<cardLine;++j) // y
               for (ordinal_type i=0;i<cardLine;++i,++idx) // x
                 for (ordinal_type l=0;l<npts;++l) {
-                  output.access(idx,l,0) = 0.0;
-                  output.access(idx,l,1) = 0.0;
-                  output.access(idx,l,2) = output_x.access(i,l)*output_y.access(j,l)*output_z.access(k,l);
+                  output(idx,l,0) = 0.0;
+                  output(idx,l,1) = 0.0;
+                  output(idx,l,2) = output_x(i,l)*output_y(j,l)*output_z(k,l);
                 }
         }
-        break;
       }
-      case OPERATOR_CURL: {
+      else if constexpr (OpType == OPERATOR_CURL) {
           
          auto ptr4 = work.data() + 4*cardLine*npts*dim_s;
          auto ptr5 = work.data() + 5*cardLine*npts*dim_s;
          
-        ViewType workLine(Kokkos::view_wrap(ptr0, vcprop), cardLine, npts);
-        ViewType outputLine_A(Kokkos::view_wrap(ptr1, vcprop), cardLine, npts);
-        ViewType outputLine_B(Kokkos::view_wrap(ptr2, vcprop), cardLine, npts);
-        ViewType outputLine_DA(Kokkos::view_wrap(ptr3, vcprop), cardLine, npts, 1);
-        ViewType outputLine_DB(Kokkos::view_wrap(ptr4, vcprop), cardLine, npts, 1);
-        ViewType outputBubble(Kokkos::view_wrap(ptr5, vcprop), cardBubble, npts);
+        ViewType workLine = createMatchingUnmanagedView<ViewType>(input, ptr0, cardLine, npts);
+        ViewType outputLine_A = createMatchingUnmanagedView<ViewType>(input, ptr1, cardLine, npts);
+        ViewType outputLine_B = createMatchingUnmanagedView<ViewType>(input, ptr2, cardLine, npts);
+        ViewType outputLine_DA = createMatchingUnmanagedView<ViewType>(input, ptr3, cardLine, npts, 1);
+        ViewType outputLine_DB = createMatchingUnmanagedView<ViewType>(input, ptr4, cardLine, npts, 1);
+        ViewType outputBubble = createMatchingUnmanagedView<ViewType>(input, ptr5, cardBubble, npts);
 
         // tensor product
         ordinal_type idx = 0;
@@ -179,9 +176,9 @@ namespace Intrepid2 {
             for (ordinal_type j=0;j<cardLine;++j) // y
               for (ordinal_type i=0;i<cardBubble;++i,++idx) // x
                 for (ordinal_type l=0;l<npts;++l) {
-                  output.access(idx,l,0) =  0.0;
-                  output.access(idx,l,1) =  output_x.access(i,l)*output_y.access (j,l)  *output_dz.access(k,l,0);
-                  output.access(idx,l,2) = -output_x.access(i,l)*output_dy.access(j,l,0)*output_z.access (k,l);
+                  output(idx,l,0) =  0.0;
+                  output(idx,l,1) =  output_x(i,l)*output_y (j,l)  *output_dz(k,l,0);
+                  output(idx,l,2) = -output_x(i,l)*output_dy(j,l,0)*output_z (k,l);
                 }
         }
         { // y - component
@@ -211,9 +208,9 @@ namespace Intrepid2 {
             for (ordinal_type j=0;j<cardBubble;++j) // y
               for (ordinal_type i=0;i<cardLine;++i,++idx) // x
                 for (ordinal_type l=0;l<npts;++l) {
-                  output.access(idx,l,0) = -output_x.access (i,l)  *output_y.access(j,l)*output_dz.access(k,l,0);
-                  output.access(idx,l,1) =  0.0;
-                  output.access(idx,l,2) =  output_dx(i,l,0)*output_y.access(j,l)*output_z.access (k,l);
+                  output(idx,l,0) = -output_x (i,l)  *output_y(j,l)*output_dz(k,l,0);
+                  output(idx,l,1) =  0.0;
+                  output(idx,l,2) =  output_dx(i,l,0)*output_y(j,l)*output_z (k,l);
                 }
         }
         { // z - component
@@ -243,17 +240,15 @@ namespace Intrepid2 {
             for (ordinal_type j=0;j<cardLine;++j) // y
               for (ordinal_type i=0;i<cardLine;++i,++idx) // x
                 for (ordinal_type l=0;l<npts;++l) {
-                  output.access(idx,l,0) =  output_x.access (i,l)  *output_dy.access(j,l,0)*output_z.access(k,l);
-                  output.access(idx,l,1) = -output_dx(i,l,0)*output_y.access (j,l)  *output_z.access(k,l);
-                  output.access(idx,l,2) =  0.0;
+                  output(idx,l,0) =  output_x (i,l)  *output_dy(j,l,0)*output_z(k,l);
+                  output(idx,l,1) = -output_dx(i,l,0)*output_y (j,l)  *output_z(k,l);
+                  output(idx,l,2) =  0.0;
                 }
         }
-        break;
       }
-      default: {
+      else {
         INTREPID2_TEST_FOR_ABORT( true,
                                   ">>> ERROR: (Intrepid2::Basis_HCURL_HEX_In_FEM::Serial::getValues) operator is not supported" );
-      }
       }
     }
     template<typename DT, ordinal_type numPtsPerEval,
@@ -278,7 +273,7 @@ namespace Intrepid2 {
       const auto loopSize = loopSizeTmp1 + loopSizeTmp2;
       Kokkos::RangePolicy<ExecSpaceType,Kokkos::Schedule<Kokkos::Static> > policy(0, loopSize);
 
-      typedef typename inputPointViewType::value_type inputPointType;
+      //typedef typename inputPointViewType::value_type inputPointType;
 
       const ordinal_type cardinality = outputValues.extent(0);
       //get basis order based on basis cardinality.
@@ -289,22 +284,20 @@ namespace Intrepid2 {
         cardBubble = Intrepid2::getPnCardinality<1>(order);
         cardLine = Intrepid2::getPnCardinality<1>(++order);
       } while((3*cardBubble*cardLine*cardLine !=  cardinality) && (order != Parameters::MaxOrder));
-      auto vcprop = Kokkos::common_view_alloc_prop(inputPoints);
-      typedef typename Kokkos::DynRankView< inputPointType, typename inputPointViewType::memory_space> workViewType;
 
       switch (operatorType) {
       case OPERATOR_VALUE: {
         auto workSize = Serial<OPERATOR_VALUE>::getWorkSizePerPoint(order);
-        workViewType  work(Kokkos::view_alloc("Basis_CURL_HEX_In_FEM::getValues::work", vcprop), workSize, inputPoints.extent(0));
-        typedef Functor<outputValueViewType,inputPointViewType,vinvViewType, workViewType,
+        auto work = createMatchingDynRankView(inputPoints, "Basis_CURL_HEX_In_FEM::getValues::work", workSize, inputPoints.extent(0));
+        typedef Functor<outputValueViewType,inputPointViewType,vinvViewType, decltype(work),
             OPERATOR_VALUE,numPtsPerEval> FunctorType;
         Kokkos::parallel_for( policy, FunctorType(outputValues, inputPoints, vinvLine, vinvBubble, work) );
         break;
       }
       case OPERATOR_CURL: {
         auto workSize = Serial<OPERATOR_CURL>::getWorkSizePerPoint(order);
-        workViewType  work(Kokkos::view_alloc("Basis_CURL_HEX_In_FEM::getValues::work", vcprop), workSize, inputPoints.extent(0));
-        typedef Functor<outputValueViewType,inputPointViewType,vinvViewType, workViewType,
+        auto work = createMatchingDynRankView(inputPoints, "Basis_CURL_HEX_In_FEM::getValues::work", workSize, inputPoints.extent(0));
+        typedef Functor<outputValueViewType,inputPointViewType,vinvViewType, decltype(work),
             OPERATOR_CURL,numPtsPerEval> FunctorType;
         Kokkos::parallel_for( policy, FunctorType(outputValues, inputPoints, vinvLine, vinvBubble, work) );
         break;
@@ -591,16 +584,16 @@ namespace Intrepid2 {
 
   template<typename DT, typename OT, typename PT>
   void 
-  Basis_HCURL_HEX_In_FEM<DT,OT,PT>::getScratchSpaceSize(       
-                                    ordinal_type& perTeamSpaceSize,
+  Basis_HCURL_HEX_In_FEM<DT,OT,PT>::getScratchSpaceSize(        
                                     ordinal_type& perThreadSpaceSize,
                               const PointViewType inputPoints,
                               const EOperator operatorType) const {
-    perTeamSpaceSize = 0;
+    using ScalarType = typename ScalarTraits<typename PointViewType::value_type>::scalar_type;
+    using ScratchViewType = Kokkos::DynRankView<ScalarType, typename DT::execution_space::scratch_memory_space, Kokkos::MemoryTraits<Kokkos::Unmanaged> >;
     ordinal_type scalarWorkViewExtent = (operatorType == OPERATOR_VALUE) ? 
                                       3*this->vinvLine_.extent(0)+this->vinvBubble_.extent(0):
                                       5*this->vinvLine_.extent(0)+this->vinvBubble_.extent(0);
-    perThreadSpaceSize = scalarWorkViewExtent*get_dimension_scalar(inputPoints)*sizeof(typename BasisBase::scalarType);
+    perThreadSpaceSize = ScratchViewType::shmem_size(scalarWorkViewExtent*get_dimension_scalar(inputPoints));
   }
 
   template<typename DT, typename OT, typename PT>
@@ -611,7 +604,7 @@ namespace Intrepid2 {
       const PointViewType  inputPoints,
       const EOperator operatorType,
       const typename Kokkos::TeamPolicy<typename DT::execution_space>::member_type& team_member,
-      const typename DT::execution_space::scratch_memory_space & scratchStorage, 
+      const int threadScratchLevel, 
       const ordinal_type subcellDim,
       const ordinal_type subcellOrdinal) const {
 
@@ -625,15 +618,15 @@ namespace Intrepid2 {
                                       3*this->vinvLine_.extent(0)+this->vinvBubble_.extent(0):
                                       5*this->vinvLine_.extent(0)+this->vinvBubble_.extent(0);
       ordinal_type sizePerPoint = scalarSizePerPoint*get_dimension_scalar(inputPoints);
-      WorkViewType workView(scratchStorage, sizePerPoint*team_member.team_size());
+      
+      WorkViewType  work(team_member.thread_scratch(threadScratchLevel), sizePerPoint);
       using range_type = Kokkos::pair<ordinal_type,ordinal_type>;
-
+      
       switch(operatorType) {
         case OPERATOR_VALUE:
           Kokkos::parallel_for (Kokkos::TeamThreadRange (team_member, numPoints), [=, &vinvLine_ = this->vinvLine_, &vinvBubble_ = this->vinvBubble_] (ordinal_type& pt) {
             auto       output = Kokkos::subview( outputValues, Kokkos::ALL(), range_type  (pt,pt+1), Kokkos::ALL() );
             const auto input  = Kokkos::subview( inputPoints,                 range_type(pt, pt+1), Kokkos::ALL() );
-            WorkViewType  work(workView.data() + sizePerPoint*team_member.team_rank(), sizePerPoint);
             Impl::Basis_HCURL_HEX_In_FEM::Serial<OPERATOR_VALUE>::getValues( output, input, work, vinvLine_, vinvBubble_ );
           });
           break;
@@ -641,7 +634,6 @@ namespace Intrepid2 {
           Kokkos::parallel_for (Kokkos::TeamThreadRange (team_member, numPoints), [=, &vinvLine_ = this->vinvLine_, &vinvBubble_ = this->vinvBubble_] (ordinal_type& pt) {
             auto       output = Kokkos::subview( outputValues, Kokkos::ALL(), range_type(pt,pt+1), Kokkos::ALL() );
             const auto input  = Kokkos::subview( inputPoints,                 range_type(pt,pt+1), Kokkos::ALL() );
-            WorkViewType  work(workView.data() + sizePerPoint*team_member.team_rank(), sizePerPoint);
             Impl::Basis_HCURL_HEX_In_FEM::Serial<OPERATOR_CURL>::getValues( output, input, work, vinvLine_, vinvBubble_ );
           });
           break;

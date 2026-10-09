@@ -1,24 +1,11 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSSPARSE_IMPL_SPMV_SPEC_HPP_
 #define KOKKOSSPARSE_IMPL_SPMV_SPEC_HPP_
 
 #include <KokkosKernels_config.h>
 #include <Kokkos_Core.hpp>
-#include <Kokkos_ArithTraits.hpp>
+#include <KokkosKernels_ArithTraits.hpp>
 
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv_handle.hpp"
@@ -143,7 +130,9 @@ struct SPMV<ExecutionSpace, Handle, AMatrix, XVector, YVector, false, KOKKOSKERN
 
   static void spmv(const ExecutionSpace& space, Handle* handle, const char mode[], const coefficient_type& alpha,
                    const AMatrix& A, const XVector& x, const coefficient_type& beta, const YVector& y) {
-    typedef Kokkos::ArithTraits<coefficient_type> KAT;
+    std::string label = "KokkosSparse::spmv[NATIVE," + KokkosKernels::ArithTraits<coefficient_type>::name() + "]";
+    Kokkos::Profiling::pushRegion(label);
+    typedef KokkosKernels::ArithTraits<coefficient_type> KAT;
 
     if (beta == KAT::zero()) {
       spmv_beta<ExecutionSpace, Handle, AMatrix, XVector, YVector, 0>(space, handle, mode, alpha, A, x, beta, y);
@@ -154,6 +143,7 @@ struct SPMV<ExecutionSpace, Handle, AMatrix, XVector, YVector, false, KOKKOSKERN
     } else {
       spmv_beta<ExecutionSpace, Handle, AMatrix, XVector, YVector, 2>(space, handle, mode, alpha, A, x, beta, y);
     }
+    Kokkos::Profiling::popRegion();
   }
 };
 
@@ -167,7 +157,9 @@ struct SPMV_MV<ExecutionSpace, Handle, AMatrix, XVector, YVector, false, false, 
   static void spmv_mv(const ExecutionSpace& space, Handle* /* handle */, const char mode[],
                       const coefficient_type& alpha, const AMatrix& A, const XVector& x, const coefficient_type& beta,
                       const YVector& y) {
-    typedef Kokkos::ArithTraits<coefficient_type> KAT;
+    std::string label = "KokkosSparse::spmv[NATIVE,MV," + KokkosKernels::ArithTraits<coefficient_type>::name() + "]";
+    Kokkos::Profiling::pushRegion(label);
+    typedef KokkosKernels::ArithTraits<coefficient_type> KAT;
     if (alpha == KAT::zero()) {
       spmv_alpha_mv<ExecutionSpace, AMatrix, XVector, YVector, 0>(space, mode, alpha, A, x, beta, y);
     } else if (alpha == KAT::one()) {
@@ -177,6 +169,7 @@ struct SPMV_MV<ExecutionSpace, Handle, AMatrix, XVector, YVector, false, false, 
     } else {
       spmv_alpha_mv<ExecutionSpace, AMatrix, XVector, YVector, 2>(space, mode, alpha, A, x, beta, y);
     }
+    Kokkos::Profiling::popRegion();
   }
 };
 
@@ -188,6 +181,8 @@ struct SPMV_MV<ExecutionSpace, Handle, AMatrix, XVector, YVector, true, false, K
                       const AMatrix& A, const XVector& x, const coefficient_type& beta, const YVector& y) {
     static_assert(std::is_integral_v<typename AMatrix::non_const_value_type>,
                   "This implementation is only for integer Scalar types.");
+    std::string label = "KokkosSparse::spmv[NATIVE,MV," + KokkosKernels::ArithTraits<coefficient_type>::name() + "]";
+    Kokkos::Profiling::pushRegion(label);
     KokkosKernels::Experimental::Controls defaultControls;
     for (size_t j = 0; j < x.extent(1); ++j) {
       auto x_j = Kokkos::subview(x, Kokkos::ALL(), j);
@@ -195,6 +190,7 @@ struct SPMV_MV<ExecutionSpace, Handle, AMatrix, XVector, YVector, true, false, K
       typedef SPMV<ExecutionSpace, Handle, AMatrix, decltype(x_j), decltype(y_j)> impl_type;
       impl_type::spmv(space, handle, mode, alpha, A, x_j, beta, y_j);
     }
+    Kokkos::Profiling::popRegion();
   }
 };
 #endif

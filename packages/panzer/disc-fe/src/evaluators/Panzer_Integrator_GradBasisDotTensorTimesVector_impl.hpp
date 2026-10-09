@@ -155,7 +155,7 @@ namespace panzer
     bool use_shared_memory = panzer::HP::inst().useSharedMemory<ScalarT>();
     if (!use_shared_memory) {
       if (Sacado::IsADType<ScalarT>::value) {
-	const auto fadSize = Kokkos::dimension_scalar(field_.get_view());
+	const auto fadSize = Sacado::dimension_scalar(field_.get_view());
 	tmp_ = PHX::View<ScalarT*>("GradBasisDotTensorTimesVector::tmp_",field_.extent(0),fadSize);
       } else {
 	tmp_ = PHX::View<ScalarT*>("GradBasisDotTensorTimesVector::tmp_",field_.extent(0));
@@ -224,7 +224,7 @@ namespace panzer
     const int numQP = vector_.extent(1);
     const int numDim = vector_.extent(2);
     const int numBases = basis_.extent(1);
-    const int fadSize = Kokkos::dimension_scalar(field_.get_view());
+    const int fadSize = Sacado::dimension_scalar(field_.get_view());
 
     scratch_view tmp;
     scratch_view tmp_field;
@@ -250,11 +250,11 @@ namespace panzer
       {
         for (int dim(0); dim < numDim; ++dim)
         {
-          tmp_(cell) = 0.0;
+          tmp(cell) = 0.0;
           for (int dim2(0); dim2 < numDim; ++dim2)
-            tmp_(cell) += kokkosTensor_(cell, qp, dim, dim2) * vector_(cell, qp, dim2);
+            tmp(cell) += kokkosTensor_(cell, qp, dim, dim2) * vector_(cell, qp, dim2);
 	  Kokkos::parallel_for(Kokkos::TeamThreadRange(team,0,numBases), [&] (const int basis) {
-	    tmp_field(basis) += basis_(cell, basis, qp, dim) * tmp_(cell);
+	    tmp_field(basis) += basis_(cell, basis, qp, dim) * tmp(cell);
 	  });
         } // end loop over the dimensions of the vector field
       } // end loop over the quadrature points
@@ -295,7 +295,7 @@ namespace panzer
     if (use_shared_memory) {
       int bytes;
       if (Sacado::IsADType<ScalarT>::value) {
-	const int fadSize = Kokkos::dimension_scalar(field_.get_view());
+	const int fadSize = Sacado::dimension_scalar(field_.get_view());
 	bytes = scratch_view::shmem_size(1,fadSize) + scratch_view::shmem_size(basis_.extent(1),fadSize);
       }
       else

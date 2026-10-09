@@ -9,7 +9,7 @@
 // @HEADER
 
 #include "Sacado.hpp"
-#include "Kokkos_View_Fad.hpp"
+#include "Sacado_Fad_Kokkos.hpp"
 #include "Kokkos_Core.hpp"
 #include "Teuchos_UnitTestHarness.hpp"
 #include "Phalanx_KokkosDeviceTypes.hpp"
@@ -147,11 +147,7 @@ TEUCHOS_UNIT_TEST(PhalanxViewOfViews,ViewOfView_UserStreamCtor) {
   std::vector<PHX::Device> streams;
   if (PHX::Device().concurrency() >= 4) {
     std::cout << "Using partition_space, concurrency=" << PHX::Device().concurrency() << std::endl;
-#if KOKKOS_VERSION >= 40699
     streams = Kokkos::Experimental::partition_space(PHX::Device(),std::vector<int>(4,1));
-#else
-    streams = Kokkos::Experimental::partition_space(PHX::Device(),1,1,1,1);
-#endif
   }
   else {
     std::cout << "NOT using partition_space, concurrency=" << PHX::Device().concurrency() << std::endl;
@@ -228,11 +224,7 @@ TEUCHOS_UNIT_TEST(PhalanxViewOfViews,ViewOfView_UserStreamInitialize) {
   std::vector<PHX::Device> streams;
   if (PHX::Device().concurrency() >= 4) {
     std::cout << "Using partition_space, concurrency=" << PHX::Device().concurrency() << std::endl;
-#if KOKKOS_VERSION >= 40699
     streams = Kokkos::Experimental::partition_space(PHX::Device(),std::vector<int>(4,1));
-#else
-    streams = Kokkos::Experimental::partition_space(PHX::Device(),1,1,1,1);
-#endif
   }
   else {
     std::cout << "NOT using partition_space, concurrency=" << PHX::Device().concurrency() << std::endl;
@@ -327,6 +319,103 @@ TEUCHOS_UNIT_TEST(PhalanxViewOfViews,ViewOfView_DefaultCtorDtor) {
   auto mesh_eval = std::make_shared<MeshEvaluationTestStruct>();
   TEST_ASSERT(!mesh_eval->v_of_v_.isInitialized());
   mesh_eval = nullptr;
+}
+
+// ********************************
+// Demonstrates that the "inner view" of a ViewOfViews can be a user
+// defined class/struct containing Kokkos::Views instead of a plain
+// Kokkos::View, e.g. "View<MyObj*>" instead of
+// "View<View<double**>*>".  To support this, MyObj must be default
+// constructible and must supply an ADL discoverable overload of
+// phalanxVoVMakeCopyWithInnerRuntimeUnmanagedViews() that builds an
+// unmanaged copy of MyObj by delegating to
+// PHX::phalanxVoVMakeCopyWithInnerRuntimeUnmanagedViews() for each of
+// its Kokkos::View data members.
+// ********************************
+namespace PhalanxViewOfViewsStructOfViewsTest {
+
+  using InnerViewT = Kokkos::View<double***,mem_t>;
+
+  // A struct of views used as the "inner view" of a ViewOfViews.
+  struct StructOfViews {
+    InnerViewT a;
+    InnerViewT b;
+
+    KOKKOS_INLINE_FUNCTION
+    double sum(const int cell,const int pt,const int eq) const
+    { return a(cell,pt,eq) + b(cell,pt,eq); }
+  };
+
+  // Required customization point for PHX::ViewOfViews. Defined in the
+  // same namespace as StructOfViews so that it is found via ADL from
+  // within PHX::ViewOfViews::addView().
+  StructOfViews phalanxVoVMakeCopyWithInnerRuntimeUnmanagedViews(const StructOfViews& s)
+  {
+    StructOfViews tmp;
+    tmp.a = PHX::phalanxVoVMakeCopyWithInnerRuntimeUnmanagedViews(s.a);
+    tmp.b = PHX::phalanxVoVMakeCopyWithInnerRuntimeUnmanagedViews(s.b);
+    return tmp;
+  }
+
+}
+
+TEUCHOS_UNIT_TEST(PhalanxViewOfViews,ViewOfView_StructOfViews) {
+  using namespace PhalanxViewOfViewsStructOfViewsTest;
+
+  const int num_cells = 10;
+  const int num_pts = 8;
+  const int num_equations = 32;
+
+  InnerViewT a1("a1",num_cells,num_pts,num_equations);
+  InnerViewT b1("b1",num_cells,num_pts,num_equations);
+  InnerViewT a2("a2",num_cells,num_pts,num_equations);
+  InnerViewT b2("b2",num_cells,num_pts,num_equations);
+
+  Kokkos::deep_copy(a1,2.0);
+  Kokkos::deep_copy(b1,3.0);
+  Kokkos::deep_copy(a2,4.0);
+  Kokkos::deep_copy(b2,5.0);
+
+  Kokkos::View<double***,mem_t> results("results",num_cells,num_pts,num_equations);
+
+  {
+    constexpr int OuterViewRank = 1;
+    PHX::ViewOfViews<OuterViewRank,StructOfViews,mem_t> v_of_v("outer host",2);
+
+    TEST_ASSERT(v_of_v.isInitialized());
+
+    // Let the original struct-of-views instances go out of scope to
+    // prove that the ViewOfViews is what keeps the inner views alive.
+    {
+      StructOfViews s1{a1,b1};
+      StructOfViews s2{a2,b2};
+      v_of_v.addView(s1,0);
+      v_of_v.addView(s2,1);
+    }
+
+    TEST_ASSERT(!v_of_v.deviceViewIsSynced());
+    v_of_v.syncHostToDevice();
+    TEST_ASSERT(v_of_v.deviceViewIsSynced());
+
+    auto v_dev = v_of_v.getViewDevice();
+    auto policy = Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0,0,0},{num_cells,num_pts,num_equations});
+    Kokkos::parallel_for("view of view struct-of-views test",policy,KOKKOS_LAMBDA (const int cell,const int pt, const int eq) {
+      results(cell,pt,eq) = v_dev(0).sum(cell,pt,eq) + v_dev(1).sum(cell,pt,eq);
+    });
+
+    // Test the const accessors also work with struct-of-views inner types.
+    const PHX::ViewOfViews<OuterViewRank,StructOfViews,mem_t>& const_v_of_v = v_of_v;
+    const_v_of_v.getViewHost();
+    const_v_of_v.getViewDevice();
+  }
+
+  auto results_host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),results);
+  const auto tol = std::numeric_limits<double>::epsilon() * 100.0;
+  for (int cell=0; cell < num_cells; ++cell)
+    for (int pt=0; pt < num_pts; ++pt)
+      for (int eq=0; eq < num_equations; ++eq) {
+        TEST_FLOATING_EQUALITY(results_host(cell,pt,eq),14.0,tol); // 2+3+4+5
+      }
 }
 
 // ********************************
@@ -571,17 +660,19 @@ void initializeVoV(VoVType& vov)
   auto c = Mat_h(1,0);
 
   // Initialize a, b and c
-  Kokkos::MDRangePolicy<PHX::Device::execution_space,Kokkos::Rank<2>> policy({0,0},{a.extent(0),a.extent(1)});
-  Kokkos::parallel_for("FadAndAssignment init",policy,KOKKOS_LAMBDA(const int cell, const int pt) {
-    a(cell,pt).val() = double(cell) + double(pt);
-    a(cell,pt).fastAccessDx(0) = 0.0;
-    a(cell,pt).fastAccessDx(1) = 2.0 * double(cell) + double(pt);
-    b(cell,pt).val() = double(cell);
-    b(cell,pt).fastAccessDx(0) = 0.0;
-    b(cell,pt).fastAccessDx(1) = 0.0;
-    c(cell,pt).val() = 0.0;
-    c(cell,pt).fastAccessDx(0) = 0.0;
-    c(cell,pt).fastAccessDx(1) = 0.0;
+  // Use RangePolicy as MDRange does not work for FADs when HIERARCHIC parallelism is enabled.
+  Kokkos::parallel_for("FadAndAssignment init",a.extent(0),KOKKOS_LAMBDA(const int cell) {
+    for (size_t pt=0; pt < a.extent(1); ++pt) {
+      a(cell,pt).val() = double(cell) + double(pt);
+      a(cell,pt).fastAccessDx(0) = 0.0;
+      a(cell,pt).fastAccessDx(1) = 2.0 * double(cell) + double(pt);
+      b(cell,pt).val() = double(cell);
+      b(cell,pt).fastAccessDx(0) = 0.0;
+      b(cell,pt).fastAccessDx(1) = 0.0;
+      c(cell,pt).val() = 0.0;
+      c(cell,pt).fastAccessDx(0) = 0.0;
+      c(cell,pt).fastAccessDx(1) = 0.0;
+    }
   });
   PHX::Device::execution_space().fence();
 }
@@ -611,7 +702,10 @@ void testVoV(VoVType& vov, OstreamType& out, bool& success)
   PHX::Device::execution_space().fence();
 
   // Check the results
-  auto c_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),c);
+  // FIXME: breaks with new view implementation in 4.7.1
+  //auto c_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),c);
+  auto c_h = Kokkos::create_mirror_view(Kokkos::HostSpace(),c);
+  Kokkos::deep_copy(c_h, c);
   const auto tol = std::numeric_limits<double>::epsilon() * 100.0;
   for (size_t cell=0; cell < c.extent(0); ++cell) {
     for (size_t pt=0; pt < c.extent(1); ++pt) {
@@ -685,10 +779,12 @@ TEUCHOS_UNIT_TEST(PhalanxViewOfViews,FadHierarchicMDRangeBug) {
   VT b("b",num_cell,num_pt,num_deriv);
 
   {
-    Kokkos::MDRangePolicy<PHX::Device::execution_space,Kokkos::Rank<2>> policy({0,0},{a.extent(0),a.extent(1)});
-    Kokkos::parallel_for("FadRawPtr init",policy,KOKKOS_LAMBDA(const int cell, const int pt) {
-      a(cell,pt).val() = double(cell) + double(pt);
-      a(cell,pt).fastAccessDx(1) = 2.0 + double(cell) + double(pt);
+    // Use RangePolicy as MDRange does not work for FADs when HIERARCHIC parallelism is enabled.
+    Kokkos::parallel_for("FadRawPtr init",a.extent(0),KOKKOS_LAMBDA(const int cell) {
+      for (size_t pt=0; pt < a.extent(1); ++pt) {
+        a(cell,pt).val() = double(cell) + double(pt);
+        a(cell,pt).fastAccessDx(1) = 2.0 + double(cell) + double(pt);
+      }
     });
     PHX::exec_space().fence(); // don't need this but being safe for debugging
   }
@@ -723,7 +819,10 @@ TEUCHOS_UNIT_TEST(PhalanxViewOfViews,FadHierarchicMDRangeBug) {
 
   PHX::exec_space().fence();
 
-  auto b_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),b);
+  // FIXME: breaks with new view implementation in 4.7.1
+  // auto b_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),b);
+  auto b_h = Kokkos::create_mirror_view(Kokkos::HostSpace(),b);
+  Kokkos::deep_copy(b_h, b);
   const auto tol = std::numeric_limits<double>::epsilon() * 100.0;
   for (size_t cell=0; cell < a.extent(0); ++cell) {
     for (size_t pt=0; pt < a.extent(1); ++pt) {

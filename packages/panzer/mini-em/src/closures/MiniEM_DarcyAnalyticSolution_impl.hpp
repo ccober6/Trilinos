@@ -17,7 +17,7 @@
 #include "Panzer_GatherBasisCoordinates.hpp"
 
 #include "Panzer_Traits.hpp"
-#include "Kokkos_ArithTraits.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "Kokkos_MathematicalConstants.hpp"
 #include "Kokkos_MathematicalFunctions.hpp"
 

@@ -30,7 +30,7 @@
    than just BLAS and LAPACK functions.  */
 #cmakedefine HAVE_KOKKOSKERNELS_MKL
 
-#cmakedefine KOKKOSKERNELS_ENABLE_TESTS_AND_PERFSUITE
+/* Define this macro to build the benchmark tests */
 #cmakedefine KOKKOSKERNELS_ENABLE_BENCHMARKS
 
 /* Define this macro if experimental features of Kokkoskernels are enabled */
@@ -53,13 +53,10 @@
 #cmakedefine KOKKOSKERNELS_INST_EXECSPACE_HIP
 #cmakedefine KOKKOSKERNELS_INST_MEMSPACE_HIPSPACE
 #cmakedefine KOKKOSKERNELS_INST_MEMSPACE_HIPMANAGEDSPACE
-/* Whether to build kernels for execution space Kokkos::Experimental::SYCL */
+/* Whether to build kernels for execution space Kokkos::SYCL */
 #cmakedefine KOKKOSKERNELS_INST_EXECSPACE_SYCL
 #cmakedefine KOKKOSKERNELS_INST_MEMSPACE_SYCLSPACE
 #cmakedefine KOKKOSKERNELS_INST_MEMSPACE_SYCLSHAREDSPACE
-/* Whether to build kernels for execution space Kokkos::Experimental::OpenMPTarget */
-#cmakedefine KOKKOSKERNELS_INST_EXECSPACE_OPENMPTARGET
-#cmakedefine KOKKOSKERNELS_INST_MEMSPACE_OPENMPTARGETSPACE
 /* Whether to build kernels for execution space Kokkos::OpenMP */
 #cmakedefine KOKKOSKERNELS_INST_EXECSPACE_OPENMP
 /* Whether to build kernels for execution space Kokkos::Threads */
@@ -142,12 +139,15 @@
 #cmakedefine KOKKOSKERNELS_ENABLE_TPL_ROCSPARSE
 /* ROCSOLVER */
 #cmakedefine KOKKOSKERNELS_ENABLE_TPL_ROCSOLVER
+/* ACCELERATE */
+#cmakedefine KOKKOSKERNELS_ENABLE_TPL_ACCELERATE
 
 #cmakedefine KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
 
 /* if MKL or ARMPL, BLAS is also defined */
 #if defined(KOKKOSKERNELS_ENABLE_TPL_MKL) || \
-    defined(KOKKOSKERNELS_ENABLE_TPL_ARMPL)
+    defined(KOKKOSKERNELS_ENABLE_TPL_ARMPL) || \
+    defined(KOKKOSKERNELS_ENABLE_TPL_ACCELERATE)
 #if !defined(KOKKOSKERNELS_ENABLE_TPL_BLAS)
 #define KOKKOSKERNELS_ENABLE_TPL_BLAS
 #endif
@@ -156,6 +156,9 @@
 /* Whether MKL is providing the BLAS and LAPACK implementation */
 #cmakedefine MKL_PROVIDES_BLAS_LAPACK
 
+/* KOKKOSKERNELS_ENABLE_HOST_ONLY is deprecated and will be removed in a future
+ * release. There is no replacement.
+ */
 #if !defined(KOKKOS_ENABLE_CUDA) && !defined(KOKKOS_ENABLE_HIP) && \
     !defined(KOKKOS_ENABLE_SYCL) && !defined(KOKKOS_ENABLE_OPENMPTARGET)
 #define KOKKOSKERNELS_ENABLE_HOST_ONLY

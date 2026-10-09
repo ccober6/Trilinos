@@ -7,7 +7,7 @@
 // *****************************************************************************
 // @HEADER
 
-#define SACADO_VIEW_CUDA_HIERARCHICAL 1
+#define SACADO_GPU_HIERARCHICAL 1
 #define SACADO_ALIGN_SFAD 1
 
 #include "Sacado.hpp"
@@ -19,7 +19,7 @@
 template <typename ViewTypeA, typename ViewTypeB, typename ViewTypeC>
 void run_mat_vec_hierarchical(const ViewTypeA& A, const ViewTypeB& b,
                               const ViewTypeC& c) {
-  typedef typename Kokkos::ThreadLocalScalarType<ViewTypeC>::type scalar_type;
+  typedef typename Sacado::ThreadLocalScalarType<ViewTypeC>::type scalar_type;
   typedef typename ViewTypeC::execution_space execution_space;
 
 #if defined (KOKKOS_ENABLE_CUDA)
@@ -65,7 +65,7 @@ check_deriv_hierarchical(const ViewTypeA& A, const ViewTypeB& b, const ViewTypeC
   Kokkos::deep_copy(h_c, c);
   const size_t m = A.extent(0);
   const size_t n = A.extent(1);
-  const size_t p = Kokkos::dimension_scalar(A);
+  const size_t p = Sacado::dimension_scalar(A);
   for (size_t i=0; i<m; ++i) {
     for (size_t j=0; j<p; ++j) {
       value_type t = (j == p-1 ? n : 2*n);
@@ -107,9 +107,9 @@ do_time_fad_hierarchical(const size_t m, const size_t n, const size_t p,
   const size_t pa = p;
 #endif
 
-  typedef Kokkos::LayoutContiguous<typename ViewTypeA::array_layout,FadStride> ConLayoutA;
-  typedef Kokkos::LayoutContiguous<typename ViewTypeB::array_layout,FadStride> ConLayoutB;
-  typedef Kokkos::LayoutContiguous<typename ViewTypeC::array_layout,FadStride> ConLayoutC;
+  typedef Sacado::LayoutContiguous<typename ViewTypeA::array_layout,FadStride> ConLayoutA;
+  typedef Sacado::LayoutContiguous<typename ViewTypeB::array_layout,FadStride> ConLayoutB;
+  typedef Sacado::LayoutContiguous<typename ViewTypeC::array_layout,FadStride> ConLayoutC;
 
   typedef Kokkos::View<AlignedFadType**, ConLayoutA, execution_space> ConViewTypeA;
   typedef Kokkos::View<AlignedFadType*,  ConLayoutB, execution_space> ConViewTypeB;
@@ -122,8 +122,8 @@ do_time_fad_hierarchical(const size_t m, const size_t n, const size_t p,
   // AlignedFadType a(pa, 1.0);
   // for (size_t k=0; k<pa; ++k)
   //   a.fastAccessDx(k) = 1.0;
-  Kokkos::deep_copy(typename ConViewTypeA::array_type(A), 1.0);
-  Kokkos::deep_copy(typename ConViewTypeB::array_type(b), 1.0);
+  Kokkos::deep_copy(typename ConViewTypeA::type(A), 1.0);
+  Kokkos::deep_copy(typename ConViewTypeB::type(b), 1.0);
 
   Kokkos::Timer wall_clock;
   Perf perf;

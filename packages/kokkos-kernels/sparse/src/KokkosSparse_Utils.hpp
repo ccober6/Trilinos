@@ -1,22 +1,10 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSKERNELS_SPARSEUTILS_HPP
 #define KOKKOSKERNELS_SPARSEUTILS_HPP
 #include <vector>
 
+#include "KokkosKernels_ArithTraits.hpp"
 #include "Kokkos_Core.hpp"
 #include "KokkosKernels_SimpleUtils.hpp"
 #include "KokkosKernels_IOUtils.hpp"
@@ -26,6 +14,7 @@
 #include "KokkosSparse_BsrMatrix.hpp"
 #include "Kokkos_Bitset.hpp"
 #include "KokkosGraph_RCM.hpp"
+#include "KokkosGraph_RCB.hpp"
 
 #ifdef KOKKOSKERNELS_HAVE_PARALLEL_GNUSORT
 #include <parallel/algorithm>
@@ -52,11 +41,11 @@ void kk_create_bsr_formated_point_crsmatrix(int block_size, size_t num_rows, siz
   typedef typename in_row_view_t::non_const_value_type size_type;
   typedef typename in_val_view_t::non_const_value_type scalar_t;
 
-  typename in_row_view_t::HostMirror hr = Kokkos::create_mirror_view(in_xadj);
+  typename in_row_view_t::host_mirror_type hr = Kokkos::create_mirror_view(in_xadj);
   Kokkos::deep_copy(hr, in_xadj);
-  typename in_nnz_view_t::HostMirror he = Kokkos::create_mirror_view(in_adj);
+  typename in_nnz_view_t::host_mirror_type he = Kokkos::create_mirror_view(in_adj);
   Kokkos::deep_copy(he, in_adj);
-  typename in_val_view_t::HostMirror hv = Kokkos::create_mirror_view(in_vals);
+  typename in_val_view_t::host_mirror_type hv = Kokkos::create_mirror_view(in_vals);
   Kokkos::deep_copy(hv, in_vals);
 
   out_num_rows = (num_rows / block_size) * block_size;
@@ -163,9 +152,9 @@ void kk_create_bsr_formated_point_crsmatrix(int block_size, size_t num_rows, siz
   out_adj  = out_nnz_view_t("BlockedPointCRS ADJ", block_adj.size());
   out_vals = out_val_view_t("BlockedPointCRS VALS", block_vals.size());
 
-  typename out_row_view_t::HostMirror hor = Kokkos::create_mirror_view(out_xadj);
-  typename out_nnz_view_t::HostMirror hoe = Kokkos::create_mirror_view(out_adj);
-  typename out_val_view_t::HostMirror hov = Kokkos::create_mirror_view(out_vals);
+  typename out_row_view_t::host_mirror_type hor = Kokkos::create_mirror_view(out_xadj);
+  typename out_nnz_view_t::host_mirror_type hoe = Kokkos::create_mirror_view(out_adj);
+  typename out_val_view_t::host_mirror_type hov = Kokkos::create_mirror_view(out_vals);
 
   for (lno_t i = 0; i < lno_t(out_num_rows) + 1; ++i) {
     hor(i) = block_rows_xadj[i];
@@ -242,7 +231,8 @@ void kk_create_bsr_from_bsr_formatted_point_crs(int block_size, size_t num_rows,
 }
 
 template <typename in_row_view_t, typename in_nnz_view_t, typename in_scalar_view_t, typename out_row_view_t,
-          typename out_nnz_view_t, typename out_scalar_view_t, typename tempwork_row_view_t, typename MyExecSpace>
+          typename out_nnz_view_t, typename out_scalar_view_t, typename MyExecSpace, bool transpose_values,
+          bool conjugate_values>
 struct TransposeMatrix {
   struct CountTag {};
   struct FillTag {};
@@ -256,6 +246,8 @@ struct TransposeMatrix {
   using nnz_lno_t = typename in_nnz_view_t::non_const_value_type;
   using size_type = typename in_row_view_t::non_const_value_type;
 
+  using KAT = KokkosKernels::ArithTraits<typename in_scalar_view_t::non_const_value_type>;
+
   nnz_lno_t num_rows;
   nnz_lno_t num_cols;
   in_row_view_t xadj;
@@ -264,13 +256,11 @@ struct TransposeMatrix {
   out_row_view_t t_xadj;     // allocated
   out_nnz_view_t t_adj;      // allocated
   out_scalar_view_t t_vals;  // allocated
-  tempwork_row_view_t tmp_txadj;
-  bool transpose_values;
   nnz_lno_t team_work_size;
 
   TransposeMatrix(nnz_lno_t num_rows_, nnz_lno_t num_cols_, in_row_view_t xadj_, in_nnz_view_t adj_,
                   in_scalar_view_t vals_, out_row_view_t t_xadj_, out_nnz_view_t t_adj_, out_scalar_view_t t_vals_,
-                  tempwork_row_view_t tmp_txadj_, bool transpose_values_, nnz_lno_t team_row_work_size_)
+                  nnz_lno_t team_row_work_size_)
       : num_rows(num_rows_),
         num_cols(num_cols_),
         xadj(xadj_),
@@ -279,8 +269,6 @@ struct TransposeMatrix {
         t_xadj(t_xadj_),
         t_adj(t_adj_),
         t_vals(t_vals_),
-        tmp_txadj(tmp_txadj_),
-        transpose_values(transpose_values_),
         team_work_size(team_row_work_size_) {}
 
   KOKKOS_INLINE_FUNCTION
@@ -297,8 +285,7 @@ struct TransposeMatrix {
                            Kokkos::parallel_for(Kokkos::ThreadVectorRange(teamMember, left_work), [&](nnz_lno_t i) {
                              const size_type adjind   = i + col_begin;
                              const nnz_lno_t colIndex = adj[adjind];
-                             typedef typename std::remove_reference<decltype(t_xadj(0))>::type atomic_incr_type;
-                             Kokkos::atomic_fetch_add(&(t_xadj(colIndex)), atomic_incr_type(1));
+                             if (colIndex < num_cols) Kokkos::atomic_inc(&(t_xadj(colIndex + 1)));
                            });
                          });
   }
@@ -308,27 +295,30 @@ struct TransposeMatrix {
     const nnz_lno_t team_row_begin = teamMember.league_rank() * team_work_size;
     const nnz_lno_t team_row_end   = KOKKOSKERNELS_MACRO_MIN(team_row_begin + team_work_size, num_rows);
 
-    Kokkos::parallel_for(
-        Kokkos::TeamThreadRange(teamMember, team_row_begin, team_row_end), [&](const nnz_lno_t &row_index) {
-          // const nnz_lno_t teamsize = teamMember.team_size();
-          // for (nnz_lno_t row_index = team_row_begin + teamMember.team_rank();
-          // row_index < team_row_end; row_index += teamsize){
-          const size_type col_begin = xadj[row_index];
-          const size_type col_end   = xadj[row_index + 1];
-          const nnz_lno_t left_work = col_end - col_begin;
-          Kokkos::parallel_for(Kokkos::ThreadVectorRange(teamMember, left_work), [&](nnz_lno_t i) {
-            const size_type adjind   = i + col_begin;
-            const nnz_lno_t colIndex = adj[adjind];
-            typedef typename std::remove_reference<decltype(tmp_txadj(0))>::type atomic_incr_type;
-            const size_type pos = Kokkos::atomic_fetch_add(&(tmp_txadj(colIndex)), atomic_incr_type(1));
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(teamMember, team_row_begin, team_row_end),
+                         [&](const nnz_lno_t &row_index) {
+                           // const nnz_lno_t teamsize = teamMember.team_size();
+                           // for (nnz_lno_t row_index = team_row_begin + teamMember.team_rank();
+                           // row_index < team_row_end; row_index += teamsize){
+                           const size_type col_begin = xadj[row_index];
+                           const size_type col_end   = xadj[row_index + 1];
+                           const nnz_lno_t left_work = col_end - col_begin;
+                           Kokkos::parallel_for(Kokkos::ThreadVectorRange(teamMember, left_work), [&](nnz_lno_t i) {
+                             const size_type adjind   = i + col_begin;
+                             const nnz_lno_t colIndex = adj[adjind];
+                             const size_type pos      = Kokkos::atomic_fetch_inc(&(t_xadj(colIndex + 1)));
 
-            t_adj(pos) = row_index;
-            if (transpose_values) {
-              t_vals(pos) = vals[adjind];
-            }
-          });
-          //}
-        });
+                             t_adj(pos) = row_index;
+                             if constexpr (transpose_values) {
+                               if constexpr (conjugate_values) {
+                                 t_vals(pos) = KAT::conj(vals[adjind]);
+                               } else {
+                                 t_vals(pos) = vals[adjind];
+                               }
+                             }
+                           });
+                           //}
+                         });
   }
 };
 
@@ -337,21 +327,10 @@ template <typename in_row_view_t, typename in_nnz_view_t, typename in_scalar_vie
 void transpose_matrix(typename in_nnz_view_t::non_const_value_type num_rows,
                       typename in_nnz_view_t::non_const_value_type num_cols, in_row_view_t xadj, in_nnz_view_t adj,
                       in_scalar_view_t vals,
-                      out_row_view_t t_xadj,    // pre-allocated -- initialized with 0
-                      out_nnz_view_t t_adj,     // pre-allocated -- no need for initialize
-                      out_scalar_view_t t_vals  // pre-allocated -- no need for initialize
-) {
-  // allocate some memory for work for row pointers
-  tempwork_row_view_t tmp_row_view(Kokkos::view_alloc(Kokkos::WithoutInitializing, "tmp_row_view"), num_cols + 1);
-
-  // create the functor for tranpose.
-  typedef TransposeMatrix<in_row_view_t, in_nnz_view_t, in_scalar_view_t, out_row_view_t, out_nnz_view_t,
-                          out_scalar_view_t, tempwork_row_view_t, MyExecSpace>
-      TransposeFunctor_t;
-
-  typedef typename TransposeFunctor_t::team_count_policy_t count_tp_t;
-  typedef typename TransposeFunctor_t::team_fill_policy_t fill_tp_t;
-
+                      out_row_view_t t_xadj,     // pre-allocated -- initialized with 0
+                      out_nnz_view_t t_adj,      // pre-allocated -- no need for initialize
+                      out_scalar_view_t t_vals,  // pre-allocated -- no need for initialize
+                      const bool conjugate_values = false) {
   typename in_row_view_t::non_const_value_type nnz = adj.extent(0);
 
   // determine vector lanes per thread
@@ -361,23 +340,48 @@ void transpose_matrix(typename in_nnz_view_t::non_const_value_type num_rows,
   // determine threads per team
   int team_size = kk_get_suggested_team_size(thread_size, KokkosKernels::Impl::kk_get_exec_space_type<MyExecSpace>());
 
-  TransposeFunctor_t tm(num_rows, num_cols, xadj, adj, vals, t_xadj, t_adj, t_vals, tmp_row_view, true, team_size);
+  if (!conjugate_values) {
+    // create the functor for transpose.
+    typedef TransposeMatrix<in_row_view_t, in_nnz_view_t, in_scalar_view_t, out_row_view_t, out_nnz_view_t,
+                            out_scalar_view_t, MyExecSpace, true, false>
+        TransposeFunctor_t;
 
-  Kokkos::parallel_for("KokkosSparse::Impl::transpose_matrix::S0",
-                       count_tp_t((num_rows + team_size - 1) / team_size, team_size, thread_size), tm);
+    typedef typename TransposeFunctor_t::team_count_policy_t count_tp_t;
+    typedef typename TransposeFunctor_t::team_fill_policy_t fill_tp_t;
 
-  KokkosKernels::Impl::kk_exclusive_parallel_prefix_sum<MyExecSpace>(num_cols + 1, t_xadj);
+    TransposeFunctor_t tm(num_rows, num_cols, xadj, adj, vals, t_xadj, t_adj, t_vals, team_size);
 
-  Kokkos::deep_copy(tmp_row_view, t_xadj);
+    Kokkos::parallel_for("KokkosSparse::Impl::transpose_matrix::S0",
+                         count_tp_t((num_rows + team_size - 1) / team_size, team_size, thread_size), tm);
 
-  Kokkos::parallel_for("KokkosSparse::Impl::transpose_matrix::S1",
-                       fill_tp_t((num_rows + team_size - 1) / team_size, team_size, thread_size), tm);
+    KokkosKernels::Impl::kk_exclusive_parallel_prefix_sum<MyExecSpace>(num_cols + 1, t_xadj);
 
+    Kokkos::parallel_for("KokkosSparse::Impl::transpose_matrix::S1",
+                         fill_tp_t((num_rows + team_size - 1) / team_size, team_size, thread_size), tm);
+  } else {
+    // create the functor for transpose.
+    typedef TransposeMatrix<in_row_view_t, in_nnz_view_t, in_scalar_view_t, out_row_view_t, out_nnz_view_t,
+                            out_scalar_view_t, MyExecSpace, true, true>
+        TransposeFunctor_t;
+
+    typedef typename TransposeFunctor_t::team_count_policy_t count_tp_t;
+    typedef typename TransposeFunctor_t::team_fill_policy_t fill_tp_t;
+
+    TransposeFunctor_t tm(num_rows, num_cols, xadj, adj, vals, t_xadj, t_adj, t_vals, team_size);
+
+    Kokkos::parallel_for("KokkosSparse::Impl::transpose_matrix::S0",
+                         count_tp_t((num_rows + team_size - 1) / team_size, team_size, thread_size), tm);
+
+    KokkosKernels::Impl::kk_exclusive_parallel_prefix_sum<MyExecSpace>(num_cols + 1, t_xadj);
+
+    Kokkos::parallel_for("KokkosSparse::Impl::transpose_matrix::S1",
+                         fill_tp_t((num_rows + team_size - 1) / team_size, team_size, thread_size), tm);
+  }
   MyExecSpace().fence();
 }
 
 template <typename crsMat_t>
-crsMat_t transpose_matrix(const crsMat_t &A) {
+crsMat_t transpose_matrix(const crsMat_t &A, const bool conjugate_values = false) {
   // Allocate views and call the other version of transpose_matrix
   using c_rowmap_t  = typename crsMat_t::row_map_type;
   using c_entries_t = typename crsMat_t::index_type;
@@ -390,7 +394,7 @@ crsMat_t transpose_matrix(const crsMat_t &A) {
   values_t AT_values(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Transpose values"), A.nnz());
   transpose_matrix<c_rowmap_t, c_entries_t, c_values_t, rowmap_t, entries_t, values_t, rowmap_t,
                    typename crsMat_t::execution_space>(A.numRows(), A.numCols(), A.graph.row_map, A.graph.entries,
-                                                       A.values, AT_rowmap, AT_entries, AT_values);
+                                                       A.values, AT_rowmap, AT_entries, AT_values, conjugate_values);
   // And construct the transpose crsMat_t
   return crsMat_t("Transpose", A.numCols(), A.numRows(), A.nnz(), AT_values, AT_rowmap, AT_entries);
 }
@@ -402,15 +406,12 @@ void transpose_graph(typename in_nnz_view_t::non_const_value_type num_rows,
                      out_row_view_t t_xadj,  // pre-allocated -- initialized with 0
                      out_nnz_view_t t_adj    // pre-allocated -- no need for initialize
 ) {
-  // allocate some memory for work for row pointers
-  tempwork_row_view_t tmp_row_view(Kokkos::view_alloc(Kokkos::WithoutInitializing, "tmp_row_view"), num_cols + 1);
-
   in_nnz_view_t tmp1;
   out_nnz_view_t tmp2;
 
-  // create the functor for tranpose.
+  // create the functor for transpose.
   typedef TransposeMatrix<in_row_view_t, in_nnz_view_t, in_nnz_view_t, out_row_view_t, out_nnz_view_t, out_nnz_view_t,
-                          tempwork_row_view_t, MyExecSpace>
+                          MyExecSpace, false, false>
       TransposeFunctor_t;
 
   typedef typename TransposeFunctor_t::team_count_policy_t count_tp_t;
@@ -425,14 +426,12 @@ void transpose_graph(typename in_nnz_view_t::non_const_value_type num_rows,
   // determine threads per team
   int team_size = kk_get_suggested_team_size(thread_size, KokkosKernels::Impl::kk_get_exec_space_type<MyExecSpace>());
 
-  TransposeFunctor_t tm(num_rows, num_cols, xadj, adj, tmp1, t_xadj, t_adj, tmp2, tmp_row_view, false, team_size);
+  TransposeFunctor_t tm(num_rows, num_cols, xadj, adj, tmp1, t_xadj, t_adj, tmp2, team_size);
 
   Kokkos::parallel_for("KokkosKernels::Impl::transpose_graph::S0",
                        count_tp_t((num_rows + team_size - 1) / team_size, team_size, thread_size), tm);
 
   KokkosKernels::Impl::kk_exclusive_parallel_prefix_sum<MyExecSpace>(num_cols + 1, t_xadj);
-
-  Kokkos::deep_copy(tmp_row_view, t_xadj);
 
   Kokkos::parallel_for("KokkosKernels::Impl::transpose_graph::S1",
                        fill_tp_t((num_rows + team_size - 1) / team_size, team_size, thread_size), tm);
@@ -462,7 +461,7 @@ struct TransposeBsrMatrix {
         Avalues(valuesA),
         tArow_map(row_mapAt),
         tAentries(entriesAt),
-        tAvalues(valuesAt){};
+        tAvalues(valuesAt) {}
 
   KOKKOS_INLINE_FUNCTION
   void operator()(const int tArowIdx) const {
@@ -1308,12 +1307,12 @@ void kk_get_lower_triangle(typename cols_view_t::non_const_value_type nr, row_ma
 
 template <typename row_map_view_t, typename cols_view_t, typename out_row_map_view_t, typename out_cols_view_t,
           typename exec_space>
-void kk_create_incidence_tranpose_matrix_from_lower_triangle(typename cols_view_t::non_const_value_type nr,
-                                                             row_map_view_t in_rowmap, cols_view_t in_entries,
-                                                             out_row_map_view_t &out_rowmap,
-                                                             out_cols_view_t &out_entries,
-                                                             bool /*use_dynamic_scheduling */ = false,
-                                                             bool /*chunksize*/               = 4) {
+void kk_create_incidence_transpose_matrix_from_lower_triangle(typename cols_view_t::non_const_value_type nr,
+                                                              row_map_view_t in_rowmap, cols_view_t in_entries,
+                                                              out_row_map_view_t &out_rowmap,
+                                                              out_cols_view_t &out_entries,
+                                                              bool /*use_dynamic_scheduling */ = false,
+                                                              bool /*chunksize*/               = 4) {
   // typedef typename row_map_view_t::const_type const_row_map_view_t;
   // typedef typename cols_view_t::const_type   const_cols_view_t;
 
@@ -1683,7 +1682,7 @@ struct CountDroppedEntriesFunctor {
   CountDroppedEntriesFunctor(const Values &values_, Mag tol_) : values(values_), tol(tol_) {}
 
   KOKKOS_INLINE_FUNCTION void operator()(int64_t i, Offset &lcount) const {
-    if (Kokkos::ArithTraits<Scalar>::abs(values(i)) <= tol) lcount++;
+    if (KokkosKernels::ArithTraits<Scalar>::abs(values(i)) <= tol) lcount++;
   }
 
   Values values;
@@ -1740,7 +1739,7 @@ struct DropEntriesFunctor {
     // i_in is the index of the input entry being processed
     // i_out (if finalPass == true) is the index of where that same entry goes
     // in the filtered matrix
-    bool filter   = Kokkos::ArithTraits<Scalar>::abs(valuesIn(i_in)) <= tol;
+    bool filter   = KokkosKernels::ArithTraits<Scalar>::abs(valuesIn(i_in)) <= tol;
     bool isRowEnd = rowEndMarkers.test(i_in);
     if (finalPass) {
       if (!filter) {
@@ -1796,7 +1795,7 @@ struct ExpandRowmapFunctor {
 // Otherwise a new matrix is returned.
 template <typename Matrix>
 Matrix removeCrsMatrixZeros(const Matrix &A,
-                            typename Kokkos::ArithTraits<typename Matrix::value_type>::mag_type tol = 0) {
+                            typename KokkosKernels::ArithTraits<typename Matrix::value_type>::mag_type tol = 0) {
   using Ordinal   = typename Matrix::non_const_ordinal_type;
   using Offset    = typename Matrix::non_const_size_type;
   using Device    = typename Matrix::device_type;
@@ -1930,6 +1929,10 @@ void kk_extract_subblock_crsmatrix_sequential(const entries_type &A_entries, con
   blk_row_map(blk_nrows) = blk_nnz;  // last element
 }
 
+}  // namespace Impl
+
+namespace Experimental {
+
 /**
  * @brief Extract the diagonal blocks out of a crs matrix.
  * This is a blocking function that runs on the host.
@@ -1960,9 +1963,9 @@ kk_extract_diagonal_blocks_crsmatrix_sequential(const crsMat_t &A, std::vector<c
   using out_row_map_type            = typename graph_t::row_map_type::non_const_type;
   using out_entries_type            = typename graph_t::entries_type::non_const_type;
   using out_values_type             = typename crsMat_t::values_type::non_const_type;
-  using out_row_map_hostmirror_type = typename out_row_map_type::HostMirror;
-  using out_entries_hostmirror_type = typename out_entries_type::HostMirror;
-  using out_values_hostmirror_type  = typename out_values_type::HostMirror;
+  using out_row_map_hostmirror_type = typename out_row_map_type::host_mirror_type;
+  using out_entries_hostmirror_type = typename out_entries_type::host_mirror_type;
+  using out_values_hostmirror_type  = typename out_values_type::host_mirror_type;
 
   using ordinal_type       = typename crsMat_t::non_const_ordinal_type;
   using size_type          = typename crsMat_t::non_const_size_type;
@@ -2039,7 +2042,7 @@ kk_extract_diagonal_blocks_crsmatrix_sequential(const crsMat_t &A, std::vector<c
         offset_view1d_type last(Kokkos::view_alloc(Kokkos::WithoutInitializing, "last"),
                                 blk_nrows);  // last position per row
 
-        kk_find_nnz_first_last_indices_subblock_crsmatrix_sequential(
+        KokkosSparse::Impl::kk_find_nnz_first_last_indices_subblock_crsmatrix_sequential(
             A_row_map_h, A_entries_h, blk_row_start, blk_col_start, blk_nrows, blk_ncols, blk_nnz, first, last);
 
         // Second round: extract
@@ -2051,8 +2054,8 @@ kk_extract_diagonal_blocks_crsmatrix_sequential(const crsMat_t &A, std::vector<c
         out_entries_hostmirror_type entries_h(Kokkos::view_alloc(Kokkos::WithoutInitializing, "entries_h"), blk_nnz);
         out_values_hostmirror_type values_h(Kokkos::view_alloc(Kokkos::WithoutInitializing, "values_h"), blk_nnz);
 
-        kk_extract_subblock_crsmatrix_sequential(A_entries_h, A_values_h, blk_col_start, blk_nrows, blk_nnz, first,
-                                                 last, row_map_h, entries_h, values_h);
+        KokkosSparse::Impl::kk_extract_subblock_crsmatrix_sequential(
+            A_entries_h, A_values_h, blk_col_start, blk_nrows, blk_nnz, first, last, row_map_h, entries_h, values_h);
 
         if (!UseRCMReordering) {
           Kokkos::deep_copy(row_map, row_map_h);
@@ -2114,7 +2117,344 @@ kk_extract_diagonal_blocks_crsmatrix_sequential(const crsMat_t &A, std::vector<c
   return perm_v;
 }
 
-}  // namespace Impl
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+/**
+ * @brief Apply RCB to the coordinates associated with the rows/columns of a crs matrix then perform matrix permutation
+ * using the RCB ordering while extract the diagonal blocks corresponding to the RCB partitions. This is a blocking
+ * function that runs on the host.
+ *
+ * @tparam crsMat_t The type of the CRS matrix.
+ * @tparam coor_view_type The type of coordinate list.
+ * @tparam perm_view_type The type of permutation array.
+ * @param A [in] The square CrsMatrix. It is expected that column indices are in ascending order
+ * @param coors [in] The 1/2/3-D coordinates associated with the rows/columns of A
+ * @param DiagBlk_v [out] The vector of the extracted CRS diagonal blocks
+ * (1 <= the number of diagonal blocks <= A_nrows, which is also the number of partitions in the RCB and has to be a
+ * power of 2)
+ * @param perm_rcb [out] The permutation array describing the mapping from the original ordering to RCB ordering
+ *
+ * Usage example:
+ *   kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential(A_in, coors, diagBlk_out, perm);
+ */
+template <typename crsMat_t, typename coor_view_type, typename perm_view_type>
+void kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential(const crsMat_t &A, coor_view_type &coors,
+                                                              std::vector<crsMat_t> &DiagBlk_v,
+                                                              perm_view_type &perm_rcb) {
+  using row_map_type     = typename crsMat_t::row_map_type;
+  using entries_type     = typename crsMat_t::index_type;
+  using values_type      = typename crsMat_t::values_type;
+  using graph_t          = typename crsMat_t::StaticCrsGraphType;
+  using out_row_map_type = typename graph_t::row_map_type::non_const_type;
+  using out_entries_type = typename graph_t::entries_type::non_const_type;
+  using out_values_type  = typename crsMat_t::values_type::non_const_type;
+
+  using ordinal_type = typename crsMat_t::non_const_ordinal_type;
+  using size_type    = typename crsMat_t::non_const_size_type;
+
+  static_assert(Kokkos::is_view_v<coor_view_type>,
+                "KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential: coor_view_type must be "
+                "a Kokkos::View.");
+  static_assert(Kokkos::is_view_v<perm_view_type>,
+                "KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential: perm_view_type must be "
+                "a Kokkos::View.");
+
+  static_assert(static_cast<int>(coor_view_type::rank()) == 2,
+                "KokkosSparse::Impl::recursive_coordinate_bisection: coor_view_type must have rank 2.");
+  static_assert(static_cast<int>(perm_view_type::rank()) == 1,
+                "KokkosSparse::Impl::recursive_coordinate_bisection: perm_view_type must have rank 1.");
+
+  row_map_type A_row_map = A.graph.row_map;
+  entries_type A_entries = A.graph.entries;
+  values_type A_values   = A.values;
+
+  auto A_row_map_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), A_row_map);
+  auto A_entries_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), A_entries);
+  auto A_values_h  = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), A_values);
+
+  ordinal_type A_nrows  = static_cast<ordinal_type>(A.numRows());
+  ordinal_type A_ncols  = static_cast<ordinal_type>(A.numCols());
+  ordinal_type n_blocks = static_cast<ordinal_type>(DiagBlk_v.size());
+
+  if (A_nrows != A_ncols) {
+    std::ostringstream os;
+    os << "The diagonal block extraction only works with square matrices -- "
+          "matrix A: "
+       << A_nrows << " x " << A_ncols;
+    throw std::runtime_error(os.str());
+  }
+
+  if (n_blocks == 1) {
+    // One block case: simply shallow copy A to DiagBlk_v[0]
+    DiagBlk_v[0] = crsMat_t(A);
+    Kokkos::parallel_for(
+        Kokkos::RangePolicy<typename perm_view_type::device_type::execution_space>(0, static_cast<int>(A_nrows)),
+        KOKKOS_LAMBDA(const ordinal_type &i) { perm_rcb(i) = i; });
+  } else {
+    // n_blocks > 1
+    if (A_nrows == 0) {
+      // Degenerate case: A is an empty matrix
+      for (ordinal_type i = 0; i < n_blocks; i++) {
+        DiagBlk_v[i] = crsMat_t();
+      }
+    } else {
+      // A_nrows >= 1
+      if ((n_blocks < 1) || (A_nrows < n_blocks)) {
+        std::ostringstream os;
+        os << "The number of diagonal blocks (" << n_blocks
+           << ") should be >=1 and <= the number of rows of the matrix A (" << A_nrows << ")";
+        throw std::runtime_error(os.str());
+      }
+
+      if (static_cast<ordinal_type>(std::pow(2, static_cast<int>(std::log2(n_blocks)))) != n_blocks) {
+        std::ostringstream os;
+        os << "The number of diagonal blocks (" << n_blocks << ") must be a power of 2";
+        throw std::runtime_error(os.str());
+      }
+
+      // Perform RCB on the coordinates associated with the row/col indices first
+      perm_view_type reverse_perm_rcb(Kokkos::view_alloc(Kokkos::WithoutInitializing, "reverse_perm_rcb"), A_nrows);
+      ordinal_type n_levels = static_cast<ordinal_type>(std::log2(static_cast<double>(n_blocks)) + 1);
+      std::vector<ordinal_type> partition_sizes =
+          KokkosGraph::Experimental::recursive_coordinate_bisection<coor_view_type, perm_view_type>(
+              coors, perm_rcb, reverse_perm_rcb, n_levels);
+
+      auto h_perm_rcb         = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), perm_rcb);
+      auto h_reverse_perm_rcb = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), reverse_perm_rcb);
+
+      ordinal_type blk_row_start = 0;     // first row index of i-th diagonal block
+      ordinal_type blk_col_start = 0;     // first col index of i-th diagonal block
+      ordinal_type blk_nrows, blk_ncols;  // Nrows, Ncols of i-th diagonal block
+
+      for (ordinal_type i = 0; i < n_blocks; i++) {
+        blk_nrows     = partition_sizes[i];
+        blk_ncols     = blk_nrows;
+        blk_col_start = blk_row_start;
+
+        // First round: count non-zeros of block i, fill row map vector of block i, and store mapping from new column
+        // indices to locations on the original entries
+        out_row_map_type row_map(Kokkos::view_alloc(Kokkos::WithoutInitializing, "row_map"), blk_nrows + 1);
+        auto row_map_h = Kokkos::create_mirror_view(row_map);
+        std::vector<std::map<ordinal_type, size_type>> colIdx_entryIdx_rcb(blk_nrows);
+        size_type blk_nnz = 0;
+        for (ordinal_type ii = 0; ii < blk_nrows; ii++) {  // ii: reordered index
+          row_map_h(ii) = blk_nnz;
+          ordinal_type origRow =
+              h_reverse_perm_rcb(blk_row_start + ii);  // get the original row idx of the reordered row idx ii
+          for (size_type j = A_row_map_h(origRow); j < A_row_map_h(origRow + 1); j++) {
+            ordinal_type origColId = A_entries_h(j);
+            ordinal_type newColId  = h_perm_rcb(origColId);  // get the reordered col idx of the original col idx
+            if ((newColId >= blk_col_start) && (newColId < (blk_col_start + blk_ncols))) {
+              colIdx_entryIdx_rcb[ii][newColId - blk_col_start] = j;
+              blk_nnz++;
+            }
+          }
+        }
+        row_map_h(blk_nrows) = blk_nnz;
+
+        // Second round: fill entries and values of block i
+        out_entries_type entries(Kokkos::view_alloc(Kokkos::WithoutInitializing, "entries"), blk_nnz);
+        out_values_type values(Kokkos::view_alloc(Kokkos::WithoutInitializing, "values"), blk_nnz);
+        auto entries_h = Kokkos::create_mirror_view(entries);
+        auto values_h  = Kokkos::create_mirror_view(values);
+        blk_nnz        = 0;
+        for (ordinal_type ii = 0; ii < blk_nrows; ii++) {
+          for (typename std::map<ordinal_type, size_type>::iterator it = colIdx_entryIdx_rcb[ii].begin();
+               it != colIdx_entryIdx_rcb[ii].end(); ++it) {
+            entries_h(blk_nnz) = it->first;
+            values_h(blk_nnz)  = A_values_h(it->second);
+            blk_nnz++;
+          }
+        }
+
+        // Copy H->D
+        Kokkos::deep_copy(row_map, row_map_h);
+        Kokkos::deep_copy(entries, entries_h);
+        Kokkos::deep_copy(values, values_h);
+
+        // Create CRS matrix for this block
+        DiagBlk_v[i] = crsMat_t("CrsMatrix", blk_nrows, blk_ncols, blk_nnz, values, row_map, entries);
+
+        // Shift to the next diagonal block
+        blk_row_start += blk_nrows;
+      }  // for (ordinal_type i = 0; i < n_blocks; i++)
+    }    // A_nrows >= 1
+  }      // n_blocks > 1
+}
+#endif
+
+/**
+ * @brief Extract the diagonal blocks corresponding to the RCB partitions from a crs matrix. This is a blocking
+ * function that runs on the host. This function must be called after applying RCB to the coordinates associated with
+ * the rows/columns of the crs matrix.
+ *
+ * @tparam crsMat_t The type of the CRS matrix.
+ * @tparam perm_view_type The type of permutation array.
+ * @param A [in] The square CrsMatrix. It is expected that column indices are in ascending order
+ * @param perm_rcb [in] The permutation array describing the mapping from the original ordering to RCB ordering
+ * @param reverse_perm_rcb [in] The reverse permutation array describing the mapping from the RCB ordering to original
+ * ordering
+ * @param partition_sizes_rcb [in] The vector containing sizes of RCB partitions
+ * @param DiagBlk_v [out] The vector of the extracted CRS diagonal blocks
+ * (1 <= the number of diagonal blocks <= A_nrows, which is also the number of partitions in the RCB and has to be a
+ * power of 2)
+ *
+ * Usage example:
+ *   kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential(A_in, perm, reverse_perm, partition_sizes, diagBlk_out);
+ */
+template <typename crsMat_t, typename perm_view_type>
+void kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential(
+    const crsMat_t &A, const perm_view_type &perm_rcb, const perm_view_type &reverse_perm_rcb,
+    const std::vector<typename crsMat_t::non_const_ordinal_type> partition_sizes_rcb,
+    std::vector<crsMat_t> &DiagBlk_v) {
+  using row_map_type     = typename crsMat_t::row_map_type;
+  using entries_type     = typename crsMat_t::index_type;
+  using values_type      = typename crsMat_t::values_type;
+  using graph_t          = typename crsMat_t::StaticCrsGraphType;
+  using out_row_map_type = typename graph_t::row_map_type::non_const_type;
+  using out_entries_type = typename graph_t::entries_type::non_const_type;
+  using out_values_type  = typename crsMat_t::values_type::non_const_type;
+
+  using ordinal_type = typename crsMat_t::non_const_ordinal_type;
+  using size_type    = typename crsMat_t::non_const_size_type;
+
+  static_assert(Kokkos::is_view_v<perm_view_type>,
+                "KokkosSparse::Impl::kk_extract_diagonal_blocks_crsmatrix_with_rcb_sequential: perm_view_type must be "
+                "a Kokkos::View.");
+
+  static_assert(static_cast<int>(perm_view_type::rank()) == 1,
+                "KokkosSparse::Impl::recursive_coordinate_bisection: perm_view_type must have rank 1.");
+
+  row_map_type A_row_map = A.graph.row_map;
+  entries_type A_entries = A.graph.entries;
+  values_type A_values   = A.values;
+
+  auto A_row_map_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), A_row_map);
+  auto A_entries_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), A_entries);
+  auto A_values_h  = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), A_values);
+
+  ordinal_type A_nrows  = static_cast<ordinal_type>(A.numRows());
+  ordinal_type A_ncols  = static_cast<ordinal_type>(A.numCols());
+  ordinal_type n_blocks = static_cast<ordinal_type>(DiagBlk_v.size());
+
+  if (A_nrows != A_ncols) {
+    std::ostringstream os;
+    os << "The diagonal block extraction only works with square matrices -- "
+          "matrix A: "
+       << A_nrows << " x " << A_ncols;
+    throw std::runtime_error(os.str());
+  }
+
+  if (n_blocks == 1) {
+    // One block case: simply shallow copy A to DiagBlk_v[0]
+    DiagBlk_v[0] = crsMat_t(A);
+  } else {
+    // n_blocks > 1
+    if (A_nrows == 0) {
+      // Degenerate case: A is an empty matrix
+      for (ordinal_type i = 0; i < n_blocks; i++) {
+        DiagBlk_v[i] = crsMat_t();
+      }
+    } else {
+      // A_nrows >= 1
+      if ((n_blocks < 1) || (A_nrows < n_blocks)) {
+        std::ostringstream os;
+        os << "The number of diagonal blocks (" << n_blocks
+           << ") should be >=1 and <= the number of rows of the matrix A (" << A_nrows << ")";
+        throw std::runtime_error(os.str());
+      }
+
+      if (static_cast<ordinal_type>(std::pow(2, static_cast<int>(std::log2(n_blocks)))) != n_blocks) {
+        std::ostringstream os;
+        os << "The number of diagonal blocks (" << n_blocks << ") must be a power of 2";
+        throw std::runtime_error(os.str());
+      }
+
+      if (static_cast<ordinal_type>(partition_sizes_rcb.size()) != n_blocks) {
+        std::ostringstream os;
+        os << "The number of diagonal blocks (" << n_blocks << ") must be equal to the number of partitions ("
+           << partition_sizes_rcb.size() << ')';
+        throw std::runtime_error(os.str());
+      }
+
+      if (static_cast<ordinal_type>(perm_rcb.extent(0)) != A_nrows) {
+        std::ostringstream os;
+        os << "The size of the permutation array (" << perm_rcb.extent(0)
+           << ") must be equal to the number of rows of the matrix A (" << A_nrows << ')';
+        throw std::runtime_error(os.str());
+      }
+
+      if (static_cast<ordinal_type>(reverse_perm_rcb.extent(0)) != A_nrows) {
+        std::ostringstream os;
+        os << "The size of the reverse permutation array (" << reverse_perm_rcb.extent(0)
+           << ") must be equal to the number of rows of the matrix A (" << A_nrows << ')';
+        throw std::runtime_error(os.str());
+      }
+
+      // Permute and extract
+      auto h_perm_rcb         = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), perm_rcb);
+      auto h_reverse_perm_rcb = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), reverse_perm_rcb);
+
+      ordinal_type blk_row_start = 0;     // first row index of i-th diagonal block
+      ordinal_type blk_col_start = 0;     // first col index of i-th diagonal block
+      ordinal_type blk_nrows, blk_ncols;  // Nrows, Ncols of i-th diagonal block
+
+      for (ordinal_type i = 0; i < n_blocks; i++) {
+        blk_nrows     = partition_sizes_rcb[i];
+        blk_ncols     = blk_nrows;
+        blk_col_start = blk_row_start;
+
+        // First round: count non-zeros of block i, fill row map vector of block i, and store mapping from new column
+        // indices to locations on the original entries
+        out_row_map_type row_map(Kokkos::view_alloc(Kokkos::WithoutInitializing, "row_map"), blk_nrows + 1);
+        auto row_map_h = Kokkos::create_mirror_view(row_map);
+        std::vector<std::map<ordinal_type, size_type>> colIdx_entryIdx_rcb(blk_nrows);
+        size_type blk_nnz = 0;
+        for (ordinal_type ii = 0; ii < blk_nrows; ii++) {  // ii: reordered index
+          row_map_h(ii) = blk_nnz;
+          ordinal_type origRow =
+              h_reverse_perm_rcb(blk_row_start + ii);  // get the original row idx of the reordered row idx ii
+          for (size_type j = A_row_map_h(origRow); j < A_row_map_h(origRow + 1); j++) {
+            ordinal_type origColId = A_entries_h(j);
+            ordinal_type newColId  = h_perm_rcb(origColId);  // get the reordered col idx of the original col idx
+            if ((newColId >= blk_col_start) && (newColId < (blk_col_start + blk_ncols))) {
+              colIdx_entryIdx_rcb[ii][newColId - blk_col_start] = j;
+              blk_nnz++;
+            }
+          }
+        }
+        row_map_h(blk_nrows) = blk_nnz;
+
+        // Second round: fill entries and values of block i
+        out_entries_type entries(Kokkos::view_alloc(Kokkos::WithoutInitializing, "entries"), blk_nnz);
+        out_values_type values(Kokkos::view_alloc(Kokkos::WithoutInitializing, "values"), blk_nnz);
+        auto entries_h = Kokkos::create_mirror_view(entries);
+        auto values_h  = Kokkos::create_mirror_view(values);
+        blk_nnz        = 0;
+        for (ordinal_type ii = 0; ii < blk_nrows; ii++) {
+          for (typename std::map<ordinal_type, size_type>::iterator it = colIdx_entryIdx_rcb[ii].begin();
+               it != colIdx_entryIdx_rcb[ii].end(); ++it) {
+            entries_h(blk_nnz) = it->first;
+            values_h(blk_nnz)  = A_values_h(it->second);
+            blk_nnz++;
+          }
+        }
+
+        // Copy H->D
+        Kokkos::deep_copy(row_map, row_map_h);
+        Kokkos::deep_copy(entries, entries_h);
+        Kokkos::deep_copy(values, values_h);
+
+        // Create CRS matrix for this block
+        DiagBlk_v[i] = crsMat_t("CrsMatrix", blk_nrows, blk_ncols, blk_nnz, values, row_map, entries);
+
+        // Shift to the next diagonal block
+        blk_row_start += blk_nrows;
+      }  // for (ordinal_type i = 0; i < n_blocks; i++)
+    }    // A_nrows >= 1
+  }      // n_blocks > 1
+}
+
+}  // namespace Experimental
 
 using Impl::isCrsGraphSorted;
 using Impl::removeCrsMatrixZeros;

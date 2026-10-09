@@ -476,13 +476,13 @@ void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     BuildFurtherAggregates(const Teuchos::ParameterList& params,
-                           const RCP<const Matrix>& A,
+                           const RCP<const Matrix>& /*A*/,
                            const Teuchos::ArrayView<const LO>& orderingVector,
-                           const typename Matrix::local_matrix_type& coarseA,
+                           const typename Matrix::local_matrix_device_type& coarseA,
                            const typename Teuchos::ScalarTraits<Scalar>::magnitudeType kappa,
-                           const Kokkos::View<typename Kokkos::ArithTraits<Scalar>::val_type*,
+                           const Kokkos::View<typename KokkosKernels::ArithTraits<Scalar>::val_type*,
                                               Kokkos::LayoutLeft,
-                                              typename Matrix::local_matrix_type::device_type>& rowSum,
+                                              typename Matrix::local_matrix_device_type::device_type>& rowSum,
                            std::vector<LocalOrdinal>& localAggStat,
                            Teuchos::Array<LocalOrdinal>& localVertex2AggID,
                            LO& numLocalAggregates,
@@ -499,7 +499,7 @@ void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
   }
 
   using value_type             = typename local_matrix_type::value_type;
-  const value_type KAT_zero    = Kokkos::ArithTraits<value_type>::zero();
+  const value_type KAT_zero    = KokkosKernels::ArithTraits<value_type>::zero();
   const magnitude_type MT_zero = Teuchos::ScalarTraits<magnitude_type>::zero();
   const magnitude_type MT_one  = Teuchos::ScalarTraits<magnitude_type>::one();
   const magnitude_type MT_two  = MT_one + MT_one;
@@ -613,8 +613,8 @@ void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-    BuildOnRankLocalMatrix(const typename Matrix::local_matrix_type& localA,
-                           typename Matrix::local_matrix_type& onrankA) const {
+    BuildOnRankLocalMatrix(const typename Matrix::local_matrix_device_type& localA,
+                           typename Matrix::local_matrix_device_type& onrankA) const {
   Monitor m(*this, "BuildOnRankLocalMatrix");
 
   // Set debug outputs based on environment variable
@@ -691,7 +691,7 @@ void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
                                  const LocalOrdinal numDirichletNodes,
                                  const LocalOrdinal numLocalAggregates,
                                  const Teuchos::ArrayView<const LocalOrdinal>& localVertex2AggID,
-                                 typename Matrix::local_matrix_type& intermediateP) const {
+                                 typename Matrix::local_matrix_device_type& intermediateP) const {
   Monitor m(*this, "BuildIntermediateProlongator");
 
   // Set debug outputs based on environment variable
@@ -734,7 +734,7 @@ void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 
   Kokkos::deep_copy(rowPtr, rowPtr_h);
   Kokkos::deep_copy(colInd, colInd_h);
-  Kokkos::deep_copy(values, Kokkos::ArithTraits<typename values_type::value_type>::one());
+  Kokkos::deep_copy(values, KokkosKernels::ArithTraits<typename values_type::value_type>::one());
 
   intermediateP = local_matrix_type("intermediateP",
                                     numRows, numLocalAggregates, intermediatePnnz,
@@ -743,8 +743,8 @@ void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-    BuildCoarseLocalMatrix(const typename Matrix::local_matrix_type& intermediateP,
-                           typename Matrix::local_matrix_type& coarseA) const {
+    BuildCoarseLocalMatrix(const typename Matrix::local_matrix_device_type& intermediateP,
+                           typename Matrix::local_matrix_device_type& coarseA) const {
   Monitor m(*this, "BuildCoarseLocalMatrix");
 
   using local_graph_type = typename local_matrix_type::staticcrsgraph_type;
@@ -829,10 +829,10 @@ void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 void NotayAggregationFactory<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
-    localSpGEMM(const typename Matrix::local_matrix_type& A,
-                const typename Matrix::local_matrix_type& B,
+    localSpGEMM(const typename Matrix::local_matrix_device_type& A,
+                const typename Matrix::local_matrix_device_type& B,
                 const std::string matrixLabel,
-                typename Matrix::local_matrix_type& C) const {
+                typename Matrix::local_matrix_device_type& C) const {
   using local_graph_type = typename local_matrix_type::staticcrsgraph_type;
   using values_type      = typename local_matrix_type::values_type;
   using size_type        = typename local_graph_type::size_type;

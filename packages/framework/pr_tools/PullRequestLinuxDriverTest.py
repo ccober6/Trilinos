@@ -3,34 +3,8 @@
 #
 # Change shebang line to '/usr/bin/python -3' for python 3.x porting warnings
 """
-This script drives a PR testing build.  It assume that Trilinos is already
-cloned under $WORKSPACE/Trilinos and that the 'origin' remote points to
-$TRILINOS_TARGET_REPO (but that is not checked here).
-
-As long as the ${WORKSPACE}/Trilinos git repo has the correct 'origin', this
-script will automatically set it up to do the merge correctly, no matter
-what its state before this script is called (i.e. from a past PR
-attempt). Unless the Trilinos/.git directory becomes corrupted, there should
-*NEVER* be any need to delete and reclone this Trilinos git repo.
-
-This script can be run in a mode where the driver scripts are run from one
-Trilinos git repo and operate on another Trilinos git repo that gets
-manipulated in order to merge the "source" topic branch into the "target"
-branch.  This makes it easy to test changes to the PR scripts.  But if this
-script is run from ${WORKSPACE}/Trilinos, then these repos are one and the same
-and we get the correct behavior for PR testing.
-
-Expectations
-------------
-
-### Required Environment Variables
-- MODULESHOME : Path to the location where modulefiles are.
-- CC : C Compiler
-- FC : Fortran Compiler
-- PULLREQUEST_CDASH_TRACK : Which CDash track should this result be published to?
-
-### Other Expectations?
-
+This script drives a PR testing build (configure, build, test, report) given
+an existing directory of Trilinos source code.
 """
 from __future__ import print_function
 
@@ -66,22 +40,10 @@ def parse_args():
     default_filename_packageenables = os.path.join("..", "packageEnables.cmake")
     default_filename_subprojects = os.path.join("..", "package_subproject_list.cmake")
 
-    required.add_argument('--target-branch-name',
-                          dest="target_branch_name",
-                          action='store',
-                          help='Branch to merge into',
-                          required=True)
-
     required.add_argument('--genconfig-build-name',
                           dest="genconfig_build_name",
                           action='store',
                           help='The job base name for the cmake configuration',
-                          required=True)
-
-    required.add_argument('--pullrequest-number',
-                          dest="pullrequest_number",
-                          action='store',
-                          help='The github PR number',
                           required=True)
 
     required.add_argument('--source-dir',
@@ -125,6 +87,13 @@ def parse_args():
                           dest="ctest_driver",
                           action='store',
                           help="Location of the CTest driver script to load via `-S`.",
+                          required=False)
+
+    optional.add_argument('--extra-ctest-driver-args',
+                          dest="extra_ctest_driver_args",
+                          action='store',
+                          default="",
+                          help="Extra command-line arguments to pass to the CTest driver script.",
                           required=False)
 
     optional.add_argument('--ctest-drop-site',
@@ -256,6 +225,18 @@ def parse_args():
                           action="store",
                           default="",
                           help="Extra arguments that will be passed to CMake for configuring Trilinos.")
+
+    optional.add_argument('--pullrequest-number',
+                          dest="pullrequest_number",
+                          action='store',
+                          help='The github PR number',
+                          required=False)
+
+    optional.add_argument('--target-branch-name',
+                          dest="target_branch_name",
+                          action='store',
+                          help='Branch to merge into',
+                          required=False)
 
     arguments = parser.parse_args()
 

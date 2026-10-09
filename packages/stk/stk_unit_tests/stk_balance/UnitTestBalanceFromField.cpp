@@ -50,7 +50,7 @@ class IdAndTimeFieldValueSetter : public stk::unit_test_util::FieldValueSetter
 {
 public:
     virtual void populate_field(stk::mesh::BulkData &bulk, stk::mesh::FieldBase* field, const unsigned /*step*/,
-                                const double time) const override
+                                const double time, const double fieldValueScaleFactor = 1.0) const override
 {
     stk::mesh::EntityRank fieldRank = field->entity_rank();
 
@@ -61,10 +61,10 @@ public:
 
     for(stk::mesh::FieldBase * transientField : allTransientFields)
     {
-        auto transientFieldData = transientField->data<double>();
+        auto transientFieldData = transientField->data<double, stk::mesh::ReadWrite>();
         for(size_t i = 0; i < entities.size(); i++)
         {
-            double value = 100.0 * static_cast<double>(bulk.identifier(entities[i])) + time;
+            double value = 100.0 * fieldValueScaleFactor * static_cast<double>(bulk.identifier(entities[i])) + time;
             auto data = transientFieldData.entity_values(entities[i]);
             for(stk::mesh::ComponentIdx component : data.components())
               data(component) = value + static_cast<int>(component);
@@ -131,7 +131,7 @@ TEST_F(BalanceFromField, 6elems2procs_readLastTimeStepFromFile)
   stk::mesh::BulkData & bulk = initialMesh.get_bulk();
   stk::mesh::Field<double> &weightField = *bulk.mesh_meta_data().get_field<double>(stk::topology::ELEM_RANK,
                                                                                    m_transientFieldName + "_scalar");
-  auto weightFieldData = weightField.data<stk::mesh::ReadOnly>();
+  auto weightFieldData = weightField.data();
   const stk::mesh::BucketVector & elemBuckets = bulk.get_buckets(stk::topology::ELEM_RANK,
                                                                  bulk.mesh_meta_data().locally_owned_part());
   for (const stk::mesh::Bucket * bucket : elemBuckets) {

@@ -98,6 +98,7 @@ Hex20Fixture::Hex20Fixture(stk::ParallelMachine pm,
 
   //put coord-field on all nodes:
   put_field_on_mesh(*m_coord_field, m_meta.universal_part(), m_spatial_dimension, nullptr);
+  stk::io::put_io_part_attribute(*m_elem_parts[0]);
   stk::io::set_field_output_type(*m_coord_field, stk::io::FieldOutputType::VECTOR_3D);
 
 }
@@ -234,7 +235,7 @@ void Hex20Fixture::generate_mesh(std::vector<size_t> & hex_range_on_this_process
         size_t nx = 0, ny = 0, nz = 0;
         node_x_y_z(elem_nodes[i], nx, ny, nz);
 
-        auto data = m_coord_field->data().entity_values(node);
+        auto data = m_coord_field->data<stk::mesh::ReadWrite>().entity_values(node);
         std::array<double, 3> data_array{data(0_comp), data(1_comp), data(2_comp)};
         coordMap.getNodeCoordinates(data_array.data(), nx, ny, nz);
 

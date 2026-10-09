@@ -17,9 +17,7 @@
 #include <map>
 
 #include "Sacado.hpp"
-#include "Kokkos_View_Fad.hpp"
-#include "Kokkos_DynRankView_Fad.hpp"
-#include "Kokkos_DynRankView.hpp"
+#include "Sacado_Fad_Kokkos.hpp"
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "Kokkos_Random.hpp"
 
@@ -581,6 +579,7 @@ namespace phalanx_test {
 	  TEST_FLOATING_EQUALITY(host_f(i).fastAccessDx(0),3.0,tol);
 	}
 
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
 	Kokkos::parallel_for(num_cells,KOKKOS_LAMBDA (const int i) {
 	    f[i].val() = 3.0;
 	    f[i].fastAccessDx(0) = 4.0;
@@ -591,6 +590,7 @@ namespace phalanx_test {
 	  TEST_FLOATING_EQUALITY(host_f[i].val(),3.0,tol);
 	  TEST_FLOATING_EQUALITY(host_f[i].fastAccessDx(0),4.0,tol);
 	}
+#endif
       }
 
     }
@@ -645,13 +645,12 @@ namespace phalanx_test {
       Kokkos::deep_copy(host_c,c);
 
       TEST_EQUALITY(c.rank(),2);
-      TEST_EQUALITY(Kokkos::dimension_scalar(c),2);
-      TEST_EQUALITY(c.impl_map().dimension_scalar(),2);
+      TEST_EQUALITY(Sacado::dimension_scalar(c),2);
 
       double tol = std::numeric_limits<double>::epsilon() * 100.0;
       for (int i = 0; i < num_cells; ++i) {
         for (int j = 0; j < num_ip; ++j) {
-          out << "(" << i << "," << j << ") val=" << host_c[i].val() << ",fad=" << host_c[i].fastAccessDx(1) << std::endl;
+          out << "(" << i << "," << j << ") val=" << host_c(i, j).val() << ",fad=" << host_c(i,j).fastAccessDx(1) << std::endl;
           TEST_FLOATING_EQUALITY(host_c(i,j).val(),static_cast<double>(i+j),tol);
           TEST_FLOATING_EQUALITY(host_c(i,j).fastAccessDx(0),static_cast<double>(i+j+1),tol);
         }
@@ -827,14 +826,19 @@ namespace phalanx_test {
 
     // Expected layout based on architecture.
     using DefaultDevLayout = PHX::DefaultDevLayout;
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL_DFAD) || defined(SACADO_VIEW_CUDA_HIERARCHICAL)
+#if defined(SACADO_GPU_HIERARCHICAL_DFAD) || defined(SACADO_GPU_HIERARCHICAL)
 
 #if defined(KOKKOS_ENABLE_CUDA)
-    using DefaultFadLayout = Kokkos::LayoutContiguous<DefaultDevLayout,32>;
+    using DefaultFadLayout = Sacado::LayoutContiguous<DefaultDevLayout,32>;
 #elif defined(KOKKOS_ENABLE_HIP)
-    using DefaultFadLayout = Kokkos::LayoutContiguous<DefaultDevLayout,64>;
+    using DefaultFadLayout = Sacado::LayoutContiguous<DefaultDevLayout,64>;
+#elif defined(KOKKOS_ENABLE_SYCL)
+    using DefaultFadLayout = Sacado::LayoutContiguous<DefaultDevLayout,32>;
+#elif defined(KOKKOS_ENABLE_SERIAL) || defined(KOKKOS_ENABLE_OPENMP) ||        \
+      defined(KOKKOS_ENABLE_THREADS)
+    using DefaultFadLayout = Sacado::LayoutContiguous<DefaultDevLayout,1>;
 #else
-    using DefaultFadLayout = Kokkos::LayoutContiguous<DefaultDevLayout,1>;
+#error "Phalanx: no FAD stride is defined for this backend.  Keep this in step with PHX::DefaultFadLayout in Phalanx_KokkosDeviceTypes.hpp -- the point of restating it here is to catch the two drifting apart."
 #endif
 
 #else

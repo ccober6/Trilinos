@@ -11,14 +11,14 @@
 #define KOKKOS_ARITHTRAITS_UQ_PCE_HPP
 
 #include "Sacado_UQ_PCE.hpp"
-#include "Kokkos_ArithTraits.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "KokkosBatched_Vector.hpp"
 
 //----------------------------------------------------------------------------
-// Specializations of Kokkos::ArithTraits for Sacado::UQ::PCE scalar type
+// Specializations of Kokkos{Kernels}::ArithTraits for Sacado::UQ::PCE scalar type
 //----------------------------------------------------------------------------
 
-namespace Kokkos {
+namespace KokkosKernels {
 
 template <typename S>
 class ArithTraits< Sacado::UQ::PCE<S> > {
@@ -177,7 +177,7 @@ namespace KokkosBatched {
   template <typename S>
   struct MagnitudeScalarType< Sacado::UQ::PCE<S> > {
     typedef Sacado::UQ::PCE<S> val_type;
-    typedef typename Kokkos::ArithTraits<val_type>::mag_type type;
+    typedef typename KokkosKernels::ArithTraits<val_type>::mag_type type;
   };
 
 }

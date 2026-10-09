@@ -117,6 +117,11 @@ void MetaData::assign_topology(Part& part, stk::topology stkTopo)
   STK_ThrowRequireMsg(stkTopo != stk::topology::INVALID_TOPOLOGY, "bad topology in MetaData::assign_topology");
 }
 
+void MetaData::set_mesh_on_field(BulkData* bulk, FieldBase& field)
+{
+  field.set_mesh(bulk);
+}
+
 void MetaData::set_mesh_on_fields(BulkData* bulk)
 {
   const FieldVector& fields = get_fields();
@@ -335,7 +340,7 @@ FieldBase const* MetaData::coordinate_field() const
 //----------------------------------------------------------------------
 
 Part * MetaData::get_part( const std::string & p_name ,
-                           const char * required_by ) const
+                           [[maybe_unused]] const char * required_by ) const
 {
   Part *part = nullptr;
 
@@ -356,6 +361,10 @@ Part * MetaData::get_part( const std::string & p_name ,
 Part & MetaData::declare_part( const std::string & p_name )
 {
   const EntityRank rank = InvalidEntityRank;
+
+  if(is_commit() and m_bulk_data and m_bulk_data->in_synchronized_state() and !m_bulk_data->in_modifiable_state()) {
+    m_bulk_data->m_meshModification.increment_sync_count();
+  }
 
   return *m_part_repo.declare_part( p_name, rank );
 }
@@ -384,6 +393,10 @@ Part & MetaData::declare_part( const std::string & p_name , EntityRank rank, boo
 {
   STK_ThrowRequireMsg(is_initialized(), "MetaData: Can't declare ranked part until spatial dimension has been set.");
   require_valid_entity_rank(rank);
+
+  if(is_commit() and m_bulk_data and m_bulk_data->in_synchronized_state() and !m_bulk_data->in_modifiable_state()) {
+    m_bulk_data->m_meshModification.increment_sync_count();
+  }
 
   return *m_part_repo.declare_part( p_name , rank, arg_force_no_induce );
 }
@@ -443,7 +456,10 @@ void MetaData::declare_part_subset( Part & superset , Part & subset, bool verify
 
 void MetaData::internal_declare_part_subset( Part & superset , Part & subset, bool verifyFieldRestrictions )
 {
-//  require_not_committed();
+  if(is_commit() and m_bulk_data and m_bulk_data->in_synchronized_state() and !m_bulk_data->in_modifiable_state()) {
+    m_bulk_data->m_meshModification.increment_sync_count();
+  }
+
   require_same_mesh_meta_data( MetaData::get(superset) );
   require_same_mesh_meta_data( MetaData::get(subset) );
 
@@ -457,6 +473,37 @@ void MetaData::internal_declare_part_subset( Part & superset , Part & subset, bo
     // field restriction to become incompatible or redundant.
     m_field_repo.verify_and_clean_restrictions(superset, subset);
   }
+}
+
+void MetaData::rename(Part& part, const std::string& newName)
+{
+#ifndef NDEBUG
+  if (m_bulk_data != nullptr) {
+    stk::parallel_machine_barrier(m_bulk_data->parallel());
+  }
+#endif
+
+  if (newName == part.name()) {
+    return;
+  }
+
+  STK_ThrowRequireMsg(!stk::mesh::impl::is_internal_part(part),"Renaming an internal part ("<<part.name()<<") is not permitted.");
+  STK_ThrowRequireMsg(!stk::mesh::impl::is_internal_part_name(newName),"Rename: newName ("<<newName<<") appears to be an internal part name. Don't use curly-braces.");
+  STK_ThrowRequireMsg(get_part(newName) == nullptr, "Rename can't use the name of an existing other part.");
+  STK_ThrowRequireMsg(m_bulk_data==nullptr || m_bulk_data->in_synchronized_state(), "Rename can't operate when mesh is being modified.");
+
+  std::string oldName = part.name();
+  m_part_repo.rename(&part, newName);
+  const bool deleted = delete_part_alias_case_insensitive(part, oldName);
+  if (deleted) {
+    add_part_alias(part, newName);
+  }
+
+#ifndef NDEBUG
+  if (m_bulk_data != nullptr) {
+    verify_parallel_consistency(*this, m_bulk_data->parallel());
+  }
+#endif
 }
 
 //----------------------------------------------------------------------
@@ -630,23 +677,33 @@ void MetaData::internal_declare_known_cell_topology_parts()
 
 Part& MetaData::register_topology(stk::topology stkTopo)
 {
-  STK_ThrowRequireMsg(is_initialized(), "MetaData::register_topology: initialize() must be called before this function");
+  STK_ThrowRequireMsg(
+    is_initialized(),
+    "MetaData::register_topology: initialize() must be called before this function");
 
-  TopologyPartMap::iterator iter = m_topologyPartMap.find(stkTopo);
-  if (iter == m_topologyPartMap.end()) {
-    std::string part_name = std::string("FEM_ROOT_CELL_TOPOLOGY_PART_") + stkTopo.name();
-    STK_ThrowErrorMsgIf(get_part(part_name) != 0, "Cannot register topology with same name as existing part '" << stkTopo.name() << "'" );
+  // Try to insert a 'nullptr' placeholder for this topology.
+  // If the topology was already registered, inserted==false and
+  // it->second already points at the correct Part.
+  auto [it, inserted] =
+    m_topologyPartMap.try_emplace(stkTopo, /*value=*/ static_cast<Part*>(nullptr));
 
-    Part& part = declare_internal_part(part_name, stkTopo.rank());
+  if (inserted) {
+    // Only now do we need to make the real Part
+    std::string partName = "FEM_ROOT_CELL_TOPOLOGY_PART_";
+    partName += stkTopo.name();
 
-    m_topologyPartMap[stkTopo] = &part;
+    STK_ThrowErrorMsgIf(
+      get_part(partName) != nullptr,
+      "Cannot register topology with same name as existing part '"
+        << stkTopo.name() << "'");
+
+    Part& part = declare_internal_part(partName, stkTopo.rank());
+    it->second = &part;
 
     assign_topology(part, stkTopo);
-
-    return part;
   }
 
-  return *iter->second;
+  return *it->second;
 }
 
 Part& MetaData::get_topology_root_part(stk::topology stkTopo) const
@@ -658,7 +715,11 @@ Part& MetaData::get_topology_root_part(stk::topology stkTopo) const
 
 bool MetaData::has_topology_root_part(stk::topology stkTopo) const
 {
-    return (m_topologyPartMap.find(stkTopo) != m_topologyPartMap.end());
+#if __cplusplus >= 202002L
+    return m_topologyPartMap.contains(stkTopo);
+#else
+    return m_topologyPartMap.find(stkTopo) != m_topologyPartMap.end();
+#endif
 }
 
 stk::topology MetaData::get_topology(const Part & part) const
@@ -821,7 +882,9 @@ public:
       m_rootPartName{0},
       m_rootPartRank(stk::topology::INVALID_RANK),
       m_rootPartTopology(stk::topology::INVALID_TOPOLOGY),
-      m_rootPartSubsetSize(0)
+      m_rootPartSubsetSize(0),
+      m_rootPartForceNoInduce(false),
+      m_rootPartEntityMembershipPllConsistent(false)
   {
   }
 
@@ -839,6 +902,8 @@ public:
         b.pack<unsigned>(partNameLen);
         b.pack<char>(partNamePtr, partNameLen);
         b.pack<stk::mesh::EntityRank>(part->primary_entity_rank());
+        b.pack<bool>(part->force_no_induce());
+        b.pack<bool>(part->entity_membership_is_parallel_consistent());
         b.pack<stk::topology::topology_t>(part->topology());
         b.pack<unsigned>(subsetParts.size());
         for (const stk::mesh::Part * subsetPart : subsetParts) {
@@ -862,6 +927,8 @@ public:
       b.unpack<unsigned>(m_rootPartNameLen);
       b.unpack<char>(m_rootPartName, m_rootPartNameLen);
       b.unpack<stk::mesh::EntityRank>(m_rootPartRank);
+      b.unpack<bool>(m_rootPartForceNoInduce);
+      b.unpack<bool>(m_rootPartEntityMembershipPllConsistent);
       b.unpack<stk::topology::topology_t>(m_rootPartTopology);
       b.unpack<unsigned>(m_rootPartSubsetSize);
       m_rootPartSubsetOrdinals.resize(m_rootPartSubsetSize);
@@ -873,6 +940,7 @@ public:
       unprocessedParts.erase(localPart);
       ok = check_local_part(localPart) && ok;
 
+      ok = ok && check_part_consistency(localPart);
       ok = ok && check_part_name(localPart);
       ok = ok && check_part_rank(localPart);
       ok = ok && check_part_topology(localPart);
@@ -901,6 +969,27 @@ public:
       localPartValid = false;
     }
     return localPartValid;
+  }
+
+  bool check_part_consistency(const stk::mesh::Part* localPart)
+  {
+    if (localPart == nullptr) {
+      //don't need to create err msg here, null part was already checked by
+      //'check_local_part'.
+      return false;
+    }
+
+    bool isConsistent = true;
+    if (localPart->force_no_induce() != m_rootPartForceNoInduce) {
+      m_errStream << "[p" << m_pRank << "] Part " << localPart->name() << " force_no_induce()=" << localPart->force_no_induce() << " inconsistent with root processor." << std::endl;
+      isConsistent = false;
+    }
+    if (localPart->entity_membership_is_parallel_consistent() != m_rootPartEntityMembershipPllConsistent) {
+      m_errStream << "[p" << m_pRank << "] Part " << localPart->name() << " entity_membership_is_parallel_consistent()=" << localPart->entity_membership_is_parallel_consistent() << " inconsistent with root processor." << std::endl;
+      isConsistent = false;
+    }
+
+    return isConsistent;
   }
 
   bool check_part_name(const stk::mesh::Part * localPart)
@@ -989,6 +1078,8 @@ private:
   stk::topology::topology_t m_rootPartTopology;
   unsigned m_rootPartSubsetSize;
   std::vector<unsigned> m_rootPartSubsetOrdinals;
+  bool m_rootPartForceNoInduce;
+  bool m_rootPartEntityMembershipPllConsistent;
 };
 
 

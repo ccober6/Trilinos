@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #include <Kokkos_Core.hpp>
 
@@ -76,8 +63,8 @@ void parse_inputs(int argc, char** argv, spmv_parameters& params) {
   for (int i = 1; i < argc; ++i) {
     if (benchmark::check_arg_int(i, argc, argv, "-n", params.N)) {
       ++i;
-    } else if (benchmark::check_arg_str(i, argc, argv, "--mode", params.alg)) {
-      if ((params.mode != "") && (params.mode != "auto") && (params.alg != "manual")) {
+    } else if (benchmark::check_arg_str(i, argc, argv, "--mode", params.mode)) {
+      if ((params.mode != "") && (params.mode != "auto") && (params.mode != "manual")) {
         throw std::runtime_error("--mode can only be an empty string, `auto` or `manual`!");
       }
       ++i;

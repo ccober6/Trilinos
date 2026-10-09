@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 /// \file KokkosSparse_CrsMatrix.hpp
 /// \brief Local sparse matrix interface
@@ -31,20 +18,19 @@
 #include "KokkosSparse_findRelOffset.hpp"
 #include "KokkosSparse_StaticCrsGraph.hpp"
 #include "KokkosKernels_default_types.hpp"
-#include "KokkosKernels_Macros.hpp"
 
 namespace KokkosSparse {
 //! String that tells sparse kernels to use the transpose of the matrix.
-static char KOKKOSKERNELS_UNUSED_ATTRIBUTE Transpose[] = "T";
+[[maybe_unused]] static char Transpose[] = "T";
 /// \brief String that tells sparse kernels to use the conjugate (NOT
 ///   transpose) of the matrix.
-static char KOKKOSKERNELS_UNUSED_ATTRIBUTE Conjugate[] = "C";
+[[maybe_unused]] static char Conjugate[] = "C";
 /// \brief String that tells sparse kernels to use the conjugate
 ///   transpose of the matrix.
-static char KOKKOSKERNELS_UNUSED_ATTRIBUTE ConjugateTranspose[] = "H";
+[[maybe_unused]] static char ConjugateTranspose[] = "H";
 /// \brief String that tells sparse kernels not to use the transpose
 ///   or conjugate of the matrix.
-static char KOKKOSKERNELS_UNUSED_ATTRIBUTE NoTranspose[] = "N";
+[[maybe_unused]] static char NoTranspose[] = "N";
 
 template <class DeviceType>
 inline int RowsPerThread(const int NNZPerRow) {
@@ -342,12 +328,14 @@ class CrsMatrix {
   typedef SizeType size_type;
 
   //! Type of a host-memory mirror of the sparse matrix.
-  typedef CrsMatrix<ScalarType, OrdinalType, host_mirror_space, MemoryTraits, SizeType> HostMirror;
+  typedef CrsMatrix<ScalarType, OrdinalType, host_mirror_space, MemoryTraits, SizeType> host_mirror_type;
   //! Type of the graph structure of the sparse matrix.
-  typedef StaticCrsGraph<ordinal_type, KokkosKernels::default_layout, device_type, memory_traits, size_type>
+  typedef KokkosSparse::StaticCrsGraph<ordinal_type, KokkosKernels::default_layout, device_type, memory_traits,
+                                       size_type>
       StaticCrsGraphType;
   //! Type of the graph structure of the sparse matrix - consistent with Kokkos.
-  typedef StaticCrsGraph<ordinal_type, KokkosKernels::default_layout, device_type, memory_traits, size_type>
+  typedef KokkosSparse::StaticCrsGraph<ordinal_type, KokkosKernels::default_layout, device_type, memory_traits,
+                                       size_type>
       staticcrsgraph_type;
   //! Type of column indices in the sparse matrix.
   typedef typename staticcrsgraph_type::entries_type index_type;
@@ -412,19 +400,7 @@ class CrsMatrix {
   //! Copy constructor (shallow copy).
   template <typename InScalar, typename InOrdinal, class InDevice, class InMemTraits, typename InSizeType>
   KOKKOS_INLINE_FUNCTION CrsMatrix(const CrsMatrix<InScalar, InOrdinal, InDevice, InMemTraits, InSizeType>& B)
-      :
-#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_4
-        graph(B.graph.entries, B.graph.row_map),
-#else
-        graph(B.graph),
-#endif
-        values(B.values),
-        numCols_(B.numCols()),
-        dev_config(B.dev_config) {
-#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_4
-    graph.row_block_offsets = B.graph.row_block_offsets;
-#endif
-  }
+      : graph(B.graph), values(B.values), numCols_(B.numCols()), dev_config(B.dev_config) {}
 
   //! Deep copy constructor (can cross spaces)
   template <typename InScalar, typename InOrdinal, typename InDevice, typename InMemTraits, typename InSizeType>
@@ -441,18 +417,6 @@ class CrsMatrix {
     graph    = StaticCrsGraphType(cols, rowmap);
   }
 
-  /// \brief Construct with a graph that will be shared.
-  ///
-  /// Allocate the values array for subsequent fill.
-  template <typename InOrdinal, typename InLayout, typename InDevice, typename InMemTraits, typename InSizeType>
-  [[deprecated(
-      "Use the constructor that accepts ncols as input "
-      "instead.")]] CrsMatrix(const std::string& label,
-                              const StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>& graph_)
-      : graph(graph_.entries, graph_.row_map),
-        values(label, graph_.entries.extent(0)),
-        numCols_(maximum_entry(graph_) + 1) {}
-
   /// \brief Constructor that accepts a a static graph, and numCols.
   ///
   /// The matrix will store and use the row map, indices
@@ -465,15 +429,7 @@ class CrsMatrix {
   CrsMatrix(const std::string& label,
             const StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>& graph_,
             const OrdinalType& ncols)
-      :
-#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_4
-        graph(graph_.entries, graph_.row_map),
-#else
-        graph(graph_),
-#endif
-        values(label, graph_.entries.extent(0)),
-        numCols_(ncols) {
-  }
+      : graph(graph_), values(label, graph_.entries.extent(0)), numCols_(ncols) {}
 
   /// \brief Constructor that accepts a a static graph, and values.
   ///
@@ -486,16 +442,7 @@ class CrsMatrix {
   template <typename InOrdinal, typename InLayout, typename InDevice, typename InMemTraits, typename InSizeType>
   CrsMatrix(const std::string&, const OrdinalType& ncols, const values_type& vals,
             const StaticCrsGraph<InOrdinal, InLayout, InDevice, InMemTraits, InSizeType>& graph_)
-      :
-#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_4
-        graph(graph_.entries, graph_.row_map),
-#else
-        graph(graph_),
-#endif
-
-        values(vals),
-        numCols_(ncols) {
-  }
+      : graph(graph_), values(vals), numCols_(ncols) {}
 
   /// \brief Constructor that copies raw arrays of host data in
   ///   3-array CRS (compressed row storage) format.
@@ -664,6 +611,11 @@ class CrsMatrix {
 
   //! The number of columns in the sparse matrix.
   KOKKOS_INLINE_FUNCTION ordinal_type numCols() const { return numCols_; }
+
+  /// \brief Modify the number of columns in the sparse matrix.
+  ///
+  /// This invalidates any algorithm handles which previously used this matrix.
+  void setNumCols(ordinal_type c) { numCols_ = c; }
 
   //! The number of "point" (non-block) rows in the matrix. Since Crs is not
   //! blocked, this is just the number of regular rows.

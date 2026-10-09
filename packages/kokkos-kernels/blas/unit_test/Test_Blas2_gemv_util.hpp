@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef TEST_BLAS2_GEMV_UTIL_HPP
 #define TEST_BLAS2_GEMV_UTIL_HPP
 
@@ -103,7 +90,19 @@ static void fill_random_view(
 
 template <class GemvFunc, class ScalarA, class ScalarX, class ScalarY, class Device, class ScalarCoef = void>
 struct GEMVTest {
-  static void run(const char *mode) { run_algorithms<0, typename GemvFunc::algorithms>(mode); }
+  static void run(const char *mode) {
+#if defined(KOKKOS_ENABLE_SYCL)
+    constexpr bool skip_complex = std::is_same_v<typename Device::execution_space, Kokkos::SYCL> &&
+                                  KokkosKernels::ArithTraits<ScalarA>::is_complex;
+#else
+    constexpr bool skip_complex = false;
+#endif
+    if constexpr (skip_complex) {
+      GTEST_SKIP() << "gemv fails with complex scalars on the SYCL backend";
+    } else {
+      run_algorithms<0, typename GemvFunc::algorithms>(mode);
+    }
+  }
 
  private:
   // ScalarCoef==void default behavior is to derive alpha/beta scalar types

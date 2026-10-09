@@ -1,5 +1,7 @@
 STK_SUBPACKAGE(STKPerformance_tests)
 
+message("STKPerformance_tests")
+
 if(HAVE_STK_Trilinos)
 
   message("STK performance tests are not currently supported for Trilinos.")
@@ -16,6 +18,7 @@ else()
                                       stk_search/*.cpp
                                       stk_transfer/*.cpp
                                       stk_util/*.cpp
+                                      stk_tools/*.cpp
       )
 
   if (STK_ENABLE_STKMiddle_mesh_util)

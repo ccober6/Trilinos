@@ -19,9 +19,7 @@
 #include <Xpetra_CrsMatrix.hpp>
 #include <Xpetra_Matrix.hpp>
 #include <Xpetra_MultiVectorFactory.hpp>
-#ifdef HAVE_XPETRA_TPETRA
 #include <Xpetra_TpetraMultiVector.hpp>
-#endif
 
 #include "MueLu_BelosSmoother_decl.hpp"
 #include "MueLu_Level.hpp"
@@ -80,7 +78,7 @@ void BelosSmoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Setup(Level& curr
 }
 
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
-void BelosSmoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::SetupBelos(Level& currentLevel) {
+void BelosSmoother<Scalar, LocalOrdinal, GlobalOrdinal, Node>::SetupBelos(Level& /*currentLevel*/) {
   bool useTpetra = A_->getRowMap()->lib() == Xpetra::UseTpetra;
 
   if (useTpetra) {

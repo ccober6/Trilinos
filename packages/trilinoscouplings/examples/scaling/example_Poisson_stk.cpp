@@ -68,18 +68,19 @@
 #include <Teuchos_DefaultMpiComm.hpp>
 #include <Teuchos_TimeMonitor.hpp>
 
-// Intrepid includes
-#include "Intrepid_FunctionSpaceTools.hpp"
-#include "Intrepid_CellTools.hpp"
-#include "Intrepid_ArrayTools.hpp"
-#include "Intrepid_Basis.hpp"
-#include "Intrepid_HGRAD_HEX_C1_FEM.hpp"
-#include "Intrepid_HGRAD_TET_C1_FEM.hpp"
-#include "Intrepid_HGRAD_QUAD_C1_FEM.hpp"
-#include "Intrepid_HGRAD_TRI_C1_FEM.hpp"
-#include "Intrepid_RealSpaceTools.hpp"
-#include "Intrepid_DefaultCubatureFactory.hpp"
-#include "Intrepid_Utils.hpp"
+// Intrepid2 includes
+#include "Intrepid2_ArrayTools.hpp"
+#include "Intrepid2_CellTools.hpp"
+#include "Intrepid2_DefaultCubatureFactory.hpp"
+#include "Intrepid2_FunctionSpaceTools.hpp"
+#include "Intrepid2_HGRAD_HEX_C1_FEM.hpp"
+#include "Intrepid2_RealSpaceTools.hpp"
+#include "Intrepid2_Utils.hpp"
+#include "Intrepid2_CellGeometry.hpp"
+#include "Intrepid2_Basis.hpp"
+#include "Intrepid2_HGRAD_TET_C1_FEM.hpp"
+#include "Intrepid2_HGRAD_QUAD_C1_FEM.hpp"
+#include "Intrepid2_HGRAD_TRI_C1_FEM.hpp"
 
 // Tpetra includes
 #include "Tpetra_Map.hpp"
@@ -105,12 +106,8 @@
 #include "MueLu_ParameterListInterpreter.hpp"
 #include "MueLu_CreateTpetraPreconditioner.hpp"
 
-#ifdef HAVE_INTREPID_KOKKOS
-#include "Sacado.hpp"
-#else
 // Sacado includes
-#include "Sacado_No_Kokkos.hpp"
-#endif
+#include "Sacado.hpp"
 
 // STK includes
 #include "Ionit_Initializer.h"
@@ -130,16 +127,20 @@
 #include "stk_mesh/base/Entity.hpp"
 #include "stk_mesh/base/Field.hpp"
 
-#include "TrilinosCouplings_Statistics.hpp"
 
 /*********************************************************/
 /*                     Typedefs                          */
 /*********************************************************/
-typedef shards::CellTopology             ShardsCellTopology;
-typedef Intrepid::FunctionSpaceTools     IntrepidFSTools;
-typedef Intrepid::RealSpaceTools<double> IntrepidRSTools;
-typedef Intrepid::CellTools<double>      IntrepidCTools;
-typedef Intrepid::FieldContainer<double> IntrepidFieldContainer;
+// Tpetra typedefs
+typedef Tpetra::Map<> Map;
+
+typedef Map::node_type::memory_space memory_space;
+typedef Map::node_type::device_type device_type;
+
+typedef shards::CellTopology ShardsCellTopology;
+typedef Intrepid2::FunctionSpaceTools<device_type> Intrepid2FSTools;
+typedef Intrepid2::CellTools<device_type> Intrepid2CTools;
+typedef Intrepid2::ScalarView<double, memory_space> Intrepid2ScalarView;
 
 using Teuchos::TimeMonitor;
 
@@ -250,6 +251,7 @@ int TestMultiLevelPreconditioner(char ProblemType[],
                                  Teuchos::RCP<Tpetra_MultiVector> & b,
                                  Teuchos::RCP<Tpetra_MultiVector> & uh,
 				 Teuchos::RCP<Tpetra_MultiVector> & coords,
+                                 Teuchos::RCP<Tpetra_CrsMatrix>   & MassMatrix,
                                  double & TotalErrorResidual,
                                  double & TotalErrorExactSol);
 
@@ -257,20 +259,14 @@ int TestMultiLevelPreconditioner(char ProblemType[],
 /************* FUNCTION DECLARATIONS FOR SIMPLE BASIS FACTORY *********************/
 /**********************************************************************************/
 
-/** \brief  Simple factory that chooses basis function based on cell topology.
+/** \brief  Simple factory that chooses HGRAD basis function based on cell topology.
 
     \param  cellTopology  [in]    Shards cell topology
-    \param  order         [in]    basis function order, currently unused
-    \param  basis         [out]   pointer to Intrepid basis
 
     \return Intrepid basis
  */
-
-void getBasis(Teuchos::RCP<Intrepid::Basis<double,IntrepidFieldContainer > > &basis,
-               const ShardsCellTopology & cellTopology,
-               int order);
-
-int getDimension(const ShardsCellTopology & cellTopology);
+template<typename DeviceType, typename Scalar>
+Teuchos::RCP<Intrepid2::Basis<DeviceType, Scalar, Scalar> > getHGradBasis(const ShardsCellTopology & cellTopology);
 
 /**********************************************************************************/
 /**********************************************************************************/
@@ -328,7 +324,7 @@ void Apply_Dirichlet_BCs(std::vector<int> &BCNodes, crs_matrix_type & A, multive
     typename crs_matrix_type::nonconst_values_host_view_type vals("vals", numEntriesInRow);
     A.getLocalRowCopy(lrid, cols, vals, numEntriesInRow);
 
-    for(size_t j=0; j<vals.extent(0); j++)
+    for(int j=0; j<vals.extent_int(0); j++)
       vals(j) = (cols(j) == lrid) ? 1.0 : 0.0;
 
     A.replaceLocalValues(lrid, cols, vals);
@@ -381,6 +377,12 @@ int main_(int argc, char *argv[]) {
   clp.setOption ("matrixFilename", &matrixFilename, "If nonempty, dump the "
 		  "generated matrix to that file in MatrixMarket format.");
 
+  // If massmatFilename is nonempty, dump the mass matrix to that file
+  // in MatrixMarket format.
+  std::string massmatFilename;
+  clp.setOption ("massmatFilename", &massmatFilename, "If nonempty, dump the "
+		  "generated mass matrix to that file in MatrixMarket format.");
+
   // If rhsFilename is nonempty, dump the rhs to that file
   // in MatrixMarket format.
   std::string rhsFilename;
@@ -399,6 +401,8 @@ int main_(int argc, char *argv[]) {
   clp.setOption ("coordsFilename", &coordsFilename, "If nonempty, dump the "
 		  "generated coordinates to that file in MatrixMarket format.");
 
+  bool buildMassMatrix = false;
+  clp.setOption("buildMassMat", "dontBuildMassMat", &buildMassMatrix, "build a mass matrix");
 
 
   switch (clp.parse(argc, argv)) {
@@ -421,10 +425,10 @@ int main_(int argc, char *argv[]) {
     << "|                      Denis Ridzal  (dridzal@sandia.gov),                    |\n" \
     << "|                      Kara Peterson (kjpeter@sandia.gov).                    |\n" \
     << "|                                                                             |\n" \
-    << "|  Intrepid's website: http://trilinos.sandia.gov/packages/intrepid           |\n" \
-    << "|  STK's website:      http://trilinos.github.io/stk.html                     |\n" \
-    << "|  ML's website:       http://trilinos.sandia.gov/packages/ml                 |\n" \
-    << "|  Trilinos website:   http://trilinos.sandia.gov                             |\n" \
+    << "|  Intrepid2's website: http://trilinos.sandia.gov/packages/intrepid2         |\n" \
+    << "|  STK's website:       http://trilinos.github.io/stk.html                    |\n" \
+    << "|  ML's website:        http://trilinos.sandia.gov/packages/ml                |\n" \
+    << "|  Trilinos website:    http://trilinos.sandia.gov                            |\n" \
     << "|                                                                             |\n" \
     << "===============================================================================\n";
   }
@@ -467,7 +471,7 @@ int main_(int argc, char *argv[]) {
   std::string filename(optMeshFile);
   int db_integer_size = 4;
   stk::io::HeartbeatType hb_type = stk::io::NONE;
-
+  stk::initialize(&argc, &argv);
   mesh_read_write(type, working_directory, filename, broker, db_integer_size, hb_type);
 
   stk::mesh::BulkData &bulkData = broker.bulk_data();
@@ -478,18 +482,18 @@ int main_(int argc, char *argv[]) {
   stk::mesh::Selector locallyOwnedSelector = metaData.locally_owned_part();
   int numLocalNodes = stk::mesh::count_entities(bulkData, NODE_RANK, locallyOwnedSelector);
 
-  stk::mesh::for_each_entity_run(bulkData, NODE_RANK, locallyOwnedSelector,
+  stk::mesh::for_each_entity_run_no_threads(bulkData, NODE_RANK, locallyOwnedSelector,
     [&](const stk::mesh::BulkData& mesh, stk::mesh::Entity node)
     {
         ownedGIDs.push_back(mesh.identifier(node)-1);
-        ownedPlusSharedGIDs.push_back(mesh.identifier(node)-1);
     });
+  ownedPlusSharedGIDs.assign(ownedGIDs.begin(), ownedGIDs.end());
 
   // Now record the shared-but-not-owned nodal GIDs
   {
     stk::mesh::Selector globallySharedSelector = metaData.globally_shared_part();
     globallySharedSelector &= !locallyOwnedSelector; //not owned
-    stk::mesh::for_each_entity_run(bulkData, NODE_RANK, globallySharedSelector,
+    stk::mesh::for_each_entity_run_no_threads(bulkData, NODE_RANK, globallySharedSelector,
       [&](const stk::mesh::BulkData& mesh, stk::mesh::Entity node)
       {
         ownedPlusSharedGIDs.push_back(mesh.identifier(node)-1);
@@ -531,7 +535,7 @@ int main_(int argc, char *argv[]) {
   auto nnzPerRowUpperBound_h = nnzPerRowUpperBound.view_host();
 
   // Count the local elements and get node index upper bound
-  stk::mesh::for_each_entity_run(bulkData, ELEMENT_RANK, locallyOwnedSelector,
+  stk::mesh::for_each_entity_run_no_threads(bulkData, ELEMENT_RANK, locallyOwnedSelector,
     [&](const stk::mesh::BulkData& mesh, stk::mesh::Entity elem)
     {
       stk::mesh::ConnectedEntities nodes = mesh.get_connected_entities(elem,NODE_RANK);
@@ -548,7 +552,7 @@ int main_(int argc, char *argv[]) {
   // Build the Graph
   RCP<Tpetra_FECrsGraph> StiffGraph = rcp(new Tpetra_FECrsGraph(globalMapG,ownedPlusSharedMapG,nnzPerRowUpperBound));
   Tpetra::beginAssembly(*StiffGraph);
-  stk::mesh::for_each_entity_run(bulkData, ELEMENT_RANK, locallyOwnedSelector,
+  stk::mesh::for_each_entity_run_no_threads(bulkData, ELEMENT_RANK, locallyOwnedSelector,
     [&](const stk::mesh::BulkData& mesh, stk::mesh::Entity elem)
     {
       stk::mesh::ConnectedEntities nodes = mesh.get_connected_entities(elem,NODE_RANK);
@@ -653,17 +657,17 @@ int main_(int argc, char *argv[]) {
   /**********************************************************************************/
   tm = rcp(new TimeMonitor(*TimeMonitor::getNewTimer("4) Assembly Prep")));
   // Define cubature of the specified degree for the cellType
-  Intrepid::DefaultCubatureFactory<double>  cubFactory;
+  Intrepid2::DefaultCubatureFactory  cubFactory;
   int cubDegree = 2;
 
-  RCP<Intrepid::Cubature<double> > cellCubature = cubFactory.create(cellType, cubDegree);
+  RCP<Intrepid2::Cubature<device_type> > cellCubature = cubFactory.create<device_type>(cellType, cubDegree);
 
   int cubDim       = cellCubature -> getDimension();
   int numCubPoints = cellCubature -> getNumPoints();
 
   // Get numerical integration points and weights
-  IntrepidFieldContainer cubPoints (numCubPoints, cubDim);
-  IntrepidFieldContainer cubWeights(numCubPoints);
+  Intrepid2ScalarView cubPoints ("cubPoints", numCubPoints, cubDim);
+  Intrepid2ScalarView cubWeights("cubWeights", numCubPoints);
 
   cellCubature -> getCubature(cubPoints, cubWeights);
 
@@ -672,20 +676,17 @@ int main_(int argc, char *argv[]) {
   /**********************************************************************************/
 
   // Select basis from the cell topology
-  int order = 1;
-  spaceDim = getDimension(cellType);
-  RCP<Intrepid::Basis<double, IntrepidFieldContainer > >  HGradBasis;
-  getBasis(HGradBasis, cellType, order);
-
+  spaceDim = cellType.getDimension();
+  auto HGradBasis = getHGradBasis<device_type,SC>(cellType);
 
   int numFieldsG = HGradBasis->getCardinality();
 
-  IntrepidFieldContainer basisValues(numFieldsG, numCubPoints);
-  IntrepidFieldContainer basisGrads(numFieldsG, numCubPoints, spaceDim);
+  Intrepid2ScalarView basisValues("HGBValues", numFieldsG, numCubPoints);
+  Intrepid2ScalarView basisGrads("HGBGrads", numFieldsG, numCubPoints, spaceDim);
 
   // Evaluate basis values and gradients at cubature points
-  HGradBasis->getValues(basisValues, cubPoints, Intrepid::OPERATOR_VALUE);
-  HGradBasis->getValues(basisGrads, cubPoints, Intrepid::OPERATOR_GRAD);
+  HGradBasis->getValues(basisValues, cubPoints, Intrepid2::OPERATOR_VALUE);
+  HGradBasis->getValues(basisGrads, cubPoints, Intrepid2::OPERATOR_GRAD);
 
 
   /**********************************************************************************/
@@ -722,10 +723,10 @@ int main_(int argc, char *argv[]) {
   /****************************** STATISTICS (Part I) *******************************/
   /**********************************************************************************/
   if(do_statistics) {
-    Intrepid::FieldContainer<int> elemToNode(numLocalElems,numNodesPerElem);
-    Intrepid::FieldContainer<int> elemToEdge(numLocalElems,numEdgesPerElem);
-    Intrepid::FieldContainer<double> nodeCoord (numLocalNodes, spaceDim);
-    Intrepid::FieldContainer<double> sigmaVal(numLocalElems);
+    Intrepid2::ScalarView<int, memory_space> elemToNode("elemToNode",numLocalElems,numNodesPerElem);
+    Intrepid2::ScalarView<int, memory_space> elemToEdge("elemToEdge",numLocalElems,numEdgesPerElem);
+    Intrepid2::ScalarView<double, memory_space> nodeCoord ("nodeCoord", numLocalNodes, spaceDim);
+    Intrepid2::ScalarView<double, memory_space> sigmaVal("sigmaVal", numLocalElems);
 
     int elem_ct=0;
     std::map<std::pair<int,int>,int> local_edge_hash;
@@ -774,7 +775,7 @@ int main_(int argc, char *argv[]) {
       }//end element loop
     }//end bucket loop
 
-    Intrepid::FieldContainer<int> edgeToNode(edge_vector.size(), 2);
+    Intrepid2::ScalarView<int, memory_space> edgeToNode("edgeToNode", edge_vector.size(), 2);
     for(int i=0; i<(int)edge_vector.size(); i++) {
       edgeToNode(i,0) = edge_vector[i].first;
       edgeToNode(i,1) = edge_vector[i].second;
@@ -791,6 +792,8 @@ int main_(int argc, char *argv[]) {
   /**********************************************************************************/
   tm = rcp(new TimeMonitor(*TimeMonitor::getNewTimer("5) Matrix/RHS Assembly")));
   RCP<Tpetra_FECrsMatrix> StiffMatrix = rcp(new Tpetra_FECrsMatrix(StiffGraph));
+  RCP<Tpetra_FECrsMatrix> MassMatrix;
+  if (buildMassMatrix) MassMatrix = rcp(new Tpetra_FECrsMatrix(StiffGraph));
 
   // Define desired workset size and count how many worksets there are on this processor's mesh block
   //int desiredWorksetSize = numElems;                   // change to desired workset size!
@@ -809,10 +812,10 @@ int main_(int argc, char *argv[]) {
   }
 
 
-
   // Start assembly
   RCP<Tpetra_FEMultiVector> rhsVector = rcp (new Tpetra_FEMultiVector(globalMapG,StiffGraph->getImporter(),1));
-  Tpetra::beginAssembly(*StiffMatrix,*rhsVector);
+  if (buildMassMatrix) Tpetra::beginAssembly(*MassMatrix,*StiffMatrix,*rhsVector);
+  else  Tpetra::beginAssembly(*StiffMatrix,*rhsVector);
 
   // Right now, this loop only increments once:
   //   numWorkset = 1
@@ -831,7 +834,7 @@ int main_(int argc, char *argv[]) {
 
     // allocate the array for the cell nodes
     worksetSize  = worksetEnd - worksetBegin;
-    IntrepidFieldContainer cellWorkset(worksetSize, numNodesPerElem, spaceDim);
+    Intrepid2ScalarView cellWorkset("cellWorkset", worksetSize, numNodesPerElem, spaceDim);
 
     // copy coordinates into cell workset
     int cellCounter = 0;
@@ -853,44 +856,47 @@ int main_(int argc, char *argv[]) {
     /**********************************************************************************/
 
     // Containers for Jacobians, integration measure & cubature points in workset cells
-    IntrepidFieldContainer worksetJacobian  (worksetSize, numCubPoints, spaceDim, spaceDim);
-    IntrepidFieldContainer worksetJacobInv  (worksetSize, numCubPoints, spaceDim, spaceDim);
-    IntrepidFieldContainer worksetJacobDet  (worksetSize, numCubPoints);
-    IntrepidFieldContainer worksetCubWeights(worksetSize, numCubPoints);
-    IntrepidFieldContainer worksetCubPoints (worksetSize, numCubPoints, cubDim);
+    Intrepid2ScalarView worksetJacobian  ("worksetJacobian", worksetSize, numCubPoints, spaceDim, spaceDim);
+    Intrepid2ScalarView worksetJacobInv  ("worksetJacobInv", worksetSize, numCubPoints, spaceDim, spaceDim);
+    Intrepid2ScalarView worksetJacobDet  ("worksetJacobDet", worksetSize, numCubPoints);
+    Intrepid2ScalarView worksetCubWeights("worksetCubWeights", worksetSize, numCubPoints);
+    Intrepid2ScalarView worksetCubPoints ("worksetCubPoints", worksetSize, numCubPoints, cubDim);
 
     // Containers for basis values transformed to workset cells and them multiplied by cubature weights
-    IntrepidFieldContainer worksetBasisValues        (worksetSize, numFieldsG, numCubPoints);
-    IntrepidFieldContainer worksetBasisValuesWeighted(worksetSize, numFieldsG, numCubPoints);
-    IntrepidFieldContainer worksetBasisGrads         (worksetSize, numFieldsG, numCubPoints, spaceDim);
-    IntrepidFieldContainer worksetBasisGradsWeighted (worksetSize, numFieldsG, numCubPoints, spaceDim);
+    Intrepid2ScalarView worksetBasisValues        ("worksetBasisValues", worksetSize, numFieldsG, numCubPoints);
+    Intrepid2ScalarView worksetBasisValuesWeighted("worksetBasisValuesWeighted", worksetSize, numFieldsG, numCubPoints);
+    Intrepid2ScalarView worksetBasisGrads         ("worksetBasisGrads", worksetSize, numFieldsG, numCubPoints, spaceDim);
+    Intrepid2ScalarView worksetBasisGradsWeighted ("worksetBasisGradsWeighted", worksetSize, numFieldsG, numCubPoints, spaceDim);
 
     // Containers for diffusive & advective fluxes & non-conservative adv. term and reactive terms
-    IntrepidFieldContainer worksetDiffusiveFlux(worksetSize, numFieldsG, numCubPoints, spaceDim);
+    Intrepid2ScalarView worksetDiffusiveFlux("worksetDiffusiveFlux", worksetSize, numFieldsG, numCubPoints, spaceDim);
 
     // Containers for material values and source term. Require user-defined functions
-    IntrepidFieldContainer worksetMaterialVals (worksetSize, numCubPoints, spaceDim, spaceDim);
-    IntrepidFieldContainer worksetSourceTerm   (worksetSize, numCubPoints);
+    Intrepid2ScalarView worksetMaterialVals ("worksetMaterialVals", worksetSize, numCubPoints, spaceDim, spaceDim);
+    Intrepid2ScalarView worksetSourceTerm   ("worksetSourceTerm", worksetSize, numCubPoints);
 
     // Containers for workset contributions to the discretization matrix and the right hand side
-    IntrepidFieldContainer worksetStiffMatrix (worksetSize, numFieldsG, numFieldsG);
-    IntrepidFieldContainer worksetRHS         (worksetSize, numFieldsG);
+    Intrepid2ScalarView worksetStiffMatrix ("worksetStiffMatrix", worksetSize, numFieldsG, numFieldsG);
+    Intrepid2ScalarView worksetMassMatrix;
+    if (buildMassMatrix)
+      worksetMassMatrix  = Intrepid2ScalarView("worksetMassMatrix" , worksetSize, numFieldsG, numFieldsG);
+    Intrepid2ScalarView worksetRHS         ("worksetRHS", worksetSize, numFieldsG);
 
 
     /**********************************************************************************/
     /*                                Calculate Jacobians                             */
     /**********************************************************************************/
 
-    IntrepidCTools::setJacobian(worksetJacobian, cubPoints, cellWorkset, cellType);
-    IntrepidCTools::setJacobianInv(worksetJacobInv, worksetJacobian );
-    IntrepidCTools::setJacobianDet(worksetJacobDet, worksetJacobian );
+    Intrepid2CTools::setJacobian(worksetJacobian, cubPoints, cellWorkset, cellType);
+    Intrepid2CTools::setJacobianInv(worksetJacobInv, worksetJacobian );
+    Intrepid2CTools::setJacobianDet(worksetJacobDet, worksetJacobian );
 
     /**********************************************************************************/
     /*          Cubature Points to Physical Frame and Compute Data                    */
     /**********************************************************************************/
 
     // map cubature points to physical frame
-    IntrepidCTools::mapToPhysicalFrame (worksetCubPoints, cubPoints, cellWorkset, cellType);
+    Intrepid2CTools::mapToPhysicalFrame (worksetCubPoints, cubPoints, cellWorkset, cellType);
 
     // get A at cubature points
     evaluateMaterialTensor (worksetMaterialVals, worksetCubPoints);
@@ -903,45 +909,51 @@ int main_(int argc, char *argv[]) {
     /**********************************************************************************/
 
     // Transform basis gradients to physical frame:                        DF^{-T}(grad u)
-    IntrepidFSTools::HGRADtransformGRAD<double>(worksetBasisGrads,
+    Intrepid2FSTools::HGRADtransformGRAD(worksetBasisGrads,
                                                 worksetJacobInv,   basisGrads);
 
     // Compute integration measure for workset cells:                      Det(DF)*w = J*w
-    IntrepidFSTools::computeCellMeasure<double>(worksetCubWeights,
+    Intrepid2FSTools::computeCellMeasure(worksetCubWeights,
                                                 worksetJacobDet, cubWeights);
 
 
     // Multiply transformed (workset) gradients with weighted measure:     DF^{-T}(grad u)*J*w
-    IntrepidFSTools::multiplyMeasure<double>(worksetBasisGradsWeighted,
+    Intrepid2FSTools::multiplyMeasure(worksetBasisGradsWeighted,
                                              worksetCubWeights, worksetBasisGrads);
 
 
     // Compute material tensor applied to basis grads:                     A*(DF^{-T}(grad u)
-    IntrepidFSTools::tensorMultiplyDataField<double>(worksetDiffusiveFlux,
+    Intrepid2FSTools::tensorMultiplyDataField(worksetDiffusiveFlux,
                                                      worksetMaterialVals,
                                                      worksetBasisGrads);
 
     // Integrate to compute contribution to global stiffness matrix:      (DF^{-T}(grad u)*J*w)*(A*DF^{-T}(grad u))
-    IntrepidFSTools::integrate<double>(worksetStiffMatrix,
+    Intrepid2FSTools::integrate(worksetStiffMatrix,
                                        worksetBasisGradsWeighted,
-                                       worksetDiffusiveFlux, Intrepid::COMP_BLAS);
+                                       worksetDiffusiveFlux);
 
     /**********************************************************************************/
     /*                                   Compute RHS                                  */
     /**********************************************************************************/
 
     // Transform basis values to physical frame:                        clones basis values (u)
-    IntrepidFSTools::HGRADtransformVALUE<double>(worksetBasisValues,
+    Intrepid2FSTools::HGRADtransformVALUE(worksetBasisValues,
                                                  basisValues);
 
     // Multiply transformed (workset) values with weighted measure:     (u)*J*w
-    IntrepidFSTools::multiplyMeasure<double>(worksetBasisValuesWeighted,
+    Intrepid2FSTools::multiplyMeasure(worksetBasisValuesWeighted,
                                              worksetCubWeights, worksetBasisValues);
 
     // Integrate worksetSourceTerm against weighted basis function set:  f.(u)*J*w
-    IntrepidFSTools::integrate<double>(worksetRHS,
+    Intrepid2FSTools::integrate(worksetRHS,
                                        worksetSourceTerm,
-                                       worksetBasisValuesWeighted, Intrepid::COMP_BLAS);
+                                       worksetBasisValuesWeighted);
+
+    /**********************************************************************************/
+    /*                         Compute Mass Matrix                                    */
+    /**********************************************************************************/
+    if (buildMassMatrix)
+       Intrepid2FSTools::integrate(worksetMassMatrix, worksetBasisValues,worksetBasisValuesWeighted);
 
     /**********************************************************************************/
     /***************************** STATISTICS (Part II) ******************************/
@@ -981,6 +993,11 @@ int main_(int argc, char *argv[]) {
             Teuchos::Array<SC> val(1); val[0] = operatorMatrixContribution;
             StiffMatrix->sumIntoGlobalValues(globalRow, col(), val());
 
+            if (buildMassMatrix) {
+              double MassMatrixContribution = worksetMassMatrix(worksetCellOrdinal, cellRow, cellCol);
+              Teuchos::Array<SC> massval(1); massval[0] = MassMatrixContribution;
+              MassMatrix->sumIntoGlobalValues(globalRow,  col(), massval());
+            }
           }// end cell col loop
 
         }// end cell row loop
@@ -994,7 +1011,8 @@ int main_(int argc, char *argv[]) {
   }// end workset loop
 
 
-  Tpetra::endAssembly(*StiffMatrix,*rhsVector);
+  if (buildMassMatrix) Tpetra::endAssembly(*MassMatrix,*StiffMatrix,*rhsVector);
+  else Tpetra::endAssembly(*StiffMatrix,*rhsVector);
 
 /**********************************************************************************/
 /***************************** STATISTICS (Part IIb) ******************************/
@@ -1056,6 +1074,9 @@ int main_(int argc, char *argv[]) {
     if (matrixFilename != "") {
       writer_type::writeSparseFile (matrixFilename, StiffMatrix);
     }
+    if ( (massmatFilename != "") && buildMassMatrix ) {
+      writer_type::writeSparseFile (massmatFilename, MassMatrix);
+    }
     if (rhsFilename != "") {
       writer_type::writeDenseFile (rhsFilename, rhsVector);
     }
@@ -1099,12 +1120,17 @@ int main_(int argc, char *argv[]) {
 
   Teuchos::RCP<Tpetra_CrsMatrix> Acrs = Teuchos::rcp_dynamic_cast<Tpetra_CrsMatrix>(StiffMatrix);
   Teuchos::RCP<Tpetra_MultiVector> rhsMV = Teuchos::rcp_dynamic_cast<Tpetra_MultiVector>(rhsVector);
+  Teuchos::RCP<Tpetra_CrsMatrix> Mcrs;
+
+  if (buildMassMatrix) {
+    Mcrs = Teuchos::rcp_dynamic_cast<Tpetra_CrsMatrix>(MassMatrix);
+  }
   tm = Teuchos::null;
   tm = rcp(new TimeMonitor(*TimeMonitor::getNewTimer("8) Linear solve")));
-  TestMultiLevelPreconditioner(probType,             MLList,
-                               Acrs,                 exactNodalVals,
-                               rhsMV,                lhsVector, nCoord,
-                               TotalErrorResidual,   TotalErrorExactSol);
+  TestMultiLevelPreconditioner(probType,           MLList,
+                               Acrs,               exactNodalVals,
+                               rhsMV,              lhsVector, nCoord, Mcrs,
+                               TotalErrorResidual, TotalErrorExactSol);
 
    // Timer Output
    tm = Teuchos::null;
@@ -1236,9 +1262,9 @@ template<class ArrayOut, class ArrayIn>
 void evaluateMaterialTensor(ArrayOut &        matTensorValues,
                              const ArrayIn &   evaluationPoints){
 
-  int numWorksetCells  = evaluationPoints.dimension(0);
-  int numPoints        = evaluationPoints.dimension(1);
-  int spaceDim         = evaluationPoints.dimension(2);
+  int numWorksetCells  = evaluationPoints.extent_int(0);
+  int numPoints        = evaluationPoints.extent_int(1);
+  int spaceDim2         = evaluationPoints.extent_int(2);
 
   double material[3][3];
 
@@ -1248,12 +1274,12 @@ void evaluateMaterialTensor(ArrayOut &        matTensorValues,
       double x = evaluationPoints(cell, pt, 0);
       double y = evaluationPoints(cell, pt, 1);
       double z = 0.0;
-      if(spaceDim==3) z = evaluationPoints(cell, pt, 2);
+      if(spaceDim2==3) z = evaluationPoints(cell, pt, 2);
 
       materialTensor<double>(material, x, y, z);
 
-      for(int row = 0; row < spaceDim; row++){
-        for(int col = 0; col < spaceDim; col++){
+      for(int row = 0; row < spaceDim2; row++){
+        for(int col = 0; col < spaceDim2; col++){
           matTensorValues(cell, pt, row, col) = material[row][col];
         }
       }
@@ -1266,8 +1292,8 @@ template<class ArrayOut, class ArrayIn>
 void evaluateSourceTerm(ArrayOut &       sourceTermValues,
                         const ArrayIn &  evaluationPoints){
 
-  int numWorksetCells  = evaluationPoints.dimension(0);
-  int numPoints = evaluationPoints.dimension(1);
+  int numWorksetCells  = evaluationPoints.extent_int(0);
+  int numPoints = evaluationPoints.extent_int(1);
 
   for(int cell = 0; cell < numWorksetCells; cell++){
     for(int pt = 0; pt < numPoints; pt++){
@@ -1288,8 +1314,8 @@ template<class ArrayOut, class ArrayIn>
 void evaluateExactSolution(ArrayOut &       exactSolutionValues,
                            const ArrayIn &  evaluationPoints){
 
-  int numWorksetCells  = evaluationPoints.dimension(0);
-  int numPoints = evaluationPoints.dimension(1);
+  int numWorksetCells  = evaluationPoints.extent_int(0);
+  int numPoints = evaluationPoints.extent_int(1);
 
   for(int cell = 0; cell < numWorksetCells; cell++){
     for(int pt = 0; pt < numPoints; pt++){
@@ -1311,9 +1337,9 @@ template<class ArrayOut, class ArrayIn>
 void evaluateExactSolutionGrad(ArrayOut &       exactSolutionGradValues,
                                const ArrayIn &  evaluationPoints){
 
-  int numWorksetCells  = evaluationPoints.dimension(0);
-  int numPoints = evaluationPoints.dimension(1);
-  int spaceDim  = evaluationPoints.dimension(2);
+  int numWorksetCells  = evaluationPoints.extent_int(0);
+  int numPoints = evaluationPoints.extent_int(1);
+  int spaceDim2  = evaluationPoints.extent_int(2);
 
   double gradient[3];
 
@@ -1323,12 +1349,12 @@ void evaluateExactSolutionGrad(ArrayOut &       exactSolutionGradValues,
       double x = evaluationPoints(cell, pt, 0);
       double y = evaluationPoints(cell, pt, 1);
       double z = 0.0;
-      if(spaceDim==3)
+      if(spaceDim2==3)
 	z = evaluationPoints(cell, pt, 2);
 
       exactSolutionGrad<double>(gradient, x, y, z);
 
-      for(int row = 0; row < spaceDim; row++){
+      for(int row = 0; row < spaceDim2; row++){
         exactSolutionGradValues(cell, pt, row) = gradient[row];
       }
     }
@@ -1347,6 +1373,7 @@ int TestMultiLevelPreconditioner(char ProblemType[],
                                  Teuchos::RCP<Tpetra_MultiVector> & b,
                                  Teuchos::RCP<Tpetra_MultiVector> & uh,
 				 Teuchos::RCP<Tpetra_MultiVector> & coords,
+                                 Teuchos::RCP<Tpetra_CrsMatrix> & MassMatrix,
                                  double & TotalErrorResidual,
                                  double & TotalErrorExactSol)
 {
@@ -1369,6 +1396,10 @@ int TestMultiLevelPreconditioner(char ProblemType[],
     mueluParams = MLList.sublist("MueLu");
   // Xpetrify coordinates
   mueluParams.sublist("user data").set("Coordinates",Xpetra::toXpetra(coords));
+  // Future versions of muelu can use a mass matrix (or a mass matrix inverse)
+  // to define a strength-of-connection matrix that guides coarsening decisions
+  if (!MassMatrix.is_null())
+    mueluParams.sublist("user data").set("M",Xpetra::toXpetra(MassMatrix));
   if(A->getMap()->getComm()->getRank()==0)
     std::cout<<"*** MueLu Params ***" <<std::endl<<mueluParams<<std::endl;
 
@@ -1411,51 +1442,19 @@ int TestMultiLevelPreconditioner(char ProblemType[],
 /**********************************************************************************/
 
 
-void getBasis(Teuchos::RCP<Intrepid::Basis<double,IntrepidFieldContainer > > &basis,
-               const ShardsCellTopology & cellTopology,
-               int order)  {
-
-
- // select basis based on cell topology only for now, and assume first order basis
-    switch (cellTopology.getKey()) {
-
-       case shards::Tetrahedron<4>::key:
-         basis = Teuchos::rcp(new Intrepid::Basis_HGRAD_TET_C1_FEM<double, IntrepidFieldContainer > );
-         break;
-
-       case shards::Hexahedron<8>::key:
-         basis = Teuchos::rcp(new Intrepid::Basis_HGRAD_HEX_C1_FEM<double, IntrepidFieldContainer > );
-         break;
-
-       case shards::Triangle<3>::key:
-         basis = Teuchos::rcp(new Intrepid::Basis_HGRAD_TRI_C1_FEM<double, IntrepidFieldContainer > );
-         break;
-
-       case shards::Quadrilateral<4>::key:
-         basis = Teuchos::rcp(new Intrepid::Basis_HGRAD_QUAD_C1_FEM<double, IntrepidFieldContainer > );
-         break;
-
-
-       default:
-         TEUCHOS_TEST_FOR_EXCEPTION(1,std::invalid_argument,
-				    "Unknown cell topology for basis selction. Please use Hexahedron_8 or Tetrahedron_4, Quadrilateral_4 or Triangle_3");
-
-     }
-
-}
-
-int getDimension( const ShardsCellTopology & cellTopology) {
+template<typename DeviceType, typename Scalar>
+Teuchos::RCP<Intrepid2::Basis<DeviceType, Scalar, Scalar> > getHGradBasis( const ShardsCellTopology & cellTopology) {
+  Teuchos::RCP<Intrepid2::Basis<DeviceType, Scalar, Scalar> > r_val;
   switch (cellTopology.getKey()) {
-  case shards::Tetrahedron<4>::key:
-  case shards::Hexahedron<8>::key:
-    return 3;
-  case shards::Triangle<3>::key:
-  case shards::Quadrilateral<4>::key:
-    return 2;
-  default:
-    TEUCHOS_TEST_FOR_EXCEPTION(1,std::invalid_argument,
-			       "Unknown cell topology for basis selction. Please use Hexahedron_8 or Tetrahedron_4, Quadrilateral_4 or Triangle_3");
+    case shards::Triangle<3>::key:      r_val = Teuchos::rcp(new Intrepid2::Basis_HGRAD_TRI_C1_FEM    <DeviceType,Scalar,Scalar>()); break;
+    case shards::Quadrilateral<4>::key: r_val = Teuchos::rcp(new Intrepid2::Basis_HGRAD_QUAD_C1_FEM   <DeviceType,Scalar,Scalar>()); break;
+    case shards::Tetrahedron<4>::key:   r_val = Teuchos::rcp(new Intrepid2::Basis_HGRAD_TET_C1_FEM    <DeviceType,Scalar,Scalar>()); break;
+    case shards::Hexahedron<8>::key:    r_val = Teuchos::rcp(new Intrepid2::Basis_HGRAD_HEX_C1_FEM    <DeviceType,Scalar,Scalar>()); break;
+    default:
+      TEUCHOS_TEST_FOR_EXCEPTION(1,std::invalid_argument,
+              "Unexpected cell topology for basis selction. Please use Hexahedron_8 or Tetrahedron_4, Quadrilateral_4 or Triangle_3");
   }
+  return r_val;
 }
 
 

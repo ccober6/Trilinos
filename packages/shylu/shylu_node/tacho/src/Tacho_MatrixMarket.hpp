@@ -112,8 +112,8 @@ template <typename ValueType> struct MatrixMarket {
   /// \brief matrix market reader
   template <typename DeviceType>
   static int read(const std::string &filename, CrsMatrixBase<ValueType, DeviceType> &A,
-                  const ordinal_type sanitize = 0, const ordinal_type verbose = 0) {
-    static_assert(Kokkos::Impl::MemorySpaceAccess<Kokkos::HostSpace, typename DeviceType::memory_space>::assignable,
+                  const ordinal_type mm_base = 1, const ordinal_type sanitize = 0, const ordinal_type verbose = 0) {
+    static_assert(Kokkos::SpaceAccessibility<Kokkos::HostSpace, typename DeviceType::memory_space>::assignable,
                   "DeviceType is not assignable from HostSpace");
 
     Kokkos::Timer timer;
@@ -157,8 +157,6 @@ template <typename ValueType> struct MatrixMarket {
     }
 
     // read data into coo format
-    const ordinal_type mm_base = 1;
-
     typedef ValueType value_type;
     typedef Coo<value_type> ijv_type;
     std::vector<ijv_type> mm;
@@ -169,7 +167,18 @@ template <typename ValueType> struct MatrixMarket {
         ordinal_type row, col;
         value_type val;
 
+        if (file.eof()) {
+          std::cout << " ERROR: Reached the end of file before nnz (invalid nnz?)" << std::endl << std::endl;
+          return -1;
+        }
         impl_read_value_from_file(file, cmplx, row, col, val);
+        if (row < mm_base || row > m-1+mm_base ||
+            col < mm_base || col > n-1+mm_base) {
+          std::cout << " ERROR: (" << row << ", " << col
+                    << ") out of row or col range for the " << m << "x" << n
+                    << " matrix with base = " << mm_base << std::endl << std::endl;
+          return -1;
+        }
 
         row -= mm_base;
         col -= mm_base;
@@ -248,7 +257,7 @@ template <typename ValueType> struct MatrixMarket {
       printf("  Time\n");
       printf("             time for reading A:                              %10.6f s\n", t);
       printf("\n");
-      printf("  Sparse Matrix (%s) \n", (symmetry ? "symmetric" : "non-symmetric"));
+      printf("  Sparse Matrix (%s, %s) \n", (cmplx ? "complex" : "real"), (symmetry ? "symmetric" : "non-symmetric"));
       printf("             number of rows:                                  %10d\n", m);
       printf("             number of cols:                                  %10d\n", n);
       printf("             number of nonzeros from input:                   %10d\n", ordinal_type(nnz_input));
@@ -264,7 +273,7 @@ template <typename ValueType> struct MatrixMarket {
   static void write(std::ofstream &file, const CrsMatrixBase<ValueType, DeviceType> &A,
                     const int uplo = 0, // 0 - all, 1 - upper, 2 - lower
                     const std::string comment = "%% Tacho::MatrixMarket::Export") {
-    static_assert(Kokkos::Impl::MemorySpaceAccess<Kokkos::HostSpace, typename DeviceType::memory_space>::assignable,
+    static_assert(Kokkos::SpaceAccessibility<Kokkos::HostSpace, typename DeviceType::memory_space>::assignable,
                   "DeviceType is not assignable from HostSpace");
 
     typedef ValueType value_type;
@@ -351,7 +360,7 @@ template <typename ValueType> struct MatrixMarket {
       file >> m >> n;
       if ( m != ordinal_type(B.extent(0))) {
         std::cout << std::endl
-                  << "ERROR: expected the RHS of length(m = " << B.extent(0) << ")" 
+                  << "ERROR: expected the RHS of length (m = " << B.extent(0) << " vs " << m << ")" 
                   << std::endl << std::endl;
         return -1;
       }

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSKERNELS_BLOCKUTILS_HPP
 #define KOKKOSKERNELS_BLOCKUTILS_HPP
 
@@ -36,7 +23,7 @@ KOKKOS_INLINE_FUNCTION void kk_block_init(const size_type block_dim, value_type 
 // Initializes block: A = B
 template <typename size_type, typename value_type>
 KOKKOS_INLINE_FUNCTION void kk_block_set(const size_type block_dim, value_type *dst, const value_type *val) {
-  memcpy((void *)dst, val, block_dim * block_dim * sizeof(value_type));
+  memcpy((void *)dst, val, block_dim * static_cast<std::size_t>(block_dim) * sizeof(value_type));
 }
 
 // Performs A += B on blocks

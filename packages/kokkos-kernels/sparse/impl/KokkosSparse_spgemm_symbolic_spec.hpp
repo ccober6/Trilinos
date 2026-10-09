@@ -1,25 +1,12 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSSPARSE_IMPL_SPGEMM_SYMBOLIC_SPEC_HPP_
 #define KOKKOSSPARSE_IMPL_SPGEMM_SYMBOLIC_SPEC_HPP_
 
 #include <KokkosKernels_config.h>
 
 #include <Kokkos_Core.hpp>
-#include <Kokkos_ArithTraits.hpp>
+#include <KokkosKernels_ArithTraits.hpp>
 #include "KokkosKernels_Handle.hpp"
 // Include the actual functors
 #if !defined(KOKKOSKERNELS_ETI_ONLY) || KOKKOSKERNELS_IMPL_COMPILE_LIBRARY
@@ -113,6 +100,8 @@ struct SPGEMM_SYMBOLIC<KernelHandle, a_size_view_t_, a_lno_view_t, b_size_view_t
                               transposeA, row_mapB, entriesB, transposeB, row_mapC);
         break;
       default: {
+        // Note: if algorithm type is SPGEMM_DEFAULT, KokkosSPGEMM's constructor will choose the
+        // correct implementation.
         KokkosSPGEMM<KernelHandle, a_size_view_t_, a_lno_view_t, typename KernelHandle::in_scalar_nnz_view_t,
                      b_size_view_t_, b_lno_view_t, typename KernelHandle::in_scalar_nnz_view_t>
             kspgemm(handle, m, n, k, row_mapA, entriesA, transposeA, row_mapB, entriesB, transposeB);

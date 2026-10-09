@@ -459,7 +459,8 @@ Marshal &operator<<(Marshal &mout, const Timer::Metric<T> &t) {
 inline Marshal &operator<<(Marshal &mout, const Timer &t) {
   mout << t.getName() << t.getTimerMask() << t.getSubtimerLapCount()
        << t.getMetric<LapCount>() << t.getMetric<CPUTime>() << t.getMetric<WallTime>()
-       << t.getMetric<MPICount>() << t.getMetric<MPIByteCount>() << t.getMetric<HeapAlloc>();
+       << t.getMetric<MPICount>() << t.getMetric<MPIByteCount>()
+       ;
 
   mout << t.getTimerList();
 

@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSBLAS2_GEMV_TPL_SPEC_DECL_HPP_
 #define KOKKOSBLAS2_GEMV_TPL_SPEC_DECL_HPP_
@@ -422,9 +409,9 @@ namespace Impl {
   }
 
 #define KOKKOSBLAS2_DGEMV_ROCBLAS(LAYOUT, MEM_SPACE, ETI_SPEC_AVAIL)                                                   \
-  template <class ExecSpace>                                                                                           \
+  template <>                                                                                                          \
   struct GEMV<                                                                                                         \
-      ExecSpace,                                                                                                       \
+      Kokkos::HIP,                                                                                                     \
       Kokkos::View<const double**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                                     \
                    Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                                          \
       Kokkos::View<const double*, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                                      \
@@ -442,7 +429,7 @@ namespace Impl {
                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >                                                     \
         YViewType;                                                                                                     \
                                                                                                                        \
-    static void gemv(const ExecSpace& space, const char trans[], typename AViewType::const_value_type& alpha,          \
+    static void gemv(const Kokkos::HIP& space, const char trans[], typename AViewType::const_value_type& alpha,        \
                      const AViewType& A, const XViewType& X, typename YViewType::const_value_type& beta,               \
                      const YViewType& Y) {                                                                             \
       Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_ROCBLAS,double]");                                           \
@@ -457,9 +444,9 @@ namespace Impl {
   };
 
 #define KOKKOSBLAS2_SGEMV_ROCBLAS(LAYOUT, MEM_SPACE, ETI_SPEC_AVAIL)                                                  \
-  template <class ExecSpace>                                                                                          \
+  template <>                                                                                                         \
   struct GEMV<                                                                                                        \
-      ExecSpace,                                                                                                      \
+      Kokkos::HIP,                                                                                                    \
       Kokkos::View<const float**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                                     \
                    Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                                         \
       Kokkos::View<const float*, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,                                      \
@@ -477,7 +464,7 @@ namespace Impl {
                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >                                                    \
         YViewType;                                                                                                    \
                                                                                                                       \
-    static void gemv(const ExecSpace& space, const char trans[], typename AViewType::const_value_type& alpha,         \
+    static void gemv(const Kokkos::HIP& space, const char trans[], typename AViewType::const_value_type& alpha,       \
                      const AViewType& A, const XViewType& X, typename YViewType::const_value_type& beta,              \
                      const YViewType& Y) {                                                                            \
       Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_ROCBLAS,float]");                                           \
@@ -492,8 +479,8 @@ namespace Impl {
   };
 
 #define KOKKOSBLAS2_ZGEMV_ROCBLAS(LAYOUT, MEM_SPACE, ETI_SPEC_AVAIL)                                                  \
-  template <class ExecSpace>                                                                                          \
-  struct GEMV<ExecSpace,                                                                                              \
+  template <>                                                                                                         \
+  struct GEMV<Kokkos::HIP,                                                                                            \
               Kokkos::View<const Kokkos::complex<double>**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,           \
                            Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                                 \
               Kokkos::View<const Kokkos::complex<double>*, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,            \
@@ -512,7 +499,7 @@ namespace Impl {
                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >                                                    \
         YViewType;                                                                                                    \
                                                                                                                       \
-    static void gemv(const ExecSpace& space, const char trans[], typename AViewType::const_value_type& alpha,         \
+    static void gemv(const Kokkos::HIP& space, const char trans[], typename AViewType::const_value_type& alpha,       \
                      const AViewType& A, const XViewType& X, typename YViewType::const_value_type& beta,              \
                      const YViewType& Y) {                                                                            \
       Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_ROCBLAS,complex<double>]");                                 \
@@ -531,8 +518,8 @@ namespace Impl {
   };
 
 #define KOKKOSBLAS2_CGEMV_ROCBLAS(LAYOUT, MEM_SPACE, ETI_SPEC_AVAIL)                                                 \
-  template <class ExecSpace>                                                                                         \
-  struct GEMV<ExecSpace,                                                                                             \
+  template <>                                                                                                        \
+  struct GEMV<Kokkos::HIP,                                                                                           \
               Kokkos::View<const Kokkos::complex<float>**, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,           \
                            Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                                \
               Kokkos::View<const Kokkos::complex<float>*, LAYOUT, Kokkos::Device<Kokkos::HIP, MEM_SPACE>,            \
@@ -551,7 +538,7 @@ namespace Impl {
                          Kokkos::MemoryTraits<Kokkos::Unmanaged> >                                                   \
         YViewType;                                                                                                   \
                                                                                                                      \
-    static void gemv(const ExecSpace& space, const char trans[], typename AViewType::const_value_type& alpha,        \
+    static void gemv(const Kokkos::HIP& space, const char trans[], typename AViewType::const_value_type& alpha,      \
                      const AViewType& A, const XViewType& X, typename YViewType::const_value_type& beta,             \
                      const YViewType& Y) {                                                                           \
       Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_ROCBLAS,complex<float>]");                                 \
@@ -620,61 +607,61 @@ struct kokkos_to_std_type_map {
 // e.g., map Kokkos::complex<float> to std::complex<float>
 template <typename T>
 struct kokkos_to_std_type_map<T, true> {
-  using type = std::complex<typename Kokkos::ArithTraits<T>::mag_type>;
+  using type = std::complex<typename KokkosKernels::ArithTraits<T>::mag_type>;
 };
 
-#define KOKKOSBLAS2_GEMV_ONEMKL(SCALAR, LAYOUT, MEM_SPACE, ETI_SPEC_AVAIL)                                       \
-  template <class ExecSpace>                                                                                     \
-  struct GEMV<ExecSpace,                                                                                         \
-              Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<Kokkos::Experimental::SYCL, MEM_SPACE>,        \
-                           Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                            \
-              Kokkos::View<const SCALAR*, LAYOUT, Kokkos::Device<Kokkos::Experimental::SYCL, MEM_SPACE>,         \
-                           Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                            \
-              Kokkos::View<SCALAR*, LAYOUT, Kokkos::Device<Kokkos::Experimental::SYCL, MEM_SPACE>,               \
-                           Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                            \
-              true, ETI_SPEC_AVAIL> {                                                                            \
-    using device_type = Kokkos::Device<ExecSpace, MEM_SPACE>;                                                    \
-    using mem_traits  = Kokkos::MemoryTraits<Kokkos::Unmanaged>;                                                 \
-    using AViewType   = Kokkos::View<const SCALAR**, LAYOUT, device_type, mem_traits>;                           \
-    using XViewType   = Kokkos::View<const SCALAR*, LAYOUT, device_type, mem_traits>;                            \
-    using YViewType   = Kokkos::View<SCALAR*, LAYOUT, device_type, mem_traits>;                                  \
-                                                                                                                 \
-    static void gemv(const ExecSpace& exec, const char kk_trans[], typename AViewType::const_value_type& alpha,  \
-                     const AViewType& A, const XViewType& X, typename YViewType::const_value_type& beta,         \
-                     const YViewType& Y) {                                                                       \
-      if (beta == Kokkos::ArithTraits<SCALAR>::zero()) {                                                         \
-        Kokkos::deep_copy(Y, Kokkos::ArithTraits<SCALAR>::zero());                                               \
-      }                                                                                                          \
-                                                                                                                 \
-      bool row_major               = std::is_same<Kokkos::LayoutRight, LAYOUT>::value;                           \
-      const std::int64_t M         = A.extent(0);                                                                \
-      const std::int64_t N         = A.extent(1);                                                                \
-      oneapi::mkl::transpose trans = mode_kk_to_onemkl(kk_trans[0]);                                             \
-      const std::int64_t LDA       = row_major ? A.stride(0) : A.stride(1);                                      \
-      std::string label            = "KokkosBlas::gemv[TPL_ONEMKL," + Kokkos::ArithTraits<SCALAR>::name() + "]"; \
-                                                                                                                 \
-      Kokkos::Profiling::pushRegion(label);                                                                      \
-      using mag_type    = kokkos_to_std_type_map<SCALAR, Kokkos::ArithTraits<SCALAR>::is_complex>::type;         \
-      const mag_type* a = reinterpret_cast<const mag_type*>(A.data());                                           \
-      const mag_type* x = reinterpret_cast<const mag_type*>(X.data());                                           \
-      mag_type* y       = reinterpret_cast<mag_type*>(Y.data());                                                 \
-      if (row_major) {                                                                                           \
-        oneapi::mkl::blas::row_major::gemv(exec.sycl_queue(), trans, M, N, alpha, a, LDA, x, 1, beta, y, 1);     \
-      } else {                                                                                                   \
-        oneapi::mkl::blas::column_major::gemv(exec.sycl_queue(), trans, M, N, alpha, a, LDA, x, 1, beta, y, 1);  \
-      }                                                                                                          \
-      Kokkos::Profiling::popRegion();                                                                            \
-    }                                                                                                            \
+#define KOKKOSBLAS2_GEMV_ONEMKL(SCALAR, LAYOUT, MEM_SPACE, ETI_SPEC_AVAIL)                                              \
+  template <class ExecSpace>                                                                                            \
+  struct GEMV<ExecSpace,                                                                                                \
+              Kokkos::View<const SCALAR**, LAYOUT, Kokkos::Device<Kokkos::SYCL, MEM_SPACE>,                             \
+                           Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                                   \
+              Kokkos::View<const SCALAR*, LAYOUT, Kokkos::Device<Kokkos::SYCL, MEM_SPACE>,                              \
+                           Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                                   \
+              Kokkos::View<SCALAR*, LAYOUT, Kokkos::Device<Kokkos::SYCL, MEM_SPACE>,                                    \
+                           Kokkos::MemoryTraits<Kokkos::Unmanaged> >,                                                   \
+              true, ETI_SPEC_AVAIL> {                                                                                   \
+    using device_type = Kokkos::Device<ExecSpace, MEM_SPACE>;                                                           \
+    using mem_traits  = Kokkos::MemoryTraits<Kokkos::Unmanaged>;                                                        \
+    using AViewType   = Kokkos::View<const SCALAR**, LAYOUT, device_type, mem_traits>;                                  \
+    using XViewType   = Kokkos::View<const SCALAR*, LAYOUT, device_type, mem_traits>;                                   \
+    using YViewType   = Kokkos::View<SCALAR*, LAYOUT, device_type, mem_traits>;                                         \
+                                                                                                                        \
+    static void gemv(const ExecSpace& exec, const char kk_trans[], typename AViewType::const_value_type& alpha,         \
+                     const AViewType& A, const XViewType& X, typename YViewType::const_value_type& beta,                \
+                     const YViewType& Y) {                                                                              \
+      if (beta == KokkosKernels::ArithTraits<SCALAR>::zero()) {                                                         \
+        Kokkos::deep_copy(Y, KokkosKernels::ArithTraits<SCALAR>::zero());                                               \
+      }                                                                                                                 \
+                                                                                                                        \
+      bool row_major               = std::is_same<Kokkos::LayoutRight, LAYOUT>::value;                                  \
+      const std::int64_t M         = A.extent(0);                                                                       \
+      const std::int64_t N         = A.extent(1);                                                                       \
+      oneapi::mkl::transpose trans = mode_kk_to_onemkl(kk_trans[0]);                                                    \
+      const std::int64_t LDA       = row_major ? A.stride(0) : A.stride(1);                                             \
+      std::string label            = "KokkosBlas::gemv[TPL_ONEMKL," + KokkosKernels::ArithTraits<SCALAR>::name() + "]"; \
+                                                                                                                        \
+      Kokkos::Profiling::pushRegion(label);                                                                             \
+      using mag_type    = kokkos_to_std_type_map<SCALAR, KokkosKernels::ArithTraits<SCALAR>::is_complex>::type;         \
+      const mag_type* a = reinterpret_cast<const mag_type*>(A.data());                                                  \
+      const mag_type* x = reinterpret_cast<const mag_type*>(X.data());                                                  \
+      mag_type* y       = reinterpret_cast<mag_type*>(Y.data());                                                        \
+      if (row_major) {                                                                                                  \
+        oneapi::mkl::blas::row_major::gemv(exec.sycl_queue(), trans, M, N, alpha, a, LDA, x, 1, beta, y, 1);            \
+      } else {                                                                                                          \
+        oneapi::mkl::blas::column_major::gemv(exec.sycl_queue(), trans, M, N, alpha, a, LDA, x, 1, beta, y, 1);         \
+      }                                                                                                                 \
+      Kokkos::Profiling::popRegion();                                                                                   \
+    }                                                                                                                   \
   };
 
-KOKKOSBLAS2_GEMV_ONEMKL(float, Kokkos::LayoutLeft, Kokkos::Experimental::SYCLDeviceUSMSpace, true)
-KOKKOSBLAS2_GEMV_ONEMKL(float, Kokkos::LayoutRight, Kokkos::Experimental::SYCLDeviceUSMSpace, true)
-KOKKOSBLAS2_GEMV_ONEMKL(double, Kokkos::LayoutLeft, Kokkos::Experimental::SYCLDeviceUSMSpace, true)
-KOKKOSBLAS2_GEMV_ONEMKL(double, Kokkos::LayoutRight, Kokkos::Experimental::SYCLDeviceUSMSpace, true)
-KOKKOSBLAS2_GEMV_ONEMKL(Kokkos::complex<float>, Kokkos::LayoutLeft, Kokkos::Experimental::SYCLDeviceUSMSpace, true)
-KOKKOSBLAS2_GEMV_ONEMKL(Kokkos::complex<float>, Kokkos::LayoutRight, Kokkos::Experimental::SYCLDeviceUSMSpace, true)
-KOKKOSBLAS2_GEMV_ONEMKL(Kokkos::complex<double>, Kokkos::LayoutLeft, Kokkos::Experimental::SYCLDeviceUSMSpace, true)
-KOKKOSBLAS2_GEMV_ONEMKL(Kokkos::complex<double>, Kokkos::LayoutRight, Kokkos::Experimental::SYCLDeviceUSMSpace, true)
+KOKKOSBLAS2_GEMV_ONEMKL(float, Kokkos::LayoutLeft, Kokkos::SYCLDeviceUSMSpace, true)
+KOKKOSBLAS2_GEMV_ONEMKL(float, Kokkos::LayoutRight, Kokkos::SYCLDeviceUSMSpace, true)
+KOKKOSBLAS2_GEMV_ONEMKL(double, Kokkos::LayoutLeft, Kokkos::SYCLDeviceUSMSpace, true)
+KOKKOSBLAS2_GEMV_ONEMKL(double, Kokkos::LayoutRight, Kokkos::SYCLDeviceUSMSpace, true)
+KOKKOSBLAS2_GEMV_ONEMKL(Kokkos::complex<float>, Kokkos::LayoutLeft, Kokkos::SYCLDeviceUSMSpace, true)
+KOKKOSBLAS2_GEMV_ONEMKL(Kokkos::complex<float>, Kokkos::LayoutRight, Kokkos::SYCLDeviceUSMSpace, true)
+KOKKOSBLAS2_GEMV_ONEMKL(Kokkos::complex<double>, Kokkos::LayoutLeft, Kokkos::SYCLDeviceUSMSpace, true)
+KOKKOSBLAS2_GEMV_ONEMKL(Kokkos::complex<double>, Kokkos::LayoutRight, Kokkos::SYCLDeviceUSMSpace, true)
 }  // namespace Impl
 }  // namespace KokkosBlas
 #endif

@@ -75,15 +75,15 @@ namespace BaskerNS
   BASKER_INLINE
   int my_amesos_csymamd <>
   (
-   long n, 
-   long *Ap,
-   long *Ai,
-   long *p, 
-   long *cmember
+   UF_long n,
+   UF_long *Ap,
+   UF_long *Ai,
+   UF_long *p,
+   UF_long *cmember
   )
   {
     double knobs[TRILINOS_CCOLAMD_KNOBS];
-    long    stats[TRILINOS_CCOLAMD_STATS];
+    UF_long    stats[TRILINOS_CCOLAMD_STATS];
 
     //use default knob settings
     trilinos_ccolamd_l_set_defaults(knobs);
@@ -137,17 +137,6 @@ namespace BaskerNS
     }
     printf("\n"); 
     #endif
-
-    //If doing  iluk, we will not want this.
-    //See amd blk notes
-    if(Options.incomplete == BASKER_TRUE)
-    {
-      for(Int i = 0; i < M.ncol; i++)
-      {
-        p(i) = i;
-      }
-      return;
-    }
 
     INT_1DARRAY temp_p;
     BASKER_ASSERT(M.ncol > 0, "AMD perm not long enough");
@@ -207,13 +196,13 @@ namespace BaskerNS
   BASKER_INLINE
   int trilinos_colamd<>
   (
-   long n_row,
-   long n_col,
-   long Alen,
-   long *A,
-   long *p,
+   UF_long n_row,
+   UF_long n_col,
+   UF_long Alen,
+   UF_long *A,
+   UF_long *p,
    double *knobs,
-   long *stats
+   UF_long *stats
   )
   {
     trilinos_colamd_l(n_row, n_col, Alen, A, p, knobs, stats);
@@ -337,33 +326,13 @@ namespace BaskerNS
   )
   {
     // printf("=============BTF_BLK_AMD_CALLED========\n");
-    Int b_end = b_start+b_num;
-    if(Options.incomplete == BASKER_TRUE)
-    {
-      //We note that AMD on incomplete ILUK
-      //Seems realy bad and leads to a zero on the diag
-      //Therefore, we simply return the natural ordering
-      for(Int i = 0 ; i < M.ncol; i++)
-      {
-        p_amd(i) = i;
-      }
-
-      //We will makeup work to be 1, 
-      //Since BTF is not supported in our iluk
-      for(Int b = b_start; b < b_end; b++)
-      {
-        btf_nnz(b) = 1;
-        btf_work(b) = 1;
-      }
-
-      return BASKER_SUCCESS;
-    }
-
     #ifdef BASKER_TIMER
     Kokkos::Timer timer_order;
     double mwm_time = 0.0;
     double amd_time = 0.0;
     #endif
+
+    Int b_end = b_start+b_num;
 
     //p == length(M)
     //Scan over all blks
@@ -482,9 +451,11 @@ namespace BaskerNS
           std::cout << " ** BLK_MWM_AMD::NO BLK MWM (blk=" << b << ", " << btf_tabs(b) << ":" << btf_tabs(b+1)-1 << ") ** " << std::endl;
           //flag = false;
         }
-        for(Int ii = 0; ii < blk_size; ii++) {
-          scale_row_array(btf_tabs(b)+ii) = one;
-          scale_col_array(btf_tabs(b)+ii) = one;
+	if (Options.matrix_scaling != 0) {
+          for(Int ii = 0; ii < blk_size; ii++) {
+            scale_row_array(btf_tabs(b)+ii) = one;
+            scale_col_array(btf_tabs(b)+ii) = one;
+          }
         }
         for(Int ii = 0; ii < blk_size; ii++) tempp(ii) = ii;
       }

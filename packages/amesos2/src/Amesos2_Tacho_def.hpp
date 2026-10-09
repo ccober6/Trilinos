@@ -31,16 +31,21 @@ TachoSolver<Matrix,Vector>::TachoSolver(
   data_.variant   = 2;      // solver variant
   data_.streams   = 1;      // # of streams
   data_.dofs_per_node = 1;  // DoFs / node
-  data_.pivot_pert = false; // Diagonal pertubation
+  data_.pivot_pert = false; // Pertub small pivot
+  data_.diag_shift = false; // Shift diagonal
   data_.verbose    = false; // verbose
+  data_.team_on_user_stream  = false; // use user stream-0 for team/batched kernels
+  data_.small_problem_threshold_size = 1024;
+  tacho_initialized_ = false;
 }
 
 
 template <class Matrix, class Vector>
 TachoSolver<Matrix,Vector>::~TachoSolver( )
 {
-  if ( this->root_ ) {
+  if ( this->root_ && tacho_initialized_) {
     data_.solver.release();
+    tacho_initialized_ = false;
   }
 }
 
@@ -70,6 +75,12 @@ TachoSolver<Matrix,Vector>::symbolicFactorization_impl()
 
   int status = 0;
   if ( this->root_ ) {
+    if (tacho_initialized_) {
+      // release inernal memory if symbolic was called before
+      data_.solver.release();
+      tacho_initialized_ = false;
+    }
+
     if(do_optimization()) {
       this->matrixA_->returnRowPtr_kokkos_view(host_row_ptr_view_);
       this->matrixA_->returnColInd_kokkos_view(host_cols_view_);
@@ -79,7 +90,7 @@ TachoSolver<Matrix,Vector>::symbolicFactorization_impl()
     data_.solver.setLevelSetOptionAlgorithmVariant(data_.variant);
     data_.solver.setSmallProblemThresholdsize(data_.small_problem_threshold_size);
     data_.solver.setVerbose(data_.verbose);
-    data_.solver.setLevelSetOptionNumStreams(data_.streams);
+    data_.solver.setLevelSetOptionNumStreams(data_.streams, data_.team_on_user_stream);
     // TODO: Confirm param options
     // data_.solver.setMaxNumberOfSuperblocks(data_.max_num_superblocks);
 
@@ -90,6 +101,7 @@ TachoSolver<Matrix,Vector>::symbolicFactorization_impl()
       data_.solver.analyze(this->globalNumCols_, host_row_ptr_view_, host_cols_view_);
     }
     data_.solver.initialize();
+    tacho_initialized_ = true;
   }
   return status;
 }
@@ -113,8 +125,11 @@ TachoSolver<Matrix,Vector>::numericFactorization_impl()
      this->matrixA_->returnValues_kokkos_view(device_nzvals_temp);
      Kokkos::deep_copy(device_nzvals_view_, device_nzvals_temp);
     }
+    if (data_.diag_shift) {
+      data_.solver.shiftDiagonal();
+    }
     if (data_.pivot_pert) {
-      data_.solver.useDefaultPivotTolerance();
+      data_.solver.useDefaultPivotTolerance(2); // tol = sqrt(eps)
     } else {
       data_.solver.useNoPivotTolerance();
     }
@@ -221,7 +236,9 @@ TachoSolver<Matrix,Vector>::setParameters_impl(const Teuchos::RCP<Teuchos::Param
 
   // factorization type
   auto method_name = parameterList->get<std::string> ("method", "chol");
-  if (method_name == "chol")
+  if (method_name == "ldl-nopiv")
+    data_.method = 0;
+  else if (method_name == "chol")
     data_.method = 1;
   else if (method_name == "ldl")
     data_.method = 2;
@@ -238,10 +255,13 @@ TachoSolver<Matrix,Vector>::setParameters_impl(const Teuchos::RCP<Teuchos::Param
   data_.verbose = parameterList->get<bool> ("verbose", false);
   // # of streams
   data_.streams = parameterList->get<int> ("num-streams", 1);
+  // use user stream-0 for batched kernels
+  data_.team_on_user_stream = parameterList->get<bool> ("team-on-user-stream", false);
   // DoFs / node
   data_.dofs_per_node = parameterList->get<int> ("dofs-per-node", 1);
   // Perturb tiny pivots
   data_.pivot_pert = parameterList->get<bool> ("perturb-pivot", false);
+  data_.diag_shift = parameterList->get<bool> ("shift-diag", false);
   // TODO: Confirm param options
   // data_.num_kokkos_threads = parameterList->get<int>("kokkos-threads", 1);
   // data_.max_num_superblocks = parameterList->get<int>("max-num-superblocks", 4);
@@ -264,6 +284,8 @@ TachoSolver<Matrix,Vector>::getValidParameters_impl() const
     pl->set("num-streams", 1, "Number of GPU streams");
     pl->set("dofs-per-node", 1, "DoFs per node");
     pl->set("perturb-pivot", false, "Perturb tiny pivots");
+    pl->set("shift-diag", false, "Shift diagonal entries");
+    pl->set("team-on-user-stream", false, "Use user stream-0 for team/batched kernels");
 
     // TODO: Confirm param options
     // pl->set("kokkos-threads", 1, "Number of threads");
@@ -301,13 +323,19 @@ TachoSolver<Matrix,Vector>::loadA_impl(EPhase current_phase)
     // now so I didn't complete refactoring the matrix code for the parallel
     // case. If we added that later, we should have it hooked up to the copy
     // manager and then these allocations can go away.
-    if( this->root_ ) {
-      device_nzvals_view_ = device_value_type_array(
-        Kokkos::ViewAllocateWithoutInitializing("nzvals"), this->globalNumNonZeros_);
-      host_cols_view_ = host_ordinal_type_array(
-        Kokkos::ViewAllocateWithoutInitializing("colind"), this->globalNumNonZeros_);
-      host_row_ptr_view_ = host_size_type_array(
-        Kokkos::ViewAllocateWithoutInitializing("rowptr"), this->globalNumRows_ + 1);
+    {
+      if( this->root_ ) {
+        if (device_nzvals_view_.extent(0) != this->globalNumNonZeros_)
+          Kokkos::resize(device_nzvals_view_, this->globalNumNonZeros_);
+        if (host_cols_view_.extent(0) != this->globalNumNonZeros_)
+          Kokkos::resize(host_cols_view_, this->globalNumNonZeros_);
+        if (host_row_ptr_view_.extent(0) != this->globalNumRows_ + 1)
+          Kokkos::resize(host_row_ptr_view_, this->globalNumRows_ + 1);
+      } else {
+        Kokkos::resize(device_nzvals_view_, 0);
+        Kokkos::resize(host_cols_view_, 0);
+        Kokkos::resize(host_row_ptr_view_, 1);
+      }
     }
 
     typename host_size_type_array::value_type nnz_ret = 0;
@@ -341,6 +369,29 @@ TachoSolver<Matrix,Vector>::loadA_impl(EPhase current_phase)
   }
 
   return true;
+}
+
+
+template <class Matrix, class Vector>
+void
+TachoSolver<Matrix,Vector>::describe_impl(Teuchos::FancyOStream &out,
+                                          const Teuchos::EVerbosityLevel verbLevel) const
+{
+  out << " Tacho current parameters:" << std::endl;
+  out << " > method  = " << data_.method;
+  if (data_.method == 0) out << " (ldl-nopiv)" << std::endl;
+  if (data_.method == 1) out << " (chol)" << std::endl;
+  if (data_.method == 2) out << " (ldl)" << std::endl;
+  if (data_.method == 3) out << " (lu)" << std::endl;
+  out << " > variant = " << data_.variant << std::endl;
+  out << " > verbose = " << data_.verbose << std::endl;
+  out << " > num-streams   = " << data_.streams << std::endl;
+  out << " > dofs-per-node = " << data_.dofs_per_node << std::endl;
+  out << " > perturb-pivo  = " << (data_.pivot_pert ? "YES" : "NO") << std::endl;
+  out << " > shift-diag    = " << (data_.diag_shift ? "YES" : "NO") << std::endl;
+  out << " > team-on-user-stream  = " << (data_.team_on_user_stream ? "YES" : "NO") << std::endl;
+  out << " > small problem threshold size = " << data_.small_problem_threshold_size << std::endl;
+  out << std::endl;
 }
 
 

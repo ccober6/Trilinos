@@ -41,6 +41,7 @@
 #include <stk_mesh/base/MetaData.hpp>
 #include <stk_mesh/base/FieldBase.hpp>
 #include <stk_util/util/StkNgpVector.hpp>
+#include <stk_mesh/base/GetEntities.hpp>
 #include <numeric>
 
 namespace stk {
@@ -79,6 +80,328 @@ inline stk::NgpVector<unsigned> get_bucket_ids(const stk::mesh::BulkData &bulk,
   bucketIds.copy_host_to_device();
   Kokkos::Profiling::popRegion();
   return bucketIds;
+}
+
+template <typename NgpSpace, typename FieldDataBytesViewType>
+void assemble_field_data_bytes_on_device(const std::vector<FieldBase*>& fields, FieldDataBytesViewType& fieldDataBytesView)
+{
+  Kokkos::resize(Kokkos::WithoutInitializing, fieldDataBytesView, fields.size());
+  auto fieldDataBytesViewOnHost = Kokkos::create_mirror(fieldDataBytesView);
+  for (size_t fieldIdx = 0; fieldIdx < fields.size(); ++fieldIdx) {
+    const auto& field = *fields[fieldIdx];
+    fieldDataBytesViewOnHost(fieldIdx) = field.data_bytes<std::byte, NgpSpace>();
+  }
+  Kokkos::deep_copy(fieldDataBytesView, fieldDataBytesViewOnHost);
+}
+
+struct BytePtr
+{
+  std::byte* ptr;
+  int numBytes;
+};
+
+template<typename InitValsPtrViewType>
+inline
+void assemble_field_init_vals_on_device(const std::vector<FieldBase*>& fields, InitValsPtrViewType& initValsPtrsView)
+{
+  Kokkos::resize(initValsPtrsView, fields.size());
+  for (unsigned fieldIdx = 0; fieldIdx < fields.size(); ++fieldIdx) {
+    const auto& initVals = fields[fieldIdx]->get_initial_value_bytes();
+    const int numInitValBytes = static_cast<int>(initVals.extent(0));
+    initValsPtrsView(fieldIdx) = BytePtr{numInitValBytes > 0 ? initVals.data() : nullptr, numInitValBytes};
+  }
+}
+
+KOKKOS_INLINE_FUNCTION
+int compute_num_copy_bytes(int numSrcBytes, int numDestBytes)
+{
+  // A zero size on either side means the Field simply is not defined on that Bucket, which is legal:
+  // moving an entity to a Bucket where the Field is undefined copies nothing (the destination has no
+  // bytes to write), and moving from such a Bucket initializes the destination instead.  Only a move
+  // between two Buckets that both define the Field at *different* per-entity sizes is a real error.
+  // This mirrors the host invariant in BulkData::copy_entity_fields_callback(), which asserts
+  // dstSize == srcSize only inside its `if (dstSize)` / `if (srcSize)` guards.
+  STK_NGP_ThrowAssertMsg(numSrcBytes == 0 || numDestBytes == 0 || numSrcBytes == numDestBytes,
+                         "Incompatible field sizes: source and destination per-entity sizes must match");
+  return Kokkos::min(numSrcBytes, numDestBytes);
+}
+
+// The two overloads below share a body but must differ in their Kokkos annotation: the host-space
+// EntityBytes accessors are host-only, so instantiating a KOKKOS_INLINE_FUNCTION template with
+// host-space types makes nvcc warn about calling __host__ from __host__ __device__ (#20014-D).
+
+template<stk::mesh::Layout LayoutValue, typename SrcFieldBytesType, typename DestFieldBytesType>
+requires ngp::is_host_space<typename SrcFieldBytesType::space>
+void copy_bytes_kernel(const SrcFieldBytesType& srcFieldBytes,
+                             DestFieldBytesType& destFieldBytes,
+                       const FastMeshIndex& srcIndex,
+                       const FastMeshIndex& destIndex,
+                       const std::byte* initVals,
+                       int initValsLen)
+{
+  auto destBytes = destFieldBytes.template entity_bytes<LayoutValue>(destIndex);
+
+  if (destBytes.num_bytes() == 0) { return; }
+
+  using SrcEntityBytes = decltype(srcFieldBytes.template entity_bytes<LayoutValue>(srcIndex));
+  SrcEntityBytes srcBytes;
+  int numCopyBytes = 0;
+  if (srcIndex.bucket_id != INVALID_BUCKET_ID) {
+    srcBytes = srcFieldBytes.template entity_bytes<LayoutValue>(srcIndex);
+    numCopyBytes = compute_num_copy_bytes(srcBytes.num_bytes(), destBytes.num_bytes());
+  }
+
+  for (ByteIdx idx : destBytes.bytes()) {
+    if (idx() < numCopyBytes) {
+      destBytes(idx) = srcBytes(idx);
+    }
+    else if (initVals != nullptr && idx() < initValsLen) {
+      destBytes(idx) = initVals[idx()];
+    }
+    else {
+      destBytes(idx) = static_cast<std::byte>(0);
+    }
+  }
+}
+
+template<stk::mesh::Layout LayoutValue, typename SrcFieldBytesType, typename DestFieldBytesType>
+requires ngp::is_device_space<typename SrcFieldBytesType::space>
+KOKKOS_INLINE_FUNCTION
+void copy_bytes_kernel(const SrcFieldBytesType& srcFieldBytes,
+                             DestFieldBytesType& destFieldBytes,
+                       const FastMeshIndex& srcIndex,
+                       const FastMeshIndex& destIndex,
+                       const std::byte* initVals,
+                       int initValsLen)
+{
+  auto destBytes = destFieldBytes.template entity_bytes<LayoutValue>(destIndex);
+
+  if (destBytes.num_bytes() == 0) { return; }
+
+  using SrcEntityBytes = decltype(srcFieldBytes.template entity_bytes<LayoutValue>(srcIndex));
+  SrcEntityBytes srcBytes;
+  int numCopyBytes = 0;
+  if (srcIndex.bucket_id != INVALID_BUCKET_ID) {
+    srcBytes = srcFieldBytes.template entity_bytes<LayoutValue>(srcIndex);
+    numCopyBytes = compute_num_copy_bytes(srcBytes.num_bytes(), destBytes.num_bytes());
+  }
+
+  for (ByteIdx idx : destBytes.bytes()) {
+    if (idx() < numCopyBytes) {
+      destBytes(idx) = srcBytes(idx);
+    }
+    else if (initVals != nullptr && idx() < initValsLen) {
+      destBytes(idx) = initVals[idx()];
+    }
+    else {
+      destBytes(idx) = static_cast<std::byte>(0);
+    }
+  }
+}
+
+template<stk::mesh::Layout LayoutValue,
+         typename DeviceFieldDataBytesViewType, typename InitValsViewType>
+KOKKOS_INLINE_FUNCTION
+void copy_entity_bytes_kernel(DeviceFieldDataBytesViewType& deviceFieldDataBytes,
+                              const FastMeshIndex& srcIndex,
+                              const FastMeshIndex& destIndex,
+                              const InitValsViewType& initValsView)
+{
+  for(unsigned i=0; i<deviceFieldDataBytes.extent(0); ++i) {
+    copy_bytes_kernel<Layout::Left>(deviceFieldDataBytes(i), deviceFieldDataBytes(i), srcIndex, destIndex, initValsView(i).ptr, initValsView(i).numBytes);
+  }
+}
+
+template <typename Space>
+void copy_entity_field_bytes(
+    const std::vector<FieldBase*>& /*fields*/, const FastMeshIndex& /*srcIndex*/, const FastMeshIndex& /*destIndex*/)
+{
+  STK_ThrowErrorMsg("un-specialized copy_entity_field_bytes template, call with either stk::ngp::HostSpace or stk::ngp::DeviceSpace");
+}
+
+template<>
+inline
+void copy_entity_field_bytes<stk::ngp::HostSpace>(const std::vector<FieldBase*>& fields,
+                        const FastMeshIndex& srcIndex, const FastMeshIndex& destIndex)
+{
+  for(FieldBase* field : fields) {
+    auto& srcFieldBytes = field->data_bytes<const std::byte,stk::ngp::HostSpace>();
+    auto& destFieldBytes = field->data_bytes<std::byte,stk::ngp::HostSpace>();
+    const auto& initVals = field->get_initial_value_bytes();
+    const int initValsLen = static_cast<int>(initVals.extent(0));
+    const std::byte* initValsPtr = initValsLen > 0 ? initVals.data() : nullptr;
+    if (field->host_data_layout() == Layout::Left) {
+      copy_bytes_kernel<Layout::Left>(srcFieldBytes, destFieldBytes, srcIndex, destIndex, initValsPtr, initValsLen);
+    }
+    else if (field->host_data_layout() == Layout::Right) {
+      copy_bytes_kernel<Layout::Right>(srcFieldBytes, destFieldBytes, srcIndex, destIndex, initValsPtr, initValsLen);
+    }
+    else {
+      STK_ThrowErrorMsg("Unsupported host Field data layout: " << field->host_data_layout());
+    }
+  }
+}
+
+#ifdef STK_USE_DEVICE_MESH
+
+template<>
+inline
+void copy_entity_field_bytes<stk::ngp::DeviceSpace>(const std::vector<FieldBase*>& fields,
+                        const FastMeshIndex& srcIndex, const FastMeshIndex& destIndex)
+{
+  auto notParallel = Kokkos::RangePolicy<stk::ngp::DeviceSpace::exec_space>(0, 1);
+
+  for(FieldBase* field : fields) {
+    auto& srcFieldBytes = field->data_bytes<const std::byte,stk::ngp::DeviceSpace>();
+    auto& destFieldBytes = field->data_bytes<std::byte,stk::ngp::DeviceSpace>();
+    const auto& initVals = field->get_initial_value_bytes();
+    const int initValsLen = static_cast<int>(initVals.extent(0));
+    const std::byte* initValsPtr = initValsLen > 0 ? initVals.data() : nullptr;
+    STK_ThrowAssertMsg(field->device_data_layout() == Layout::Left,"Device field layout must always be Left");
+    Kokkos::parallel_for("copy_entity_fields Left", notParallel,
+      KOKKOS_LAMBDA(const int) {
+        copy_bytes_kernel<Layout::Left>(srcFieldBytes, destFieldBytes, srcIndex, destIndex, initValsPtr, initValsLen);
+      }
+    );
+  }
+}
+
+#endif // STK_USE_DEVICE_MESH
+
+namespace impl {
+
+typedef enum {
+  SCRATCH_LEVEL0      = 0,
+  SCRATCH_LEVEL1      = 1,
+  NO_SCRATCH_FALLBACK = 2
+} ScratchLevel;
+
+inline ScratchLevel get_scratch_level(unsigned neededSize)
+{
+  using TeamPolicy = Kokkos::TeamPolicy<stk::ngp::ExecSpace>;
+  if (neededSize <= static_cast<unsigned>(TeamPolicy::scratch_size_max(0))) {
+    return impl::SCRATCH_LEVEL0;
+  } else if (neededSize <= static_cast<unsigned>(TeamPolicy::scratch_size_max(1))) {
+    return impl::SCRATCH_LEVEL1;
+  } else {
+    return impl::NO_SCRATCH_FALLBACK;
+  }
+}
+
+template <typename FieldDataBytesView>
+inline void fill_all_device_field_data_bytes(EntityRank rank, MetaData const& meta, FieldDataBytesView fieldDataBytesView)
+{
+  auto& fields = meta.get_fields(rank);
+  auto fieldDataBytesViewOnHost = Kokkos::create_mirror(fieldDataBytesView);
+  for (size_t fieldIdx = 0; fieldIdx < fields.size(); ++fieldIdx) {
+    auto field = fields[fieldIdx];
+
+    if (!field->has_device_data()) {
+      continue;
+    }
+
+    auto fieldDataBytes = field->data_bytes<std::byte, stk::ngp::DeviceSpace>();
+    fieldDataBytesViewOnHost(fieldIdx) = fieldDataBytes;
+  }
+  Kokkos::deep_copy(fieldDataBytesView, fieldDataBytesViewOnHost);
+}
+
+template <typename ExecSpace, typename EntityBytesView, typename EntityView, typename FmiView, typename BackupView>
+inline void update_field_data_bytes(unsigned fieldIdx, unsigned maxNumBytesPerEntity,
+                                    EntityBytesView fieldDataBytesView, EntityView allEntities,
+                                    FmiView srcFmiView, FmiView dstFmiView,
+                                    BackupView backup, const std::byte* initVals, int initValsLen)
+{
+  auto numEntities = allEntities.extent(0);
+  auto policy = Kokkos::RangePolicy<ExecSpace>(0, numEntities);
+
+  // fill backup field data bytes
+  Kokkos::parallel_for("fill_backup", policy,
+    KOKKOS_LAMBDA(int eidx) {
+      auto entity = allEntities(eidx);
+      if (!entity.is_local_offset_valid()) return;
+
+      auto fieldDataBytes = fieldDataBytesView(fieldIdx);
+      auto srcFmi = srcFmiView(entity.local_offset());
+      if (srcFmi.bucket_id == INVALID_BUCKET_ID) return;
+
+      auto srcBytes = fieldDataBytes.entity_bytes(srcFmi);
+      auto bytesPerEntityBytes = srcBytes.num_bytes();
+#ifndef NDEBUG
+        STK_NGP_ThrowRequire(static_cast<unsigned>(bytesPerEntityBytes) <= maxNumBytesPerEntity);
+#endif
+      for (int j = 0; j < bytesPerEntityBytes; ++j) {
+        backup[eidx * maxNumBytesPerEntity + j] = srcBytes(ByteIdx(j));
+      }
+    }
+  );
+
+  // update field data
+  Kokkos::parallel_for("update", policy,
+    KOKKOS_LAMBDA(int eidx) {
+      auto entity = allEntities(eidx);
+      if (!entity.is_local_offset_valid()) return;
+
+      auto fieldDataBytes = fieldDataBytesView(fieldIdx);
+      auto dstFmi = dstFmiView(entity.local_offset());
+      auto dstBytes = fieldDataBytes.entity_bytes(dstFmi);
+      auto bytesPerEntityBytes = dstBytes.num_bytes();
+#ifndef NDEBUG
+      STK_NGP_ThrowRequire(static_cast<unsigned>(bytesPerEntityBytes) <= maxNumBytesPerEntity);
+#endif
+      auto srcFmi = srcFmiView(entity.local_offset());
+      int numCopyBytes = 0;
+      if (srcFmi.bucket_id != INVALID_BUCKET_ID) {
+        const int numSrcBytes = fieldDataBytes.entity_bytes(srcFmi).num_bytes();
+        numCopyBytes = compute_num_copy_bytes(numSrcBytes, bytesPerEntityBytes);
+      }
+      for (int j = 0; j < bytesPerEntityBytes; ++j) {
+        if (j < numCopyBytes) {
+          dstBytes(ByteIdx(j)) = backup[eidx * maxNumBytesPerEntity + j];
+        }
+        else if (initVals != nullptr && j < initValsLen) {
+          dstBytes(ByteIdx(j)) = initVals[j];
+        }
+        else {
+          dstBytes(ByteIdx(j)) = static_cast<std::byte>(0);
+        }
+      }
+    }
+  );
+}
+
+template <typename NgpMemSpace, typename FieldDataBytesView, typename EntitySrcDestInPartitionView>
+inline int get_max_entity_bytes(FieldDataBytesView& fieldDataBytesView, EntitySrcDestInPartitionView const& allEntities)
+{
+  using TeamPolicy = Kokkos::TeamPolicy<stk::ngp::ExecSpace>;
+  using TeamMember = typename TeamPolicy::member_type;
+
+  int maxFieldBytes = 0;
+
+  auto teamPolicy = TeamPolicy(allEntities.extent(0), Kokkos::AUTO); 
+  Kokkos::parallel_reduce(teamPolicy,
+    KOKKOS_LAMBDA(TeamMember const& team, int& max) {
+      auto idx = team.league_rank();
+      auto fmi = allEntities(idx).srcFmi;
+      int localTMax = 0;
+
+      Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, fieldDataBytesView.extent(0)),
+        [&](const int fidx, int& lMax) {
+          auto fieldDataByte = fieldDataBytesView(fidx);
+          auto entityBytes = fieldDataByte.entity_bytes(fmi);
+          auto numBytes = entityBytes.num_bytes();
+
+          lMax = (lMax > numBytes) ? lMax : numBytes;
+        }, Kokkos::Max<int>(localTMax)
+      );
+
+      max = (max > localTMax) ? max : localTMax;
+    }, Kokkos::Max<int>(maxFieldBytes)
+  );
+
+  return maxFieldBytes;
+}
+
 }
 
 }

@@ -26,12 +26,12 @@ namespace MueLu {
 template <class LocalOrdinal, class GlobalOrdinal, class Node>
 Aggregates<LocalOrdinal, GlobalOrdinal, Node>::Aggregates(const LWGraph& graph) {
   numAggregates_       = 0;
-  numGlobalAggregates_ = 0;
+  numGlobalAggregates_ = -1;
 
-  vertex2AggId_ = LOMultiVectorFactory::Build(graph.GetImportMap(), 1);
+  vertex2AggId_ = LOMultiVectorFactory::Build(graph.GetImportMap(), 1, false);
   vertex2AggId_->putScalar(MUELU_UNAGGREGATED);
 
-  procWinner_ = LOVectorFactory::Build(graph.GetImportMap());
+  procWinner_ = LOVectorFactory::Build(graph.GetImportMap(), false);
   procWinner_->putScalar(MUELU_UNASSIGNED);
 
   isRoot_ = Teuchos::ArrayRCP<bool>(graph.GetImportMap()->getLocalNumElements(), false);
@@ -44,12 +44,12 @@ template <class LocalOrdinal, class GlobalOrdinal, class Node>
 Aggregates<LocalOrdinal, GlobalOrdinal, Node>::
     Aggregates(LWGraph_kokkos graph) {
   numAggregates_       = 0;
-  numGlobalAggregates_ = 0;
+  numGlobalAggregates_ = -1;
 
-  vertex2AggId_ = LOMultiVectorFactory::Build(graph.GetImportMap(), 1);
+  vertex2AggId_ = LOMultiVectorFactory::Build(graph.GetImportMap(), 1, false);
   vertex2AggId_->putScalar(MUELU_UNAGGREGATED);
 
-  procWinner_ = LOVectorFactory::Build(graph.GetImportMap());
+  procWinner_ = LOVectorFactory::Build(graph.GetImportMap(), false);
   procWinner_->putScalar(MUELU_UNASSIGNED);
 
   isRoot_ = Teuchos::ArrayRCP<bool>(graph.GetImportMap()->getLocalNumElements(), false);
@@ -62,12 +62,12 @@ template <class LocalOrdinal, class GlobalOrdinal, class Node>
 Aggregates<LocalOrdinal, GlobalOrdinal, Node>::
     Aggregates(const RCP<const Map>& map) {
   numAggregates_       = 0;
-  numGlobalAggregates_ = 0;
+  numGlobalAggregates_ = -1;
 
-  vertex2AggId_ = LOMultiVectorFactory::Build(map, 1);
+  vertex2AggId_ = LOMultiVectorFactory::Build(map, 1, false);
   vertex2AggId_->putScalar(MUELU_UNAGGREGATED);
 
-  procWinner_ = LOVectorFactory::Build(map);
+  procWinner_ = LOVectorFactory::Build(map, false);
   procWinner_->putScalar(MUELU_UNASSIGNED);
 
   isRoot_ = Teuchos::ArrayRCP<bool>(map->getLocalNumElements(), false);
@@ -88,8 +88,8 @@ Aggregates<LocalOrdinal, GlobalOrdinal, Node>::ComputeAggregateSizes(bool forceR
 
     int myPID = GetMap()->getComm()->getRank();
 
-    auto vertex2AggId = vertex2AggId_->getLocalViewDevice(Xpetra::Access::ReadOnly);
-    auto procWinner   = procWinner_->getLocalViewDevice(Xpetra::Access::ReadOnly);
+    auto vertex2AggId = vertex2AggId_->getLocalViewDevice(Tpetra::Access::ReadOnly);
+    auto procWinner   = procWinner_->getLocalViewDevice(Tpetra::Access::ReadOnly);
 
     typename AppendTrait<decltype(aggregateSizes_), Kokkos::Atomic>::type aggregateSizesAtomic = aggregateSizes;
     Kokkos::parallel_for(
@@ -139,8 +139,8 @@ Aggregates<LocalOrdinal, GlobalOrdinal, Node>::GetGraph() const {
   if (static_cast<LO>(graph_.numRows()) == numAggregates)
     return graph_;
 
-  auto vertex2AggId = vertex2AggId_->getLocalViewDevice(Xpetra::Access::ReadOnly);
-  auto procWinner   = procWinner_->getLocalViewDevice(Xpetra::Access::ReadOnly);
+  auto vertex2AggId = vertex2AggId_->getLocalViewDevice(Tpetra::Access::ReadOnly);
+  auto procWinner   = procWinner_->getLocalViewDevice(Tpetra::Access::ReadOnly);
   auto sizes        = ComputeAggregateSizes();
 
   // FIXME_KOKKOS: replace by ViewAllocateWithoutInitializing + rows(0) = 0.
@@ -192,7 +192,7 @@ template <class LocalOrdinal, class GlobalOrdinal, class Node>
 void Aggregates<LocalOrdinal, GlobalOrdinal, Node>::ComputeNodesInAggregate(LO_view& aggPtr, LO_view& aggNodes, LO_view& unaggregated) const {
   LO numAggs                                          = GetNumAggregates();
   LO numNodes                                         = vertex2AggId_->getLocalLength();
-  auto vertex2AggId                                   = vertex2AggId_->getLocalViewDevice(Xpetra::Access::ReadOnly);
+  auto vertex2AggId                                   = vertex2AggId_->getLocalViewDevice(Tpetra::Access::ReadOnly);
   typename aggregates_sizes_type::const_type aggSizes = ComputeAggregateSizes(true);
   LO INVALID                                          = Teuchos::OrdinalTraits<LO>::invalid();
 
@@ -264,7 +264,7 @@ void Aggregates<LocalOrdinal, GlobalOrdinal, Node>::print(Teuchos::FancyOStream&
 
 template <class LocalOrdinal, class GlobalOrdinal, class Node>
 GlobalOrdinal Aggregates<LocalOrdinal, GlobalOrdinal, Node>::GetNumGlobalAggregatesComputeIfNeeded() {
-  if (numGlobalAggregates_ != -1) {
+  if (numGlobalAggregates_ == -1) {
     LO nAggregates = GetNumAggregates();
     GO nGlobalAggregates;
     MueLu_sumAll(vertex2AggId_->getMap()->getComm(), (GO)nAggregates, nGlobalAggregates);

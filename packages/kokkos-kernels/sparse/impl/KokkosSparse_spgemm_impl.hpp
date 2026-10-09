@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOSSPARSE_SPGEMM_IMPL_HPP
 #define KOKKOSSPARSE_SPGEMM_IMPL_HPP
@@ -451,14 +438,14 @@ class KokkosSPGEMM {
                        int vectorlane, const int cache_line_size, const int data_size, const int cache_size,
 
                        nnz_lno_persistent_work_host_view_t color_xadj,
-                       typename nnz_lno_persistent_work_view_t::HostMirror color_adj,
-                       typename nnz_lno_persistent_work_view_t::HostMirror vertex_colors,
+                       typename nnz_lno_persistent_work_view_t::host_mirror_type color_adj,
+                       typename nnz_lno_persistent_work_view_t::host_mirror_type vertex_colors,
 
-                       size_t overall_flops, typename row_lno_temp_work_view_t::HostMirror c_flop_rowmap,
-                       typename row_lno_temp_work_view_t::HostMirror c_comp_a_net_index,
-                       typename row_lno_temp_work_view_t::HostMirror c_comp_b_net_index,
-                       typename nnz_lno_temp_work_view_t::HostMirror c_comp_row_index,
-                       typename nnz_lno_temp_work_view_t::HostMirror c_comp_col_index, c_row_view_t rowmapC,
+                       size_t overall_flops, typename row_lno_temp_work_view_t::host_mirror_type c_flop_rowmap,
+                       typename row_lno_temp_work_view_t::host_mirror_type c_comp_a_net_index,
+                       typename row_lno_temp_work_view_t::host_mirror_type c_comp_b_net_index,
+                       typename nnz_lno_temp_work_view_t::host_mirror_type c_comp_row_index,
+                       typename nnz_lno_temp_work_view_t::host_mirror_type c_comp_col_index, c_row_view_t rowmapC,
                        int write_type  // 0 -- KKMEM, 1-KKSPEED, 2- KKCOLOR 3-KKMULTICOLOR
                                        // 4-KKMULTICOLOR2
   );
@@ -488,6 +475,17 @@ class KokkosSPGEMM {
                             nnz_lno_persistent_work_view_t &color_adj, c_row_view_t &rowmapC,
                             c_nnz_view_t &entryIndicesC_);
 
+ private:
+  static inline SPGEMMAlgorithm select_algorithm(HandleType *handle) {
+    auto sh          = handle->get_spgemm_handle();
+    auto handle_algo = sh->get_algorithm_type();
+    if (handle_algo == SPGEMM_DEFAULT) {
+      return sh->get_default_native_algorithm();
+    }
+    return handle_algo;
+  }
+
+ public:
   KokkosSPGEMM(HandleType *handle_, nnz_lno_t m_, nnz_lno_t n_, nnz_lno_t k_, const_a_lno_row_view_t row_mapA_,
                const_a_lno_nnz_view_t entriesA_, bool transposeA_, const_b_lno_row_view_t row_mapB_,
                const_b_lno_nnz_view_t entriesB_, bool transposeB_)
@@ -508,7 +506,7 @@ class KokkosSPGEMM {
         use_dynamic_schedule(handle_->is_dynamic_scheduling()),
         KOKKOSKERNELS_VERBOSE(handle_->get_verbose()),
         MyEnumExecSpace(this->handle->get_handle_exec_space()),
-        spgemm_algorithm(this->handle->get_spgemm_handle()->get_algorithm_type()),
+        spgemm_algorithm(select_algorithm(this->handle)),
         spgemm_accumulator(this->handle->get_spgemm_handle()->get_accumulator_type())
   //,row_mapC(), entriesC(), valsC()
   {}
@@ -534,7 +532,7 @@ class KokkosSPGEMM {
         use_dynamic_schedule(handle_->is_dynamic_scheduling()),
         KOKKOSKERNELS_VERBOSE(handle_->get_verbose()),
         MyEnumExecSpace(this->handle->get_handle_exec_space()),
-        spgemm_algorithm(this->handle->get_spgemm_handle()->get_algorithm_type()),
+        spgemm_algorithm(select_algorithm(this->handle)),
         spgemm_accumulator(this->handle->get_spgemm_handle()->get_accumulator_type())
   //,row_mapB(), entriesC(), valsC()
   {}
@@ -569,10 +567,10 @@ class KokkosSPGEMM {
    *
    */
   template <typename a_row_view_t, typename a_nnz_view_t, typename b_oldrow_view_t, typename b_row_view_t>
-  struct PredicMaxRowNNZ;
+  struct PredictMaxRowNNZ;
 
-  struct PredicMaxRowNNZIntersection;
-  struct PredicMaxRowNNZ_p;
+  struct PredictMaxRowNNZIntersection;
+  struct PredictMaxRowNNZ_p;
 
  private:
   /**

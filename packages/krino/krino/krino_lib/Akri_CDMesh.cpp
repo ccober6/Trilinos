@@ -42,7 +42,7 @@
 #include <Akri_MeshDiagnostics.hpp>
 #include <Akri_MeshHelpers.hpp>
 #include <Akri_DiagWriter.hpp>
-#include <Akri_Quality.hpp>
+#include <Akri_MeshQuality.hpp>
 #include <Akri_QualityMetric.hpp>
 #include <Akri_Snap.hpp>
 #include <Akri_SnapToNode.hpp>
@@ -58,6 +58,7 @@
 #include <Akri_RefinementSupport.hpp>
 #include <Akri_ParallelErrorMessage.hpp>
 #include <Akri_RefinementManager.hpp>
+#include <Akri_SmallClusterCleanup.hpp>
 namespace krino{
 
 CDMesh & CDMesh::get_decomposed_mesh(stk::mesh::BulkData & mesh)
@@ -380,7 +381,7 @@ void CDMesh::snap_and_update_fields_and_captured_domains(const InterfaceGeometry
 
   std::vector<ChildNodeStencil> childNodeStencils;
   if (cdfemSnapField.valid())
-    fill_child_node_stencils(stk_bulk(), get_child_edge_node_part(), get_parent_node_ids_field(), get_parent_node_weights_field(), childNodeStencils);
+    fill_child_node_stencils_for_all_interfaces(stk_bulk(), get_child_edge_node_part(), get_parent_node_ids_field(), get_parent_node_weights_field(), childNodeStencils);
 
   const double minIntPtWeightForEstimatingCutQuality = get_snapper().get_edge_tolerance();
   const double maxEdgeSnap = std::min(1.-get_snapper().get_edge_tolerance(), my_cdfem_support.get_max_edge_snap()); // Dont want to make a snap that would create an edge smaller than edge tol
@@ -429,18 +430,8 @@ CDMesh::decompose_mesh(const InterfaceGeometry & interfaceGeometry, const int st
 
   NodeToCapturedDomainsMap nodesToCapturedDomains;
 
-  auto & LSStash = cdfemSupport.get_stashed_levelsets();
-  for(auto & LS : LSStash)
-  {
-    stk::mesh::field_copy(LS.first.field(), LS.second.field());
-  }
-
   {
     fix_node_ownership_to_assure_selected_owned_element(mesh, get_active_part());
-
-    // Not sure if this is krino's responsibility or the driving application.  If we have
-    // elemental death fields, these need to be parallel consistent on aura elements.
-    parallel_communicate_elemental_death_fields();
 
     stk::diag::TimeBlock timer__(my_timer_decompose);
 
@@ -540,6 +531,15 @@ void CDMesh::store_child_node_parent_ids_and_weights_fields() const
   }
 }
 
+void CDMesh::cleanup_small_clusters()
+{
+  const auto & smallClusterCleanup = my_phase_support.get_small_cluster_cleanup();
+  if (!smallClusterCleanup.empty())
+  {
+    cleanup_small_clusters_of_phases(stk_bulk(), my_phase_support, smallClusterCleanup);
+  }
+}
+
 bool
 CDMesh::modify_mesh()
 {
@@ -571,8 +571,11 @@ CDMesh::modify_mesh()
     batch_create_sides(stk_bulk(), side_requests);
 
     stk::mesh::toggle_sideset_updaters(stk_bulk(), true);
-    activate_selected_entities_touching_active_elements(stk_bulk(), stk::topology::NODE_RANK, stk_meta().universal_part(), aux_meta().active_part()); // we should be able to skip this step if there are no higher order elements
+    if (mesh_has_selected_higher_order_elements(stk_bulk(), my_phase_support.get_all_decomposed_blocks_selector()))
+      activate_selected_entities_touching_active_elements(stk_bulk(), stk::topology::NODE_RANK, stk_meta().universal_part(), aux_meta().active_part());
     update_element_side_parts();
+
+    cleanup_small_clusters();
 
     ParallelThrowAssert(stk_bulk().parallel(), check_element_side_connectivity(stk_bulk(), aux_meta().exposed_boundary_part(), aux_meta().active_part()));
     ParallelThrowAssert(stk_bulk().parallel(), check_element_side_parts());
@@ -603,20 +606,6 @@ CDMesh::set_entities_for_child_nodes_with_common_ancestry_as_existing_child_node
         newNode->set_entity(mesh, childNode);
     }
   }
-}
-
-void
-CDMesh::parallel_communicate_elemental_death_fields() const
-{
-  std::vector< const stk::mesh::FieldBase *> element_fields;
-  for (auto && field : my_cdfem_support.get_levelset_fields())
-  {
-    if (field.valid() && field.entity_rank() == stk::topology::ELEMENT_RANK)
-    {
-      element_fields.push_back(&field.field());
-    }
-  }
-  stk::mesh::communicate_field_data(stk_bulk(), element_fields);
 }
 
 bool
@@ -699,17 +688,6 @@ CDMesh::decomposition_needs_update(const stk::mesh::BulkData & mesh, const Inter
 }
 
 void
-CDMesh::mark_interface_elements_for_adaptivity(stk::mesh::BulkData & mesh, const FieldRef coordsField, const RefinementSupport & refinementSupport, const InterfaceGeometry & interfaceGeometry, const int num_refinements)
-{
-  krino::mark_interface_elements_for_adaptivity(mesh,
-      refinementSupport.get_non_interface_conforming_refinement(),
-      interfaceGeometry,
-      refinementSupport,
-      coordsField,
-      num_refinements);
-}
-
-void
 CDMesh::nonconformal_adaptivity(stk::mesh::BulkData & mesh, const FieldRef coordsField, const InterfaceGeometry & interfaceGeometry)
 {
   const auto & refinementSupport = RefinementSupport::get(mesh.mesh_meta_data());
@@ -737,7 +715,12 @@ CDMesh::nonconformal_adaptivity(stk::mesh::BulkData & mesh, const FieldRef coord
   {
     markerFunction = [&mesh, &coordsField, &refinementSupport, &interfaceGeometry](int num_refinements)
     {
-      mark_interface_elements_for_adaptivity(mesh, coordsField, refinementSupport, interfaceGeometry, num_refinements);
+      krino::mark_interface_elements_for_adaptivity(mesh,
+            refinementSupport.get_non_interface_conforming_refinement(),
+            interfaceGeometry,
+            refinementSupport,
+            coordsField,
+            num_refinements);
     };
   }
 
@@ -792,7 +775,8 @@ CDMesh::rebuild_from_restart_mesh(stk::mesh::BulkData & mesh)
   cdmesh.generate_nonconformal_elements();
   cdmesh.restore_subelements();
 
-  activate_selected_entities_touching_active_elements(cdmesh.stk_bulk(), stk::topology::NODE_RANK, cdmesh.stk_meta().universal_part(), cdmesh.aux_meta().active_part()); // we should be able to skip this step if there are no higher order elements
+  if (mesh_has_selected_higher_order_elements(mesh, mesh.mesh_meta_data().universal_part()))
+    activate_selected_entities_touching_active_elements(cdmesh.stk_bulk(), stk::topology::NODE_RANK, cdmesh.stk_meta().universal_part(), cdmesh.aux_meta().active_part());
   cdmesh.update_element_side_parts(); // rebuild conformal side parts
 
   delete_extraneous_inactive_sides(mesh, cdmesh.myRefinementSupport, cdmesh.get_parent_part(), cdmesh.get_active_part());
@@ -1025,62 +1009,6 @@ CDMesh::restore_subelements()
       element->set_have_interface();
     }
   }
-}
-
-void
-CDMesh::fixup_adapted_element_parts(stk::mesh::BulkData & mesh)
-{/* %TRACE[SPEC]% */ Tracespec trace__("Mesh::fixup_adapted_element_parts(CDFEM_Support & cdfem_support)"); /* %TRACE% */
-  // Fixup volume parts that currently can be messed up by adaptivity.
-  // There are two types of fixes:
-  // 1. CDFEM parent elements that are activated by Encore adaptivity (this is expected, but needs to be fixed).
-  // 2. Conformal elements that have somehow picked up the non-conformal part (this probably shouldn't happen).
-
-  Phase_Support & phase_support = Phase_Support::get(mesh.mesh_meta_data());
-  CDFEM_Support & cdfem_support = CDFEM_Support::get(mesh.mesh_meta_data());
-  AuxMetaData & aux_meta = AuxMetaData::get(mesh.mesh_meta_data());
-  stk::mesh::Selector cdfem_parent_selector = cdfem_support.get_parent_part();
-
-  stk::mesh::Selector locally_owned_selector(mesh.mesh_meta_data().locally_owned_part());
-  std::vector<stk::mesh::Entity> entities;
-
-  std::vector<stk::mesh::PartVector> remove_parts;
-  stk::mesh::PartVector bucket_remove_parts;
-  const stk::mesh::BucketVector & buckets = mesh.get_buckets(stk::topology::ELEMENT_RANK, locally_owned_selector);
-  for (auto&& bucket_ptr : buckets)
-  {
-    unsigned num_volume_parts = 0;
-    stk::mesh::Part * extraneous_nonconformal_part = nullptr;
-    const stk::mesh::PartVector & bucket_parts = bucket_ptr->supersets();
-    bucket_remove_parts.clear();
-    for(auto * part : bucket_parts)
-    {
-      if (part->primary_entity_rank() == stk::topology::ELEMENT_RANK && part->subsets().empty() && part->topology() != stk::topology::INVALID_TOPOLOGY)
-      {
-        ++num_volume_parts;
-        if (phase_support.is_nonconformal(*part))
-        {
-          extraneous_nonconformal_part = part;
-        }
-      }
-    }
-    if (num_volume_parts > 1)
-    {
-      bucket_remove_parts.push_back(extraneous_nonconformal_part);
-    }
-    if (cdfem_parent_selector(*bucket_ptr))
-    {
-      bucket_remove_parts.push_back(&aux_meta.active_part());
-    }
-    if (!bucket_remove_parts.empty())
-    {
-      entities.insert(entities.end(), bucket_ptr->begin(), bucket_ptr->end());
-      remove_parts.insert(remove_parts.end(), bucket_ptr->size(), bucket_remove_parts);
-    }
-  }
-  stk::mesh::PartVector empty;
-  std::vector<stk::mesh::PartVector> add_parts(entities.size(), empty);
-
-  mesh.batch_change_entity_parts(entities, add_parts, remove_parts);
 }
 
 //--------------------------------------------------------------------------------
@@ -3414,6 +3342,14 @@ CDMesh::reset_mesh_to_original_undecomposed_state(stk::mesh::BulkData & mesh)
   append_part_changes_to_reset_entities_to_original_undecomposed_state(mesh, mesh.mesh_meta_data().side_rank(), phaseSupport, cdfemSupport.get_child_part(), cdfemSupport.get_parent_part(), auxMeta.active_part(), batchEntities, batchAddParts, batchRemoveParts);
 
   mesh.batch_change_entity_parts(batchEntities, batchAddParts, batchRemoveParts);
+
+  FieldRef cdfemSnapField = cdfemSupport.get_cdfem_snap_displacements_field();
+
+  if (cdfemSnapField.valid())
+  {
+      undo_previous_snaps_without_interpolation(mesh, cdfemSupport.get_coords_field(), cdfemSnapField);
+      stk::mesh::field_fill(0., cdfemSnapField);
+  }
 
   if (has_decomposed_mesh(mesh))
   {

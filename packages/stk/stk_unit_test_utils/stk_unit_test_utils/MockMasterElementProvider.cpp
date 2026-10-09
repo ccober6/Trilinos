@@ -34,7 +34,7 @@
 
 // #######################  Start Clang Header Tool Managed Headers ########################
 // clang-format off
-#include "MockMasterElementProvider.hpp"
+#include "stk_unit_test_utils/MockMasterElementProvider.hpp"
 // clang-format on
 // #######################   End Clang Header Tool Managed Headers  ########################
 
@@ -60,7 +60,6 @@ namespace unit_test_util {
                                              const std::vector<double>& fieldData,
                                              std::vector<double>& result) const
   {
-    check_consistent_topology(meTopo);
     const stk::topology topo = meTopo.get_topology();
     const unsigned numParCoords = num_parametric_coordinates(meTopo);
     STK_ThrowRequireMsg(paramCoords.size() >= numParCoords*numEvalPoints,
@@ -106,31 +105,31 @@ namespace unit_test_util {
     stk::mesh::Entity const* nodes = bulk.begin_nodes(entity);
 
     numNodes = bulk.num_nodes(entity);
+
+    // Implicit assumption that number of field components is same for all nodes
     numFieldComponents = numNodes > 0 ? stk::mesh::field_extent0_per_entity(field, nodes[0]) : 0;
 
     fieldData.resize(static_cast<size_t>(numFieldComponents) * numNodes, 0.0);
 
-    stk::mesh::field_data_execute<double, stk::mesh::ReadOnly>(field,
-      [&](auto& meFieldData) {
-        for (unsigned ni = 0u; ni < numNodes; ++ni) {
-          stk::mesh::Entity node = nodes[ni];
+    stk::search::CachedEntityFieldData<double> data;
 
-          if (field.defined_on(node)) {
-            auto data = meFieldData.entity_values(node);
-            for (stk::mesh::ComponentIdx j(0); j < static_cast<int>(numFieldComponents); ++j) {
-              const auto offSet = ni + j * numNodes;
-              fieldData[offSet] = meField.transform(data(j));
-            }
-          }
-          else {
-            for (unsigned j = 0; j < numFieldComponents; ++j) {
-              const auto offSet = ni + j * numNodes;
-              fieldData[offSet] = meField.default_value();
-            }
-          }
+    for(unsigned ni = 0u; ni < numNodes; ++ni) {
+      stk::mesh::Entity node = nodes[ni];
+
+      if(field.defined_on(node)) {
+        meField.populate_entity_data(node, data);
+
+        for(unsigned j(0); j < numFieldComponents; ++j) {
+          const auto offSet = ni + j * numNodes;
+          fieldData[offSet] = meField.transform(data.constPointer[j * data.componentStride]);
+        }
+      } else {
+        for(unsigned j = 0; j < numFieldComponents; ++j) {
+          const auto offSet = ni + j * numNodes;
+          fieldData[offSet] = meField.default_value();
         }
       }
-    );
+    }
   }
 
   void MasterElementProvider::nodal_field_data(const std::vector<stk::search::spmd::EntityKeyPair>& nodeKeys,
@@ -141,32 +140,32 @@ namespace unit_test_util {
     // Extract transposed field data
     const stk::mesh::FieldBase& field = *meField.get_field();
     unsigned numNodes = nodeKeys.size();
+
+    // Implicit assumption that number of field components is same for all nodes
     numFieldComponents = numNodes > 0 ? stk::mesh::field_extent0_per_entity(field, nodeKeys[0]) : 0;
     fieldData.resize(static_cast<size_t>(numFieldComponents) * numNodes, 0.0);
 
-    stk::mesh::field_data_execute<double, stk::mesh::ReadOnly>(field,
-      [&](auto& meFieldData) {
-        for (unsigned ni = 0u; ni < numNodes; ++ni) {
-          stk::mesh::Entity node = nodeKeys[ni];
+    stk::search::CachedEntityFieldData<double> data;
 
-          unsigned numNodeFieldComponents = stk::mesh::field_extent0_per_entity(field, node);
+    for (unsigned ni = 0u; ni < numNodes; ++ni) {
+      stk::mesh::Entity node = nodeKeys[ni];
 
-          if (field.defined_on(node)) {
-            auto data = meFieldData.entity_values(node);
-            for (stk::mesh::ComponentIdx j = 0_comp; j < static_cast<int>(numNodeFieldComponents); ++j) {
-              const auto offSet = ni + j * numNodes;
-              fieldData[offSet] = meField.transform(data(j));
-            }
-          }
-          else {
-            for (unsigned j = 0; j < numNodeFieldComponents; ++j) {
-              const auto offSet = ni + j * numNodes;
-              fieldData[offSet] = meField.default_value();
-            }
-          }
+      unsigned numNodeFieldComponents = stk::mesh::field_extent0_per_entity(field, node);
+
+      if(field.defined_on(node)) {
+        meField.populate_entity_data(node, data);
+
+        for(int j(0); j < static_cast<int>(numNodeFieldComponents); ++j) {
+          const auto offSet = ni + j * numNodes;
+          fieldData[offSet] = meField.transform(data.constPointer[j * data.componentStride]);
+        }
+      } else {
+        for(unsigned j = 0; j < numNodeFieldComponents; ++j) {
+          const auto offSet = ni + j * numNodes;
+          fieldData[offSet] = meField.default_value();
         }
       }
-    );
+    }
   }
 
   void MasterElementProvider::find_parametric_coordinates(const stk::search::SearchTopology& meTopo,
@@ -208,8 +207,6 @@ namespace unit_test_util {
 
   const MasterElement* MasterElementProvider::get_master_element(const stk::search::SearchTopology& meTopo) const
   {
-    check_consistent_topology(meTopo);
-
     stk::topology topology = meTopo.get_topology();
 
     if(topology == stk::topology::HEX_8) {
@@ -218,20 +215,18 @@ namespace unit_test_util {
     if(topology == stk::topology::QUAD_4) {
       return m_quad4MasterElement.get();
     }
+    if (topology == stk::topology::QUAD_4_2D)
+    {
+      return m_quad4MasterElement_2D.get();
+    }
     if(topology == stk::topology::LINE_2) {
       return m_line2MasterElement.get();
     }
 
-    return nullptr;
-  }
+    STK_ThrowRequireMsg(false, "Invalid topology " << meTopo.get_topology());
 
-  void MasterElementProvider::check_consistent_topology([[maybe_unused]] const stk::search::SearchTopology& meTopo) const
-  {
-    // Only support Hex8, Quad4 and Line2
-    STK_ThrowAssertMsg(meTopo.get_topology() == stk::topology::HEX_8 ||
-                       meTopo.get_topology() == stk::topology::QUAD_4 ||
-                       meTopo.get_topology() == stk::topology::LINE_2,
-                       "Invalid topology " << meTopo.get_topology());
+
+    return nullptr;
   }
 }
 }

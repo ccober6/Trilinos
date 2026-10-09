@@ -219,7 +219,6 @@ bool check_bucket_ptrs(const stk::mesh::Bucket &bucket)
 {
   if (bucket.size() == 0 )
   {
-    std::cout << "Bucket has size zero!" << std::endl;
     return false;
   }
 
@@ -243,8 +242,6 @@ bool check_nonempty_strictly_ordered(Data_T data, bool reject_0_lt_0 = true )
   for (stk::mesh::EntityIdx i=0_entity; i<(data.num_entities()-1); ++i) {
     stk::mesh::EntityIdx iPlus1(i+1);
     if ((data(i,0_comp) >= data(iPlus1,0_comp) && reject_0_lt_0)) {
-      std::cout << "i = " << i << ": data(i) = " << data(i,0_comp)
-                   << ", data(i + 1) = " << data(iPlus1,0_comp) << std::endl;
       return false;
     }
   }
@@ -255,7 +252,7 @@ void check_test_partition_invariant(SelectorFixture& fix,
                                     const stk::mesh::impl::Partition &partition)
 {
   const std::vector<unsigned> &partition_key = partition.get_legacy_partition_id();
-  auto fieldData = fix.m_fieldABC->data<stk::mesh::ReadOnly>();
+  auto fieldData = fix.m_fieldABC->data();
   for (const stk::mesh::Bucket* bptr : partition) {
     const stk::mesh::Bucket& bkt = *bptr;
     EXPECT_EQ(&partition, bkt.getPartition() );

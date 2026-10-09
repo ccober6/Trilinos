@@ -16,6 +16,8 @@
 // Tpetra includes
 #include "Tpetra_Map.hpp"
 #include "Tpetra_CrsGraph.hpp"
+#include "Tpetra_FECrsGraph.hpp"
+#include "Tpetra_FECrsMatrix.hpp"
 #include "Tpetra_Import.hpp"
 #include "Tpetra_Export.hpp"
 
@@ -31,6 +33,7 @@
 
 #include "Panzer_GatherOrientation.hpp"
 #include "Panzer_GatherSolution_BlockedTpetra.hpp"
+#include "Panzer_GatherSolution_Tpetra.hpp"
 #include "Panzer_GatherTangent_BlockedTpetra.hpp"
 #include "Panzer_ScatterResidual_BlockedTpetra.hpp"
 #include "Panzer_ScatterDirichletResidual_BlockedTpetra.hpp"
@@ -58,19 +61,41 @@ public:
    typedef Tpetra::Import<LocalOrdinalT,GlobalOrdinalT,NodeT> ImportType;
    typedef Tpetra::Export<LocalOrdinalT,GlobalOrdinalT,NodeT> ExportType;
 
+   typedef Tpetra::FECrsGraph<LocalOrdinalT,GlobalOrdinalT,NodeT> FECrsGraphType;
+   typedef Tpetra::FECrsMatrix<ScalarT,LocalOrdinalT,GlobalOrdinalT,NodeT> FECrsMatrixType;
+
    typedef Thyra::TpetraVector<ScalarT,LocalOrdinalT,GlobalOrdinalT,NodeT> ThyraVector;
    typedef Thyra::TpetraLinearOp<ScalarT,LocalOrdinalT,GlobalOrdinalT,NodeT> ThyraLinearOp;
 
 
+   /** \param[in] useFEAssembly Opt in to assembling each (i,j) block into a
+     *            Tpetra::FECrsMatrix instead of a separate owned/ghosted CrsMatrix pair
+     *            joined by an explicit export. Defaults to false, which leaves the
+     *            classic behavior of this class completely unchanged.
+     */
    BlockedTpetraLinearObjFactory(const Teuchos::RCP<const Teuchos::MpiComm<int> > & comm,
-                                 const Teuchos::RCP<const BlockedDOFManager> & gidProvider);
+                                 const Teuchos::RCP<const BlockedDOFManager> & gidProvider,
+                                 bool useFEAssembly = false);
 
   /** \brief Ctor that takes a vector of DOFManagers instead of the
       BlockedDOFManager. Plan is to deprecate the BlockedDOFManager,
       but for now it is ingrained in all gather/scatter operators.
    */
    BlockedTpetraLinearObjFactory(const Teuchos::RCP<const Teuchos::MpiComm<int> > & comm,
-                                 const std::vector<Teuchos::RCP<const panzer::GlobalIndexer>> & gidProviders);
+                                 const std::vector<Teuchos::RCP<const panzer::GlobalIndexer>> & gidProviders,
+                                 bool useFEAssembly = false);
+
+   /** \brief Ctor for a non-square factory, whose range and domain differ.
+     *
+     * This is what a distributed parameter needs: the rows are indexed by the
+     * solution, the columns by the parameter. Either provider may be a
+     * BlockedDOFManager or a flat GlobalIndexer; a flat one contributes a
+     * single block. Not supported together with FE assembly.
+     */
+   BlockedTpetraLinearObjFactory(const Teuchos::RCP<const Teuchos::MpiComm<int> > & comm,
+                                 const Teuchos::RCP<const GlobalIndexer> & rowProvider,
+                                 const Teuchos::RCP<const GlobalIndexer> & colProvider,
+                                 bool useFEAssembly = false);
 
    virtual ~BlockedTpetraLinearObjFactory();
 
@@ -133,7 +158,14 @@ public:
    //! Use preconstructed scatter evaluators
    template <typename EvalT>
    Teuchos::RCP<panzer::CloneableEvaluator> buildScatter() const
-   { return Teuchos::rcp(new ScatterResidual_BlockedTpetra<EvalT,Traits,LocalOrdinalT,GlobalOrdinalT,NodeT>(blockedDOFManager_)); }
+   {
+     if(!hasColProvider_)
+       return Teuchos::rcp(new ScatterResidual_BlockedTpetra<EvalT,Traits,LocalOrdinalT,GlobalOrdinalT,NodeT>(blockedDOFManager_));
+
+     // Non-square: the columns carry the derivative components, so the scatter
+     // needs the column indexers to place them.
+     return Teuchos::rcp(new ScatterResidual_BlockedTpetra<EvalT,Traits,LocalOrdinalT,GlobalOrdinalT,NodeT>(blockedDOFManager_,colGidProviders_));
+   }
 
    //! Use preconstructed gather evaluators
    template <typename EvalT>
@@ -148,7 +180,17 @@ public:
    //! Use preconstructed gather evaluators
    template <typename EvalT>
    Teuchos::RCP<panzer::CloneableEvaluator > buildGatherDomain() const
-   { return Teuchos::rcp(new GatherSolution_BlockedTpetra<EvalT,Traits,ScalarT,LocalOrdinalT,GlobalOrdinalT,NodeT>(blockedDOFManager_)); }
+   {
+     if(!hasColProvider_)
+       return Teuchos::rcp(new GatherSolution_BlockedTpetra<EvalT,Traits,ScalarT,LocalOrdinalT,GlobalOrdinalT,NodeT>(blockedDOFManager_));
+
+     // A blocked column side gathers into a product vector; a flat one is a
+     // single vector, which only the non-blocked gather knows how to fill.
+     if(colBlockedDOFManager_!=Teuchos::null)
+       return Teuchos::rcp(new GatherSolution_BlockedTpetra<EvalT,Traits,ScalarT,LocalOrdinalT,GlobalOrdinalT,NodeT>(colBlockedDOFManager_));
+
+     return Teuchos::rcp(new GatherSolution_Tpetra<EvalT,Traits,LocalOrdinalT,GlobalOrdinalT,NodeT>(colGidProviders_[0]));
+   }
 
    //! Use preconstructed gather evaluators
    template <typename EvalT>
@@ -158,7 +200,12 @@ public:
    //! Use preconstructed dirichlet scatter evaluators
    template <typename EvalT>
    Teuchos::RCP<panzer::CloneableEvaluator> buildScatterDirichlet() const
-   { return Teuchos::rcp(new ScatterDirichletResidual_BlockedTpetra<EvalT,Traits,LocalOrdinalT,GlobalOrdinalT,NodeT>(blockedDOFManager_)); }
+   {
+     if(!hasColProvider_)
+       return Teuchos::rcp(new ScatterDirichletResidual_BlockedTpetra<EvalT,Traits,LocalOrdinalT,GlobalOrdinalT,NodeT>(blockedDOFManager_));
+
+     return Teuchos::rcp(new ScatterDirichletResidual_BlockedTpetra<EvalT,Traits,LocalOrdinalT,GlobalOrdinalT,NodeT>(blockedDOFManager_,colGidProviders_));
+   }
 
 /*************** Generic helper functions for container setup *******************/
 
@@ -250,8 +297,34 @@ public:
    //! get exporter for converting an overalapped object to a "normal" object
    virtual Teuchos::RCP<const ExportType> getGhostedExport(int j) const;
 
+   /** The column-side counterparts of the four accessors above. For a square
+     * factory each simply forwards to the row-side version, so the two agree
+     * object for object and callers need not care which they asked for.
+     */
+   virtual Teuchos::RCP<const MapType> getColMap(int i) const;
+   virtual Teuchos::RCP<const MapType> getGhostedColMap(int i) const;
+   virtual Teuchos::RCP<const ImportType> getGhostedColImport(int i) const;
+   virtual Teuchos::RCP<const ExportType> getGhostedColExport(int i) const;
+
    Teuchos::RCP<CrsMatrixType> getTpetraMatrix(int i,int j) const;
    Teuchos::RCP<CrsMatrixType> getGhostedTpetraMatrix(int i,int j) const;
+
+/*************** FE (finite-element) construction functions *******************/
+
+   //! True if this factory was constructed with FE assembly enabled.
+   bool useFEAssembly() const { return useFEAssembly_; }
+
+   //! Get the (cached) FE graph for block (i,j), built via the Tpetra::FECrsGraph "V2" ctor.
+   Teuchos::RCP<FECrsGraphType> getFEGraph(int i,int j) const;
+
+   /** \brief Get the (cached) FECrsMatrix for block (i,j).
+     *
+     * Unlike getTpetraMatrix()/getGhostedTpetraMatrix(), which hand back a freshly
+     * allocated matrix on every call, this returns the same object each time. That
+     * sharing is the whole point in FE mode: the owned and ghosted containers must
+     * wrap one matrix so endAssembly() can perform the ghost->global migration in place.
+     */
+   Teuchos::RCP<FECrsMatrixType> getFEMatrix(int i,int j) const;
 
    Teuchos::RCP<VectorType> getTpetraDomainVector(int i) const;
    Teuchos::RCP<VectorType> getGhostedTpetraDomainVector(int i) const;
@@ -272,14 +345,33 @@ public:
    void addExcludedPairs(const std::vector<std::pair<int,int> > & exPairs);
 
    virtual void beginFill(LinearObjContainer & loc) const;
+
+   /** \brief Open the ghosted container for filling, giving it the owned container's operator.
+     *
+     * Under FE assembly the ghosted container holds no operator of its own; this is where it
+     * borrows the owned one. Outside FE assembly it is exactly beginFill(ghostContainer).
+     */
+   virtual void beginFill(LinearObjContainer & ghostContainer,
+                          const LinearObjContainer & container) const;
    virtual void endFill(LinearObjContainer & loc) const;
+
+   /** \brief Close the ghosted container after filling, returning the borrowed matrix.
+     *
+     * The counterpart of beginFill(ghostContainer,container). Outside FE assembly it is
+     * exactly endFill(ghostContainer).
+     */
+   virtual void endFill(LinearObjContainer & ghostContainer,
+                        const LinearObjContainer & container) const;
 
    Teuchos::RCP<const panzer::BlockedDOFManager> getGlobalIndexer() const
    { return blockedDOFManager_; }
 
-   //! Get the domain unique global indexer this factory was created with.
+   /** Get the domain unique global indexer this factory was created with. For a
+     * non-square factory this is the column provider; it is the row provider
+     * only when no separate column provider was supplied.
+     */
    Teuchos::RCP<const panzer::GlobalIndexer> getDomainGlobalIndexer() const
-   { return blockProvider_; }
+   { return hasColProvider_ ? colBlockProvider_ : blockProvider_; }
 
    //! Get the range unique global indexer this factory was created with.
    Teuchos::RCP<const panzer::GlobalIndexer> getRangeGlobalIndexer() const
@@ -291,12 +383,29 @@ protected:
    // Get the global indexer associated with a particular block
    Teuchos::RCP<const GlobalIndexer> getGlobalIndexer(int i) const;
 
+   // Get the column global indexer associated with a particular block
+   Teuchos::RCP<const GlobalIndexer> getColGlobalIndexer(int i) const;
+
+   /** Split a global indexer into per-block field indexers: a BlockedDOFManager
+     * contributes its field managers, a flat indexer contributes itself.
+     */
+   static void splitIntoBlocks(const Teuchos::RCP<const GlobalIndexer> & ugi,
+                               Teuchos::RCP<const BlockedDOFManager> & blocked,
+                               std::vector<Teuchos::RCP<const GlobalIndexer> > & blocks);
+
    //! Allocate the space in the std::vector objects so we can fill with appropriate Tpetra data
-   void makeRoomForBlocks(std::size_t blockCnt);
+   void makeRoomForBlocks(std::size_t blockCnt,std::size_t colBlockCnt=0);
 
    Teuchos::RCP<const GlobalIndexer> blockProvider_;
    Teuchos::RCP<const BlockedDOFManager> blockedDOFManager_;
    std::vector<Teuchos::RCP<const GlobalIndexer> > gidProviders_;
+
+   //! False unless a separate column provider was supplied, in which case the
+   //! three members below mirror the three above for the domain.
+   bool hasColProvider_;
+   Teuchos::RCP<const GlobalIndexer> colBlockProvider_;
+   Teuchos::RCP<const BlockedDOFManager> colBlockedDOFManager_;
+   std::vector<Teuchos::RCP<const GlobalIndexer> > colGidProviders_;
 
    // which block entries are ignored
   std::unordered_set<std::pair<int,int>,panzer::pair_hash> excludedPairs_;
@@ -304,16 +413,20 @@ protected:
 /*************** Thyra based methods/members *******************/
 
    void ghostToGlobalThyraVector(const Teuchos::RCP<const Thyra::VectorBase<ScalarT> > & in,
-                                 const Teuchos::RCP<Thyra::VectorBase<ScalarT> > & out) const;
+                                 const Teuchos::RCP<Thyra::VectorBase<ScalarT> > & out,bool col) const;
    void ghostToGlobalThyraMatrix(const Thyra::LinearOpBase<ScalarT> & in,Thyra::LinearOpBase<ScalarT> & out) const;
    void globalToGhostThyraVector(const Teuchos::RCP<const Thyra::VectorBase<ScalarT> > & in,
-                                 const Teuchos::RCP<Thyra::VectorBase<ScalarT> > & out) const;
+                                 const Teuchos::RCP<Thyra::VectorBase<ScalarT> > & out,bool col) const;
 
    mutable Teuchos::RCP<Thyra::ProductVectorSpaceBase<ScalarT> > rangeSpace_;
-   mutable Teuchos::RCP<Thyra::ProductVectorSpaceBase<ScalarT> > domainSpace_;
-
    mutable Teuchos::RCP<Thyra::ProductVectorSpaceBase<ScalarT> > ghostedRangeSpace_;
-   mutable Teuchos::RCP<Thyra::ProductVectorSpaceBase<ScalarT> > ghostedDomainSpace_;
+
+   /** These are only a product space when the column side is blocked. A flat
+     * column provider gives a single SPMD space, matching the single vector the
+     * non-blocked domain gather fills.
+     */
+   mutable Teuchos::RCP<const Thyra::VectorSpaceBase<ScalarT> > domainSpace_;
+   mutable Teuchos::RCP<const Thyra::VectorSpaceBase<ScalarT> > ghostedDomainSpace_;
 
 /*************** Tpetra based methods/members *******************/
 
@@ -323,17 +436,26 @@ protected:
                                      const Teuchos::Ptr<CrsMatrixType> & A,
                                      bool zeroVectorRows) const;
 
-   void ghostToGlobalTpetraVector(int i,const VectorType & in,VectorType & out) const;
+   void ghostToGlobalTpetraVector(int i,const VectorType & in,VectorType & out,bool col) const;
    void ghostToGlobalTpetraMatrix(int blockRow,const CrsMatrixType & in,CrsMatrixType & out) const;
-   void globalToGhostTpetraVector(int i,const VectorType & in,VectorType & out) const;
+   void globalToGhostTpetraVector(int i,const VectorType & in,VectorType & out,bool col) const;
 
    // get the map from the matrix
    virtual Teuchos::RCP<const MapType> buildTpetraMap(int i) const;
    virtual Teuchos::RCP<const MapType> buildTpetraGhostedMap(int i) const;
+   virtual Teuchos::RCP<const MapType> buildColTpetraMap(int i) const;
+   virtual Teuchos::RCP<const MapType> buildColTpetraGhostedMap(int i) const;
 
    // get the graph of the crs matrix
    virtual Teuchos::RCP<const CrsGraphType> buildTpetraGraph(int i,int j) const;
+
+   // build the FE graph for block (i,j) (owned+shared/owned unified via Tpetra::FECrsGraph)
+   virtual Teuchos::RCP<FECrsGraphType> buildFEGraph(int i,int j) const;
+
+
+ public:
    virtual Teuchos::RCP<const CrsGraphType> buildTpetraGhostedGraph(int i,int j) const;
+ protected:
 
    // storage for Tpetra graphs and maps
    Teuchos::RCP<const Teuchos::MpiComm<int> > comm_;
@@ -344,6 +466,32 @@ protected:
 
    mutable std::vector<Teuchos::RCP<const ImportType> > importers_;
    mutable std::vector<Teuchos::RCP<const ExportType> > exporters_;
+
+   // Only populated when hasColProvider_; otherwise the column accessors
+   // forward to the row-side objects above.
+   mutable std::vector<Teuchos::RCP<const MapType> > colMaps_;
+   mutable std::vector<Teuchos::RCP<const MapType> > ghostedColMaps_;
+   mutable std::vector<Teuchos::RCP<const ImportType> > colImporters_;
+   mutable std::vector<Teuchos::RCP<const ExportType> > colExporters_;
+
+/*************** FE based members *******************/
+
+   bool useFEAssembly_;
+
+   mutable std::unordered_map<std::pair<int,int>,Teuchos::RCP<FECrsGraphType>,panzer::pair_hash> feGraphs_;
+
+   /** Which FE matrices currently have an assembly open, tracked so the paired
+     * beginFill(ghosted)/beginFill(global) calls AssemblyEngine makes -- which in FE mode
+     * hold the same matrix per block -- collapse into a single beginAssembly()/endAssembly().
+     *
+     * This cannot be derived from the matrix itself: Tpetra::FECrsMatrix keeps its assembly
+     * state in a private fillState_, and the public isFillActive() reports the underlying
+     * CrsMatrix's state, which is decoupled from it.
+     *
+     * Keyed by block rather than by matrix pointer so a stray unbalanced call on one block
+     * cannot silently suppress the begin/end on another.
+     */
+   mutable std::unordered_map<std::pair<int,int>,const FECrsMatrixType *,panzer::pair_hash> feAssemblyOpenOn_;
 };
 
 }

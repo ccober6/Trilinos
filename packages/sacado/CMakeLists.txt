@@ -11,6 +11,14 @@ TRIBITS_PACKAGE(Sacado)
 #
 TRIBITS_SET_ST_FOR_DEV_MODE(ST_FOR_DEV_PT_FOR_RELEASE)
 
+SET(Sacado_ENABLE_DEPRECATED_CODE_DEFAULT ON)
+TRIBITS_ADD_OPTION_AND_DEFINE(
+  Sacado_ENABLE_DEPRECATED_CODE
+  SACADO_ENABLE_DEPRECATED_CODE
+  "Whether Sacado enables deprecated code (that is, anything marked with the Sacado_DEPRECATED macro) at compile time.  Default is ON (deprecated code enabled)."
+  ${Sacado_ENABLE_DEPRECATED_CODE_DEFAULT}
+)
+
 IF (Trilinos_ENABLE_COMPLEX_DOUBLE)
   SET(${PACKAGE_NAME}_ENABLE_COMPLEX_DEFAULT  TRUE)
 ELSE()
@@ -25,13 +33,6 @@ TRIBITS_ADD_OPTION_AND_DEFINE(
   )
 
 TRIBITS_ADD_OPTION_AND_DEFINE(
-  ${PACKAGE_NAME}_NEW_FAD_DESIGN_IS_DEFAULT
-  SACADO_NEW_FAD_DESIGN_IS_DEFAULT
-  "Make the new Fad design the default, replacing the old one."
-  ON
-  )
-
-TRIBITS_ADD_OPTION_AND_DEFINE(
   ${PACKAGE_NAME}_SFAD_INIT_DEFAULT_CONSTRUCTOR
   SACADO_SFAD_INIT_DEFAULT_CONSTRUCTOR
   "Force SFad (in the new design) to initialize value and derivative components in the default constructor (adds additional runtime cost, but protects against uninitialized use)."
@@ -40,15 +41,15 @@ TRIBITS_ADD_OPTION_AND_DEFINE(
 
 TRIBITS_ADD_OPTION_AND_DEFINE(
   ${PACKAGE_NAME}_ENABLE_HIERARCHICAL
-  SACADO_VIEW_CUDA_HIERARCHICAL
-  "Enable hierarchical parallelism (currently only for CUDA)."
+  SACADO_GPU_HIERARCHICAL
+  "Enable hierarchical parallelism, in which a team's vector dimension is used to partition the derivative array (CUDA, HIP and SYCL)."
   FALSE
   )
 
 TRIBITS_ADD_OPTION_AND_DEFINE(
   ${PACKAGE_NAME}_ENABLE_HIERARCHICAL_DFAD
-  SACADO_VIEW_CUDA_HIERARCHICAL_DFAD
-  "Enable hierarchical parallelism using an approach specific to DFad (currently only for CUDA)."
+  SACADO_GPU_HIERARCHICAL_DFAD
+  "Enable hierarchical parallelism using an approach specific to DFad (CUDA, HIP and SYCL).  A DFad whose derivative array belongs to a Kokkos::View is supported everywhere; building a DFad value inside a kernel additionally needs a device heap, which means CUDA with UVM and is unavailable on SYCL."
   FALSE
   )
 
@@ -91,10 +92,46 @@ TRIBITS_ADD_OPTION_AND_DEFINE(${PACKAGE_NAME}_ENABLE_VIEW_SPEC
   "Enable Sacado specializations for Kokkos::View<...>"
   ON )
 
-TRIBITS_ADD_OPTION_AND_DEFINE(${PACKAGE_NAME}_ENABLE_GTest
-  HAVE_SACADO_GTEST
-  "Enable internal GTest library for unit testing"
-  ON )
+# Narrowest vector width a SYCL TeamPolicy launch can deliver.
+#
+# Kokkos may hand a team a narrower vector width than it asked for, and the
+# clamp that depends on the built kernel cannot be seen from the host.  Sacado
+# therefore sizes partitioned Fad storage for the narrowest width the device
+# could produce rather than the width that was requested.  Lowering this value
+# costs registers; raising it above what the device can deliver is incorrect.
+#
+# This changes a type, so it must be the same for every translation unit in a
+# build -- hence a configured value rather than a macro a source file can set.
+#
+# 8 is the smallest SIMD width Intel GPUs compile to and is safe anywhere.
+# Ponte Vecchio reports sub-group sizes of 16 and 32, so 16 is safe there and
+# halves the derivative storage per thread.
+IF (Kokkos_ARCH_INTEL_PVC)
+  SET(Sacado_SYCL_MIN_VECTOR_LENGTH_DEFAULT 16)
+  SET(Sacado_SYCL_MIN_VECTOR_LENGTH_WHY "from Kokkos_ARCH_INTEL_PVC")
+ELSE()
+  SET(Sacado_SYCL_MIN_VECTOR_LENGTH_DEFAULT 8)
+  SET(Sacado_SYCL_MIN_VECTOR_LENGTH_WHY "default")
+ENDIF()
+
+SET(Sacado_SYCL_MIN_VECTOR_LENGTH "${Sacado_SYCL_MIN_VECTOR_LENGTH_DEFAULT}"
+  CACHE STRING
+  "Narrowest vector width a SYCL team launch can deliver.  Sacado sizes partitioned Fad storage for this width, so lowering it costs registers and raising it above what the device can deliver is incorrect.")
+
+IF (NOT "${Sacado_SYCL_MIN_VECTOR_LENGTH}" STREQUAL
+    "${Sacado_SYCL_MIN_VECTOR_LENGTH_DEFAULT}")
+  SET(Sacado_SYCL_MIN_VECTOR_LENGTH_WHY "user-specified")
+ENDIF()
+
+# The name #cmakedefine tests in Sacado_config.h.in is the macro's own, so
+# mirror the cache variable onto it.
+SET(SACADO_SYCL_MIN_VECTOR_LENGTH ${Sacado_SYCL_MIN_VECTOR_LENGTH})
+
+IF (Kokkos_ENABLE_SYCL)
+  MESSAGE(STATUS
+    "Sacado: partitioned Fad sized for a minimum SYCL vector length of "
+    "${Sacado_SYCL_MIN_VECTOR_LENGTH} (${Sacado_SYCL_MIN_VECTOR_LENGTH_WHY})")
+ENDIF()
 
 SET(Sacado_ENABLE_ADOLC_default OFF)
 IF(TPL_ENABLE_ADOLC)

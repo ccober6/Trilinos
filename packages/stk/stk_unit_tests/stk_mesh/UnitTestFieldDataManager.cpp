@@ -114,15 +114,15 @@ void testAllocateFieldData(stk::mesh::BulkData& bulkData, const size_t extraCapa
   const stk::mesh::FieldVector &fields = meshMetaData.get_fields();
   for (stk::mesh::FieldBase* field : fields) {
     if (is_test_field(*field)) {
-      const T *initial_value = reinterpret_cast<const T*>(field->get_initial_value());
-      auto fieldData = field->data<T, stk::mesh::ReadOnly, stk::ngp::HostMemSpace, Layout>();
+      const T *initial_value = field->get_initial_value_num_bytes() > 0 ? reinterpret_cast<const T*>(field->get_initial_value_bytes().data()) : nullptr;
+      auto fieldData = field->data<T, stk::mesh::ReadOnly, stk::ngp::HostSpace, Layout>();
 
       size_t totalBytesAllocatedForField = 0;
       for (const stk::mesh::Bucket * bucket : bulkData.buckets(stk::topology::NODE_RANK)) {
         size_t bytesPerEntity = field->get_meta_data_for_field()[bucket->bucket_id()].m_bytesPerEntity;
         size_t numEntitiesAllocated = bucket->capacity();
         totalBytesAllocatedForField += stk::adjust_up_to_alignment_boundary(numEntitiesAllocated*bytesPerEntity,
-                                                                            fieldDataManager.get_alignment_bytes());
+                                                                            fieldDataManager.get_alignment_padding_size());
         auto fieldValues = fieldData.bucket_values(*bucket);
         for (stk::mesh::EntityIdx entity : bucket->entities()) {
           for (stk::mesh::ComponentIdx component : fieldValues.components()) {
@@ -139,13 +139,13 @@ void testAllocateFieldData(stk::mesh::BulkData& bulkData, const size_t extraCapa
 
 template <typename T, stk::mesh::Layout Layout>
 void testReorderBucketFieldData(stk::mesh::BulkData& bulkData, stk::mesh::EntityRank rank,
-                                const stk::mesh::FieldVector& fields, const std::vector<unsigned> &reorderedBucketIds)
+                                const stk::mesh::FieldVector& fields, const std::vector<unsigned>& reorderedBucketIds)
 {
   const stk::mesh::BucketVector& buckets = bulkData.buckets(rank);
 
   for (const stk::mesh::FieldBase* field : fields) {
     if (field->data_traits().size_of == sizeof(T)) {
-      auto fieldData = field->data<T, stk::mesh::ReadWrite, stk::ngp::HostMemSpace, Layout>();
+      auto fieldData = field->data<T, stk::mesh::ReadWrite, stk::ngp::HostSpace, Layout>();
       for (const stk::mesh::Bucket* bucket : buckets) {
         T value = (bucket->bucket_id()+1)*1000 + (field->mesh_meta_data_ordinal()+1)*100;
 
@@ -167,7 +167,7 @@ void testReorderBucketFieldData(stk::mesh::BulkData& bulkData, stk::mesh::Entity
 
     for (const stk::mesh::FieldBase* field : fields) {
       if (field->data_traits().size_of == sizeof(T)) {
-        auto fieldData = field->data<T, stk::mesh::ReadOnly, stk::ngp::HostMemSpace, Layout>();
+        auto fieldData = field->data<T, stk::mesh::ReadOnly, stk::ngp::HostSpace, Layout>();
 
         T expectedValue = (oldBucketId+1)*1000 + (field->mesh_meta_data_ordinal()+1)*100;
 
@@ -247,7 +247,7 @@ std::shared_ptr<stk::mesh::BulkData> build_mesh(unsigned spatialDim, stk::Parall
 
 using TestTypes = ::testing::Types<char, unsigned char, signed char, short, unsigned short, int, unsigned int,
                                    long, unsigned long, long long, unsigned long long, float, double, long double,
-                                   std::complex<float>, std::complex<double>>;
+                                   Kokkos::complex<float>, Kokkos::complex<double>>;
 
 template <typename T>
 class TestFieldDataManager : public testing::Test {};
@@ -347,6 +347,56 @@ TYPED_TEST(TestFieldDataManager, TwoEntitiesTwoBuckets_LayoutLeft)
   testTwoEntitiesTwoBuckets(*bulkDataPtr);
 }
 
+TYPED_TEST(TestFieldDataManager, AllocateFieldDataAndReorderBuckets_LayoutRight)
+{
+  if (stk::parallel_machine_size(MPI_COMM_WORLD) != 1) return;
+
+  using FieldDataType = TypeParam;
+  const size_t spatialDim = 3;
+
+  std::shared_ptr<stk::mesh::BulkData> bulkDataPtr = build_mesh(spatialDim, MPI_COMM_WORLD);
+  stk::mesh::MetaData& meshMetaData = bulkDataPtr->mesh_meta_data();
+  initializeTestField<FieldDataType, stk::mesh::Layout::Right>(meshMetaData);
+
+  size_t numNodes = 10000;
+  const size_t extraCapacity = 0;
+  testAllocateFieldData<FieldDataType, stk::mesh::Layout::Right>(*bulkDataPtr, extraCapacity, numNodes);
+
+  const int num_buckets = static_cast<int>(numNodes/stk::mesh::get_default_maximum_bucket_capacity() + 1);
+  std::vector<unsigned> reorderedBucketIds(num_buckets, 0);
+  for (size_t i = 0; i < reorderedBucketIds.size(); ++i) {
+    reorderedBucketIds[i] = reorderedBucketIds.size()-i-1;
+  }
+  testReorderBucketFieldData<FieldDataType, stk::mesh::Layout::Right>(*bulkDataPtr, stk::topology::NODE_RANK,
+                                                                      meshMetaData.get_fields(stk::topology::NODE_RANK),
+                                                                      reorderedBucketIds);
+}
+
+TYPED_TEST(TestFieldDataManager, AllocateFieldDataAndReorderBuckets_LayoutLeft)
+{
+  if (stk::parallel_machine_size(MPI_COMM_WORLD) != 1) return;
+
+  using FieldDataType = TypeParam;
+  const size_t spatialDim = 3;
+
+  std::shared_ptr<stk::mesh::BulkData> bulkDataPtr = build_mesh(spatialDim, MPI_COMM_WORLD);
+  stk::mesh::MetaData& meshMetaData = bulkDataPtr->mesh_meta_data();
+  initializeTestField<FieldDataType, stk::mesh::Layout::Left>(meshMetaData);
+
+  size_t numNodes = 10000;
+  const size_t extraCapacity = 0;
+  testAllocateFieldData<FieldDataType, stk::mesh::Layout::Left>(*bulkDataPtr, extraCapacity, numNodes);
+
+  const int num_buckets = static_cast<int>(numNodes/stk::mesh::get_default_maximum_bucket_capacity() + 1);
+  std::vector<unsigned> reorderedBucketIds(num_buckets, 0);
+  for (size_t i = 0; i < reorderedBucketIds.size(); ++i) {
+    reorderedBucketIds[i] = reorderedBucketIds.size()-i-1;
+  }
+  testReorderBucketFieldData<FieldDataType, stk::mesh::Layout::Left>(*bulkDataPtr, stk::topology::NODE_RANK,
+                                                                     meshMetaData.get_fields(stk::topology::NODE_RANK),
+                                                                     reorderedBucketIds);
+}
+
 
 template <typename T, stk::mesh::Layout Layout>
 void initialize2Parts2Fields(stk::mesh::MetaData& meshMetaData)
@@ -372,26 +422,28 @@ size_t allocateAndTestNodeBucketFieldData(const std::vector<stk::mesh::PartVecto
 {
   const stk::mesh::FieldBase &fieldOnPart1 = *fields[0];
   const stk::mesh::FieldBase &fieldOnPart2 = *fields[1];
-  const stk::mesh::FieldMetaDataArrayType &part1FieldMetaDataVector = fieldOnPart1.get_meta_data_for_field();
-  const stk::mesh::FieldMetaDataArrayType &part2FieldMetaDataVector = fieldOnPart2.get_meta_data_for_field();
-
+  const unsigned totalNumFields = allFields.size();
   stk::mesh::FieldDataManager& fieldDataManager = fieldOnPart1.get_mesh().get_field_data_manager();
 
   const size_t bucketSize = 123;
   const size_t bucketCapacity = 123;
   for (size_t i = 0; i < partsTable.size(); ++i) {
-    fieldDataManager.allocate_bucket_field_data(stk::topology::NODE_RANK, allFields, partsTable[i],
-                                                bucketSize, bucketCapacity);
+    fieldDataManager.allocate_bucket_field_data(stk::topology::NODE_RANK, fields, partsTable[i],
+                                                totalNumFields, bucketSize, bucketCapacity);
 
     size_t expectedNumBucketsInField = i+1;
-    EXPECT_EQ(expectedNumBucketsInField, part1FieldMetaDataVector.extent(0));
-    EXPECT_EQ(expectedNumBucketsInField, part2FieldMetaDataVector.extent(0));
+    const unsigned part1NumBuckets = fieldOnPart1.get_num_buckets_for_field();
+    const unsigned part2NumBuckets = fieldOnPart2.get_num_buckets_for_field();
+    EXPECT_EQ(expectedNumBucketsInField, part1NumBuckets);
+    EXPECT_EQ(expectedNumBucketsInField, part2NumBuckets);
 
+    const stk::mesh::FieldMetaData* part1FieldMetaDataArray = fieldOnPart1.get_meta_data_for_field();
+    const stk::mesh::FieldMetaData* part2FieldMetaDataArray = fieldOnPart2.get_meta_data_for_field();
     for (size_t j=0; j<expectedNumBucketsInField; j++) {
       int expectedNumBytesPerEntity = bytesPerEntityForField[0][j];
-      EXPECT_EQ(expectedNumBytesPerEntity, part1FieldMetaDataVector[j].m_bytesPerEntity);
+      EXPECT_EQ(expectedNumBytesPerEntity, part1FieldMetaDataArray[j].m_bytesPerEntity);
       expectedNumBytesPerEntity = bytesPerEntityForField[1][j];
-      EXPECT_EQ(expectedNumBytesPerEntity, part2FieldMetaDataVector[j].m_bytesPerEntity);
+      EXPECT_EQ(expectedNumBytesPerEntity, part2FieldMetaDataArray[j].m_bytesPerEntity);
     }
   }
   return bucketCapacity;

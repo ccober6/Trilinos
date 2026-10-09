@@ -14,7 +14,7 @@ IF (${PACKAGE_NAME}_ENABLE_METIS)
 
   TRIBITS_COPY_FILES_TO_BINARY_DIR(SolverTestcuSolverFiles
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
-    SOURCE_FILES cuSOLVER_test.xml
+    SOURCE_FILES cuSOLVER_test.xml cuSOLVER_sparse_test.xml
     EXEDEPS Solver_Test
     )
 
@@ -22,6 +22,15 @@ IF (${PACKAGE_NAME}_ENABLE_METIS)
     Solver_Test
     NAME cuSOLVER_Solver_Test
     ARGS "--xml-params=cuSOLVER_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor"
+    STANDARD_PASS_OUTPUT
+    NUM_MPI_PROCS 1
+    COMM serial mpi
+    )
+
+  TRIBITS_ADD_TEST(
+    Solver_Test
+    NAME cuSOLVER_Sparse_Solver_Test
+    ARGS "--xml-params=cuSOLVER_sparse_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor"
     STANDARD_PASS_OUTPUT
     NUM_MPI_PROCS 1
     COMM serial mpi
@@ -215,10 +224,19 @@ IF (${PACKAGE_NAME}_ENABLE_ShyLU_NodeTacho)
   TRIBITS_ADD_TEST(
     Solver_Test
     NAME Tacho_Solver_Test
-    ARGS "--xml-params=tacho_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor"
+    ARGS "--xml-params=tacho_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor --resymbol"
     STANDARD_PASS_OUTPUT
     NUM_MPI_PROCS 1 # Need to determine if we want more MPI when not running OpenMP with threads
     COMM serial mpi
+    )
+
+  TRIBITS_ADD_TEST(
+    Solver_Test
+    NAME Tacho_Solver_Test
+    ARGS "--xml-params=tacho_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor --resymbol"
+    STANDARD_PASS_OUTPUT
+    NUM_MPI_PROCS 2 # Need to determine if we want more MPI when not running OpenMP with threads
+    COMM mpi
     )
 
 ENDIF()
@@ -318,6 +336,7 @@ IF (${PACKAGE_NAME}_ENABLE_SuperLUDist)
     # Disabled --refactor which fails now that refactor properly tests a vector not all 0 - TODO
     ARGS "--xml-params=superludist_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves"
     STANDARD_PASS_OUTPUT
+    NUM_MPI_PROCS 2
     COMM mpi
     )
 
@@ -336,28 +355,22 @@ IF (${PACKAGE_NAME}_ENABLE_SuperLUDist)
     COMM mpi
     )
 
-  IF (${PACKAGE_NAME}_ENABLE_Epetra)
-    TRIBITS_COPY_FILES_TO_BINARY_DIR(SolverTestCopySuperLUDistFiles_GapEpetra
-      SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
-      SOURCE_FILES superludist_gapped_test_epetra.xml
-      EXEDEPS Solver_Test
-      )
-
-    TRIBITS_ADD_TEST(
-      Solver_Test
-      NAME SuperLU_DIST_Solver_Gapped_Test_Epetra
-      ARGS "--xml-params=superludist_gapped_test_epetra.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves"
-      NUM_MPI_PROCS 1
-      STANDARD_PASS_OUTPUT
-      COMM mpi
-      )
-  ENDIF()
 ENDIF()
 
 
 ##### PARDISO_MKL Tests #####
 
 IF (${PACKAGE_NAME}_ENABLE_PARDISO_MKL)
+    TRIBITS_ADD_EXECUTABLE_AND_TEST(
+    PardisoMKL_UnitTests
+    SOURCES
+      PardisoMKL_UnitTests.cpp
+      ${TEUCHOS_STD_UNIT_TEST_MAIN}
+    COMM serial mpi
+    NUM_MPI_PROCS 2
+    STANDARD_PASS_OUTPUT
+    )
+
   TRIBITS_COPY_FILES_TO_BINARY_DIR(SolverTestCopyPardisoMKLFiles
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
     SOURCE_FILES pardiso_mkl_test.xml
@@ -367,13 +380,13 @@ IF (${PACKAGE_NAME}_ENABLE_PARDISO_MKL)
   TRIBITS_ADD_TEST(
     Solver_Test
     NAME Pardiso_MKL_Solver_Test
-    ARGS "--xml-params=pardiso_mkl_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor"
+    ARGS "--xml-params=pardiso_mkl_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor --resymbol"
     STANDARD_PASS_OUTPUT
     COMM serial mpi
     )
 ENDIF()
 
-##### PARDISO_CSS Tests #####
+##### CSS_MKL Tests #####
 
 IF (${PACKAGE_NAME}_ENABLE_CSS_MKL)
   TRIBITS_COPY_FILES_TO_BINARY_DIR(SolverTestCopyCssMKLFiles
@@ -385,7 +398,7 @@ IF (${PACKAGE_NAME}_ENABLE_CSS_MKL)
   TRIBITS_ADD_TEST(
     Solver_Test
     NAME Css_MKL_Solver_Test
-    ARGS "--xml-params=css_mkl_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor"
+    ARGS "--xml-params=css_mkl_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor --resymbol"
     NUM_MPI_PROCS 2
     STANDARD_PASS_OUTPUT
     COMM mpi
@@ -464,7 +477,7 @@ IF (${PACKAGE_NAME}_ENABLE_ShyLU_NodeBasker)
     TRIBITS_ADD_TEST(
     Solver_Test
     NAME ShyLUBasker_Solver_Test
-    ARGS "--xml-params=shylubasker_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor"
+    ARGS "--kokkos-num-threads=2 --xml-params=shylubasker_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor"
     STANDARD_PASS_OUTPUT
     NUM_MPI_PROCS 2
     COMM serial mpi
@@ -474,6 +487,20 @@ ENDIF()
 ##### MUMPS Tests ####
 #MUMPS requires int/int type
 IF (${PACKAGE_NAME}_ENABLE_MUMPS AND Tpetra_INST_INT_INT)
+  TRIBITS_COPY_FILES_TO_BINARY_DIR(SolverTestCopyMumpsFiles
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
+    SOURCE_FILES mumps_test.xml
+    EXEDEPS Solver_Test
+    )
+
+  TRIBITS_ADD_TEST(
+    Solver_Test
+    NAME MUMPS_Solver_Test
+    ARGS "--xml-params=mumps_test.xml --filedir=${CMAKE_CURRENT_BINARY_DIR}/../matrices/ --multiple-solves --refactor --resymbol"
+    STANDARD_PASS_OUTPUT
+    COMM serial mpi
+    )
+
    TRIBITS_ADD_EXECUTABLE_AND_TEST(
    MUMPS_UnitTests
    SOURCES

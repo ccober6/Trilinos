@@ -31,16 +31,15 @@ namespace Tpetra {
 /// \tparam Node The Kokkos Node type.  See the documentation of Map
 ///   for requirements.
 ///
-/// \param[in/out] matrix Tpetra::CrsMatrix to be modified
-/// \param[in] newDiag Tpetra::Vector with new values for the diagonal; must have same Tpetra::Map as matrix's rowMap
+/// \param matrix [in/out] Tpetra::CrsMatrix to be modified
+/// \param newDiag [in] Tpetra::Vector with new values for the diagonal; must have same Tpetra::Map as matrix's rowMap
 ///
 ///
 /// \return Local number of successfully replaced diagonal entries
-template<class SC, class LO, class GO, class NT>
-LO
-replaceDiagonalCrsMatrix(::Tpetra::CrsMatrix<SC, LO, GO, NT>& matrix,
-    const ::Tpetra::Vector<SC, LO, GO, NT>& newDiag);
+template <class SC, class LO, class GO, class NT>
+LO replaceDiagonalCrsMatrix(::Tpetra::CrsMatrix<SC, LO, GO, NT>& matrix,
+                            const ::Tpetra::Vector<SC, LO, GO, NT>& newDiag);
 
-} // namespace Tpetra
+}  // namespace Tpetra
 
-#endif // #ifndef TPETRA_REPLACEDIAGONALCRSMATRIX_DECL_HPP
+#endif  // #ifndef TPETRA_REPLACEDIAGONALCRSMATRIX_DECL_HPP

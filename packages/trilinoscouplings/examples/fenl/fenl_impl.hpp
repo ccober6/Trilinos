@@ -24,7 +24,7 @@
 #include <Kokkos_UnorderedMap.hpp>
 #include <KokkosSparse_CrsMatrix.hpp>
 #include <Kokkos_Timer.hpp>
-#include <Kokkos_ArithTraits.hpp>
+#include <KokkosKernels_ArithTraits.hpp>
 
 #include <Teuchos_CommHelpers.hpp>
 #include <Teuchos_ParameterList.hpp>
@@ -93,7 +93,7 @@ public:
   typedef Device DeviceType;
   typedef BoxElemFixture< Device , ElemOrder >  FixtureType ;
 
-  typedef typename Kokkos::ArithTraits<Scalar>::mag_type  Magnitude;
+  typedef typename KokkosKernels::ArithTraits<Scalar>::mag_type  Magnitude;
 
   typedef Tpetra::KokkosCompat::KokkosDeviceWrapperNode< Device >  NodeType;
 
@@ -712,7 +712,7 @@ Perf fenl(
   Teuchos::Array<Scalar>& response_gradient,
   const QuadratureData<Device>& qd = QuadratureData<Device>() )
 {
-  typedef typename Kokkos::ArithTraits<Scalar>::mag_type  Magnitude;
+  typedef typename KokkosKernels::ArithTraits<Scalar>::mag_type  Magnitude;
 
   const unsigned  newton_iteration_limit =
     fenlParams->get("Max Nonlinear Iterations", 10) ;

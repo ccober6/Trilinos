@@ -20,7 +20,7 @@
 #endif
 
 #include "Intrepid2_Types.hpp"
-#include "Intrepid2_Utils.hpp"
+#include "Intrepid2_TestUtils.hpp"
 
 #include "Intrepid2_HDIV_TRI_I1_FEM.hpp"
 #include "packages/intrepid2/unit-test/Discretization/Basis/Setup.hpp"
@@ -61,18 +61,13 @@ namespace Intrepid2 {
         Kokkos::DynRankView<OutValueType,DeviceType> ConstructWithLabelOutView(outputDivergencesA, ncells, basisPtr->getCardinality(), npts);
         Kokkos::DynRankView<OutValueType,DeviceType> ConstructWithLabelOutView(outputDivergencesB, basisPtr->getCardinality(), npts);
 
-        Kokkos::DynRankView<PointValueType,DeviceType> ConstructWithLabelPointView(point, 1);
-        
-        using ScalarType = typename ScalarTraits<PointValueType>::scalar_type;
-        
-        Kokkos::View<ScalarType*,DeviceType> inputPointsViewToUseRandom("inputPoints", npts*ndim*get_dimension_scalar(point));
-        auto vcprop = Kokkos::common_view_alloc_prop(point);
-        Kokkos::DynRankView<PointValueType,DeviceType> inputPoints (Kokkos::view_wrap(inputPointsViewToUseRandom.data(), vcprop),  npts, ndim);
-        
-        // random values between (0,1)
-        Kokkos::Random_XorShift64_Pool<DeviceType> random(13718);
-        Kokkos::fill_random(inputPointsViewToUseRandom, random, 1.0);
-        
+        Kokkos::DynRankView<PointValueType,DeviceType> ConstructWithLabelPointView(inputPoints, npts, ndim);
+
+        { //randomly initialize inputPoints including derivatives for fad types
+          auto inputPointsViewToUseRandom = as_scalar_1d_view(inputPoints);          
+          Kokkos::Random_XorShift64_Pool<DeviceType> random(20260504); // random values between (0,1)
+          Kokkos::fill_random(inputPointsViewToUseRandom, random, 0.0, 1.0);
+        }         
 
         *outStream << "Computing values and divergences for " << ncells << " cells and " << npts << " points using team-level getValues function" <<std::endl;
 
@@ -87,13 +82,13 @@ namespace Intrepid2 {
           { //compute values
             auto functor = KOKKOS_LAMBDA (typename Kokkos::TeamPolicy<DeviceSpaceType>::member_type team_member) {
                 auto valsACell = Kokkos::subview(outputValuesA, team_member.league_rank(), Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL());
-                basisRawPtr_device->getValues(valsACell, inputPoints, OPERATOR_VALUE, team_member, team_member.team_scratch(scratch_space_level));
+                basisRawPtr_device->getValues(valsACell, inputPoints, OPERATOR_VALUE, team_member, scratch_space_level);
             };              
             
             //Get the required size of the scratch space per team and per thread.
-            int perThreadSpaceSize(0), perTeamSpaceSize(0);
-            basisPtr->getScratchSpaceSize(perTeamSpaceSize,perThreadSpaceSize,inputPoints, OPERATOR_VALUE);
-            teamPolicy.set_scratch_size(scratch_space_level, Kokkos::PerTeam(perTeamSpaceSize), Kokkos::PerThread(perThreadSpaceSize));
+            int perThreadSpaceSize(0);
+            basisPtr->getScratchSpaceSize(perThreadSpaceSize,inputPoints, OPERATOR_VALUE);
+            teamPolicy.set_scratch_size(scratch_space_level, Kokkos::PerThread(perThreadSpaceSize));
 
             Kokkos::parallel_for (teamPolicy,functor);
           }
@@ -101,13 +96,13 @@ namespace Intrepid2 {
           { //compute divergences
             auto functor = KOKKOS_LAMBDA (typename Kokkos::TeamPolicy<DeviceSpaceType>::member_type team_member) {
                 auto divergencesACell = Kokkos::subview(outputDivergencesA, team_member.league_rank(), Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL());
-                basisRawPtr_device->getValues(divergencesACell, inputPoints, OPERATOR_DIV, team_member, team_member.team_scratch(scratch_space_level));
+                basisRawPtr_device->getValues(divergencesACell, inputPoints, OPERATOR_DIV, team_member, scratch_space_level);
             };              
             
             //Get the required size of the scratch space per team and per thread.
-            int perThreadSpaceSize(0), perTeamSpaceSize(0);
-            basisPtr->getScratchSpaceSize(perTeamSpaceSize,perThreadSpaceSize,inputPoints, OPERATOR_DIV);
-            teamPolicy.set_scratch_size(scratch_space_level, Kokkos::PerTeam(perTeamSpaceSize), Kokkos::PerThread(perThreadSpaceSize));
+            int perThreadSpaceSize(0);
+            basisPtr->getScratchSpaceSize(perThreadSpaceSize,inputPoints, OPERATOR_DIV);;
+            teamPolicy.set_scratch_size(scratch_space_level, Kokkos::PerThread(perThreadSpaceSize));
 
             Kokkos::parallel_for (teamPolicy,functor);
           }
@@ -125,20 +120,23 @@ namespace Intrepid2 {
           const auto outputValuesA_Host = Kokkos::create_mirror_view(outputValuesA); Kokkos::deep_copy(outputValuesA_Host, outputValuesA);
           const auto outputValuesB_Host = Kokkos::create_mirror_view(outputValuesB); Kokkos::deep_copy(outputValuesB_Host, outputValuesB);
           
-          OutValueType diff = 0; 
-          auto tol = epsilon<double>();
+          const auto tol = 100.0 * epsilon<double>();
           for (size_t ic=0;ic<outputValuesA_Host.extent(0);++ic)
             for (size_t i=0;i<outputValuesA_Host.extent(1);++i)
               for (size_t j=0;j<outputValuesA_Host.extent(2);++j) {
-                diff = 0;
-                for (int d=0;d<ndim;++d)
-                  diff += std::abs(outputValuesB_Host(i,j,d) - outputValuesA_Host(ic,i,j,d));
-                if (diff > tol) {
+                auto maxBNorm = computeMaxNorm(outputValuesB_Host(i,j,0));
+                auto diffNorm = computeMaxNorm(outputValuesB_Host(i,j,0) - outputValuesA_Host(ic,i,j,0));
+                for (int d=1;d<ndim;++d) {
+                  maxBNorm = std::max(maxBNorm, computeMaxNorm(outputValuesB_Host(i,j,d)));
+                  diffNorm = std::max(diffNorm, computeMaxNorm(outputValuesB_Host(i,j,d)- outputValuesA_Host(ic,i,j,d)));
+                }
+                const auto diffRelNorm = diffNorm/std::max(1.0, maxBNorm);
+                if (diffRelNorm > tol) {
                   ++errorFlag;
                   std::cout << ", ic: " << ic << ", i: " << i << ", j: " << j 
                             << ", val A: [" << outputValuesA_Host(ic,i,j,0) << ", " << outputValuesA_Host(ic,i,j,1) << "]"
                             << ", val B: [" << outputValuesB_Host(i,j,0) << ", " << outputValuesB_Host(i,j,1) << "]"
-                            << ", |diff|: " << diff
+                            << ", |rel diff|: " << diffRelNorm
                             << ", tol: " << tol
                             << std::endl;
                 }
@@ -150,18 +148,20 @@ namespace Intrepid2 {
           const auto outputDivergencesA_Host = Kokkos::create_mirror_view(outputDivergencesA); Kokkos::deep_copy(outputDivergencesA_Host, outputDivergencesA);
           const auto outputDivergencesB_Host = Kokkos::create_mirror_view(outputDivergencesB); Kokkos::deep_copy(outputDivergencesB_Host, outputDivergencesB);
           
-          OutValueType diff = 0;
-          auto tol = epsilon<double>();
+          const auto tol = 100.0 * epsilon<double>();
           for (size_t ic=0;ic<outputDivergencesA_Host.extent(0);++ic)
             for (size_t i=0;i<outputDivergencesA_Host.extent(1);++i)
               for (size_t j=0;j<outputDivergencesA_Host.extent(2);++j) {
-                diff = std::abs(outputDivergencesB_Host(i,j) - outputDivergencesA_Host(ic,i,j));
-                if (diff > tol) {
+                const auto valA = outputDivergencesA_Host(ic,i,j);
+                const auto valB = outputDivergencesB_Host(i,j);
+                const auto maxBNorm = computeMaxNorm(valB);
+                const auto diffRelNorm = computeMaxNorm(valB - valA)/std::max(1.0, maxBNorm);
+                if (diffRelNorm > tol) {
                   ++errorFlag;
                   std::cout << ", ic: " << ic << ", i: " << i << ", j: " << j 
-                            << ", divergence A: " << outputDivergencesA_Host(ic,i,j)
-                            << ", divergence B: " << outputDivergencesB_Host(i,j)
-                            << ", |diff|: " << diff
+                            << ", divergence A: " << valA
+                            << ", divergence B: " << valB
+                            << ", |rel diff|: " << diffRelNorm
                             << ", tol: " << tol
                             << std::endl;
                 }

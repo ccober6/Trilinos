@@ -37,7 +37,6 @@
 #include <MueLu_ExplicitInstantiation.hpp>
 #endif
 #include <MueLu_Level.hpp>
-#include <MueLu_MutuallyExclusiveTime.hpp>
 #include <MueLu_ParameterListInterpreter.hpp>
 #include <MueLu_Utilities.hpp>
 
@@ -67,10 +66,6 @@
 #include <KokkosBlas1_abs.hpp>
 #include <Tpetra_leftAndOrRightScaleCrsMatrix.hpp>
 #include <Tpetra_computeRowAndColumnOneNorms.hpp>
-
-#ifdef HAVE_MUELU_EPETRA
-#include "Xpetra_EpetraMultiVector.hpp"
-#endif
 
 #include <MueLu_CreateXpetraPreconditioner.hpp>
 
@@ -200,7 +195,8 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
   // size. For example, np=14 will give a 7-by-2 distribution.
   // If you don't want Galeri to do this, specify mx or my on the galeriList.
   std::string matrixType = galeriParameters.GetMatrixType();
-  int numDimensions      = 0;
+
+  int numDimensions = 0;
   Teuchos::Array<LO> lNodesPerDim(3);
 
   // Create map and coordinates
@@ -307,6 +303,7 @@ int main_(Teuchos::CommandLineProcessor& clp, Xpetra::UnderlyingLib& lib, int ar
     userParamList.set<double>("double cfl", 1.0);
     userParamList.set<double>("double deltaT", 1.0);
     userParamList.set("Mdiag", Mdiag);
+    userParamList.set<std::string>("string matrixType", matrixType);
 
     H = MueLu::CreateXpetraPreconditioner(A, paramList);
 

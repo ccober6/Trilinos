@@ -16,6 +16,9 @@
 
 // For computing DeviceConfig
 #include "Kokkos_Core.hpp"
+#ifndef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
+#include "Sacado_Fad_Kokkos_View_Support.hpp"
+#endif
 
 //
 // Tests various View< Sacado::MP::Vector<...>,...> operations work
@@ -44,14 +47,26 @@ checkVectorView(const ViewType& v,
   typedef ViewType view_type;
   typedef typename view_type::size_type size_type;
   typedef typename view_type::host_mirror_type host_view_type;
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   typedef typename host_view_type::array_type host_array_type;
-  typedef typename host_array_type::value_type scalar_type;
+#else
+  typedef Stokhos::scalar_view_t<host_view_type> host_array_type;
+#endif
+  // FIXME: workaround for CUDA <12.6 etc. issue with ranges
+  // I do not know why this typedef causes an issue in those compilers
+  // https://github.com/kokkos/kokkos/issues/8718
+  // typedef typename host_array_type::value_type scalar_type;
 
   // Copy to host
   host_view_type h_v = Kokkos::create_mirror_view(v);
   Kokkos::deep_copy(h_v, v);
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   host_array_type h_a = h_v;
+#else
+  host_array_type h_a = Stokhos::reinterpret_as_unmanaged_scalar_view(h_v);
+#endif
 
+  using scalar_type = std::remove_reference_t<decltype(h_a(0,0))>;
   size_type num_rows, num_cols;
 
   // For static, layout left, sacado dimension becomes first dimension
@@ -101,7 +116,7 @@ checkConstantVectorView(const ViewType& v,
   typedef ViewType view_type;
   typedef typename view_type::size_type size_type;
   typedef typename view_type::host_mirror_type host_view_type;
-  typedef typename host_view_type::array_type::value_type scalar_type;
+  typedef typename host_view_type::value_type scalar_type;
 
   // Copy to host
   host_view_type h_v = Kokkos::create_mirror_view(v);
@@ -160,13 +175,21 @@ TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL( Kokkos_View_MP, DeepCopy, Storage, Layout )
   typedef typename ApplyView<Vector*,Layout,Device>::type ViewType;
   typedef typename ViewType::size_type size_type;
   typedef typename ViewType::host_mirror_type host_view_type;
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   typedef typename host_view_type::array_type host_array_type;
+#else
+  typedef typename Stokhos::scalar_view_t<host_view_type> host_array_type;
+#endif
 
   const size_type num_rows = global_num_rows;
   const size_type num_cols = Storage::is_static ? Storage::static_size : global_num_cols;
   ViewType v("view", num_rows, num_cols);
   host_view_type h_v = Kokkos::create_mirror_view(v);
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   host_array_type h_a = h_v;
+#else
+  host_array_type h_a = Stokhos::reinterpret_as_unmanaged_scalar_view(h_v);
+#endif
 
   bool is_right = std::is_same< typename ViewType::array_layout,
                                          Kokkos::LayoutRight >::value;
@@ -360,13 +383,21 @@ TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL( Kokkos_View_MP, Unmanaged, Storage, Layout )
   typedef typename ApplyView<Vector*,Layout,Device>::type ViewType;
   typedef typename ViewType::size_type size_type;
   typedef typename ViewType::host_mirror_type host_view_type;
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   typedef typename host_view_type::array_type host_array_type;
+#else
+  typedef Stokhos::scalar_view_t<host_view_type> host_array_type;
+#endif
 
   const size_type num_rows = global_num_rows;
   const size_type num_cols = Storage::is_static ? Storage::static_size : global_num_cols;
   ViewType v("view", num_rows, num_cols);
   host_view_type h_v = Kokkos::create_mirror_view(v);
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   host_array_type h_a = h_v;
+#else
+  host_array_type h_a = Stokhos::reinterpret_as_unmanaged_scalar_view(h_v);
+#endif
 
   bool is_right = std::is_same< typename ViewType::array_layout,
                                          Kokkos::LayoutRight >::value;
@@ -385,11 +416,16 @@ TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL( Kokkos_View_MP, Unmanaged, Storage, Layout )
   Kokkos::deep_copy(v, h_v);
 
   // Create unmanaged view
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   ViewType v2(v.data(), num_rows, num_cols);
+#else
+  ViewType v2(v.data(), num_rows);
+#endif
 
   success = checkVectorView(v2, out);
 }
 
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
 TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL( Kokkos_View_MP, PartitionHost, Storage, Layout )
 {
   typedef typename Storage::execution_space Device;
@@ -420,6 +456,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL( Kokkos_View_MP, PartitionHost, Storage, Layou
 
   success = checkVectorView(v, out);
 }
+#endif
 
 /*
 // This test does not work because we can't call deep_copy on partitioned views
@@ -470,16 +507,23 @@ TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL( Kokkos_View_MP, Flatten, Storage, Layout )
   typedef Sacado::MP::Vector<Storage> Vector;
   typedef typename ApplyView<Vector*,Layout,Device>::type ViewType;
   typedef typename ViewType::size_type size_type;
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   typedef typename Kokkos::FlatArrayType<ViewType>::type flat_view_type;
-  typedef typename flat_view_type::host_mirror_type host_flat_view_type;
+#else
+  typedef typename Stokhos::scalar_flat_view_t<ViewType> flat_view_type;
+#endif
 
   const size_type num_rows = global_num_rows;
   const size_type num_cols = Storage::is_static ? Storage::static_size : global_num_cols;
   ViewType v("view", num_rows, num_cols);
 
   // Create flattened view
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
   flat_view_type flat_v = v;
-  host_flat_view_type h_flat_v = Kokkos::create_mirror_view(flat_v);
+#else
+  flat_view_type flat_v = Stokhos::reinterpret_as_unmanaged_scalar_flat_view(v);
+#endif
+  auto h_flat_v = Kokkos::create_mirror_view(flat_v);
   for (size_type i=0; i<num_rows; ++i)
     for (size_type j=0; j<num_cols; ++j)
       h_flat_v(i*num_cols+j) = generate_vector_coefficient<Scalar>(
@@ -603,6 +647,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL( Kokkos_View_MP, AssignData, Storage, Layout )
 
 // Removing the DynamicStorage tests since we don't use it for anything real,
 // and it doesn't necessarily work without UVM
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
 #define VIEW_MP_VECTOR_TESTS_ORDINAL_SCALAR_DEVICE( ORDINAL, SCALAR, DEVICE ) \
   typedef Stokhos::StaticFixedStorage<ORDINAL,SCALAR,global_num_cols,DEVICE> SFS;     \
   VIEW_MP_VECTOR_TESTS_STORAGE( SFS )                                   \
@@ -612,6 +657,11 @@ TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL( Kokkos_View_MP, AssignData, Storage, Layout )
     Kokkos_View_MP, PartitionHost, SFS, LayoutLeft )                    \
   TEUCHOS_UNIT_TEST_TEMPLATE_2_INSTANT(                                 \
     Kokkos_View_MP, PartitionHost, SFS, LayoutRight )
+#else
+#define VIEW_MP_VECTOR_TESTS_ORDINAL_SCALAR_DEVICE( ORDINAL, SCALAR, DEVICE ) \
+  typedef Stokhos::StaticFixedStorage<ORDINAL,SCALAR,global_num_cols,DEVICE> SFS;     \
+  VIEW_MP_VECTOR_TESTS_STORAGE( SFS )
+#endif
 
 #define VIEW_MP_VECTOR_TESTS_DEVICE( DEVICE )                           \
   VIEW_MP_VECTOR_TESTS_ORDINAL_SCALAR_DEVICE( int, double, DEVICE )

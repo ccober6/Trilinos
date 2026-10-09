@@ -11,7 +11,10 @@
 // The right-hand-side from the HB file is used instead of random vectors.
 // The initial guesses are all set to zero.
 //
-// NOTE: No preconditioner is used in this case.
+// NOTE: No preconditioner is used in this case.  If --flexible is
+// provided, this exercises the flexible GCRODR path with no right
+// preconditioner; Belos::LinearProblem::applyRightPrec() falls back to
+// the identity operation.
 //
 #include "BelosConfigDefs.hpp"
 #include "BelosLinearProblem.hpp"
@@ -24,9 +27,7 @@
 #endif
 
 // I/O for Harwell-Boeing files
-#ifdef HAVE_BELOS_TRIUTILS
-#include "Trilinos_Util_iohb.h"
-#endif
+#include "Tpetra_Util_iohb.h"
 
 #include "MyMultiVec.hpp"
 #include "MyBetterOperator.hpp"
@@ -57,8 +58,10 @@ int main(int argc, char *argv[]) {
 
   bool success = false;
   bool verbose = false;
+  bool debug = false;
   try {
     bool proc_verbose = false;
+    bool flexible = false;
     int frequency = -1;  // how often residuals are printed by solver
     int blocksize = 1;
     int numrhs = 1;
@@ -67,6 +70,10 @@ int main(int argc, char *argv[]) {
 
     CommandLineProcessor cmdp(false,true);
     cmdp.setOption("verbose","quiet",&verbose,"Print messages and results.");
+    cmdp.setOption("flexible","standard",&flexible,
+                   "Use flexible GCRODR.  No preconditioner is required; "
+                   "the right preconditioner application falls back to identity.");
+    cmdp.setOption("debug","no-debug",&debug,"Print debug messages.");
     cmdp.setOption("frequency",&frequency,"Solvers frequency for printing residuals (#iters).");
     cmdp.setOption("filename",&filename,"Filename for Harwell-Boeing test matrix.");
     cmdp.setOption("tol",&tol,"Relative residual tolerance used by GCRODR solver.");
@@ -82,20 +89,13 @@ int main(int argc, char *argv[]) {
     if (!verbose)
       frequency = -1;  // reset frequency if test is not verbose
 
-#ifndef HAVE_BELOS_TRIUTILS
-    std::cout << "This test requires Triutils. Please configure with --enable-triutils." << std::endl;
-    if (MyPID==0) {
-      std::cout << "End Result: TEST FAILED" << std::endl;
-    }
-    return EXIT_FAILURE;
-#endif
     // Get the data from the HB file
     int dim,dim2,nnz;
     MT *dvals;
     int *colptr,*rowind;
     ST *cvals;
     nnz = -1;
-    info = readHB_newmat_double(filename.c_str(),&dim,&dim2,&nnz,
+    info = Tpetra::HB::readHB_newmat_double(filename.c_str(),&dim,&dim2,&nnz,
         &colptr,&rowind,&dvals);
     if (info == 0 || nnz < 0) {
       if (MyPID==0) {
@@ -121,9 +121,23 @@ int main(int argc, char *argv[]) {
     ParameterList belosList;
     belosList.set( "Maximum Iterations", maxits );         // Maximum number of iterations allowed
     belosList.set( "Convergence Tolerance", tol );         // Relative convergence tolerance requested
-    belosList.set( "Verbosity", Belos::Errors + Belos::Warnings + Belos::StatusTestDetails + Belos::TimingDetails);
     belosList.set( "Num Blocks", numBlocks );
     belosList.set( "Num Recycled Blocks", numRecycledBlocks );
+    if (flexible) {
+      belosList.set( "Flexible GCRODR", true );
+    }
+    if (verbose) {
+      int verbosity = Belos::Errors + Belos::Warnings +
+          Belos::TimingDetails + Belos::StatusTestDetails;
+      if (debug)
+        verbosity += Belos::OrthoDetails + Belos::Debug;
+      belosList.set( "Verbosity", verbosity );
+      if (frequency > 0)
+        belosList.set( "Output Frequency", frequency );
+    }
+    else
+      belosList.set( "Verbosity", Belos::Errors + Belos::Warnings );
+
     // Construct the right-hand side and solution multivectors.
     // NOTE:  The right-hand side will be constructed such that the solution is
     // a vectors of one.
@@ -153,6 +167,8 @@ int main(int argc, char *argv[]) {
       std::cout << "Block size used by solver: " << blocksize << std::endl;
       std::cout << "Max number of GCRODR iterations: " << maxits << std::endl;
       std::cout << "Relative residual tolerance: " << tol << std::endl;
+      std::cout << "Flexible GCRODR: "
+                << (flexible ? "enabled" : "disabled") << std::endl;
       std::cout << std::endl;
     }
     // Perform solve
@@ -184,20 +200,25 @@ int main(int argc, char *argv[]) {
     solver.reset(Belos::Problem);
     ret = solver.solve();
     numIters3=solver.getNumIters();
+    if (proc_verbose) {
+      std::cout << "Iterations solve 1: " << numIters1 << std::endl;
+      std::cout << "Iterations solve 2: " << numIters2 << std::endl;
+      std::cout << "Iterations solve 3: " << numIters3 << std::endl;
+    }
     // Clean up.
     delete [] dvals;
     delete [] colptr;
     delete [] rowind;
     delete [] cvals;
     // Test for failures
-    if ( ret!=Belos::Converged || norm_failure || numIters1 < numIters2 || numIters2 < numIters3 ) {
-      success = false;
-      if (proc_verbose)
-        std::cout << "End Result: TEST FAILED" << std::endl;
-    } else {
+    if ( ret==Belos::Converged && !norm_failure && numIters1 >= numIters2 && numIters2 >= numIters3 ) {
       success = true;
       if (proc_verbose)
         std::cout << "End Result: TEST PASSED" << std::endl;
+    } else {
+      success = false;
+      if (proc_verbose)
+        std::cout << "End Result: TEST FAILED" << std::endl;
     }
   }
   TEUCHOS_STANDARD_CATCH_STATEMENTS(verbose, std::cerr, success);

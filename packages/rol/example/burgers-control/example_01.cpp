@@ -16,9 +16,7 @@
 #include "ROL_TypeB_LinMoreAlgorithm.hpp"
 #include "ROL_Bounds.hpp"
 
-#include "Teuchos_GlobalMPISession.hpp"
-#include "Teuchos_XMLParameterListHelpers.hpp"
-#include "Teuchos_LAPACK.hpp"
+#include "ROL_GlobalMPISession.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -36,9 +34,9 @@ int main(int argc, char *argv[]) {
   typedef ROL::Vector<RealT>    V;
   typedef ROL::StdVector<RealT> SV;
 
-  typedef typename vector::size_type uint;
+  typedef typename vector::size_type luint;
 
-  Teuchos::GlobalMPISession mpiSession(&argc, &argv);
+  ROL::GlobalMPISession mpiSession(&argc, &argv);
 
   // This little trick lets us print to std::cout only if a (dummy) command-line argument is provided.
   int iprint     = argc - 1;
@@ -55,13 +53,13 @@ int main(int argc, char *argv[]) {
 
   try {
     // Initialize objective function.
-    uint nx     = 1028;  // Set spatial discretization.
+    luint nx     = 1028;  // Set spatial discretization.
     RealT alpha = 1.e-3; // Set penalty parameter.
     Objective_BurgersControl<RealT> obj(alpha,nx);
     // Initialize iteration vectors.
     ROL::Ptr<vector> x_ptr = ROL::makePtr<vector>(nx+2, 1.0);
     ROL::Ptr<vector> y_ptr = ROL::makePtr<vector>(nx+2, 0.0);
-    for (uint i=0; i<nx+2; i++) {
+    for (luint i=0; i<nx+2; i++) {
       (*x_ptr)[i] = (RealT)rand()/(RealT)RAND_MAX;
       (*y_ptr)[i] = (RealT)rand()/(RealT)RAND_MAX;
     }

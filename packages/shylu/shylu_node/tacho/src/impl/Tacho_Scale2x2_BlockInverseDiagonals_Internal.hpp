@@ -37,7 +37,7 @@ template <> struct Scale2x2_BlockInverseDiagonals<Side::Left, Algo::Internal> {
               const value_type det = a00 * a11 - a10 * a01;
               const value_type x0 = A(i - 1, 0), x1 = A(i, 0);
 
-              A(i - 1, 0) = (a11 * x0 - a10 * x1) / det;
+              A(i - 1, 0) = (a11 * x0 - a01 * x1) / det;
               A(i, 0) = (-a10 * x0 + a00 * x1) / det;
             } else {
               const value_type a00 = D(i, 0);
@@ -56,7 +56,7 @@ template <> struct Scale2x2_BlockInverseDiagonals<Side::Left, Algo::Internal> {
               for (ordinal_type j = 0; j < n; ++j) {
                 const value_type x0 = A(i - 1, j), x1 = A(i, j);
 
-                A(i - 1, j) = (a11 * x0 - a10 * x1) / det;
+                A(i - 1, j) = (a11 * x0 - a01 * x1) / det;
                 A(i, j) = (-a10 * x0 + a00 * x1) / det;
               }
             } else {
@@ -111,7 +111,7 @@ template <> struct Scale2x2_BlockInverseDiagonals<Side::Left, Algo::Internal> {
               const value_type det = a00 * a11 - a10 * a01;
               Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n), [&](const ordinal_type &j) {
                 const value_type x0 = A(i - 1, j), x1 = A(i, j);
-                A(i - 1, j) = (a11 * x0 - a10 * x1) / det;
+                A(i - 1, j) = (a11 * x0 - a01 * x1) / det;
                 A(i, j) = (-a10 * x0 + a00 * x1) / det;
               });
             } else {
@@ -127,6 +127,82 @@ template <> struct Scale2x2_BlockInverseDiagonals<Side::Left, Algo::Internal> {
     KOKKOS_IF_ON_HOST((invoke(P, D, A);))
     return 0;
   }
+};
+
+// diagonal scaling
+// from left
+template <> struct Scale_BlockInverseDiagonals<Side::Left, Algo::Internal> {
+  template <typename ViewTypeD, typename ViewTypeA>
+  KOKKOS_INLINE_FUNCTION static int invoke(const ViewTypeD &D, const ViewTypeA &A) {
+    const ordinal_type m = A.extent(0);
+    const ordinal_type n = A.extent(1);
+    if (m == ordinal_type(D.extent(0))) {
+      // apply from left
+      for (ordinal_type i=0; i<m; i++) {
+        for (ordinal_type j=0; j<n; j++) {
+          A(i, j) /= D(i, i);
+        }
+      }
+    } else {
+      return -1;
+    }
+    return 0;
+  }
+
+  template <typename MemberType, typename ViewTypeD, typename ViewTypeA>
+  KOKKOS_INLINE_FUNCTION static int invoke(MemberType &member, const ViewTypeD &D, const ViewTypeA &A) {
+    KOKKOS_IF_ON_DEVICE((
+      const ordinal_type m = A.extent(0);
+      const ordinal_type n = A.extent(1);
+      Kokkos::parallel_for(Kokkos::TeamVectorRange(member, m), [&](const ordinal_type &i) {
+        for (ordinal_type j=0; j<n; j++) {
+          A(i, j) /= D(i, i);
+        }
+      });
+    ))
+    KOKKOS_IF_ON_HOST((
+      invoke(D, A);
+    ))
+    return 0;
+ }
+};
+
+// from right
+template <> struct Scale_BlockInverseDiagonals<Side::Right, Algo::Internal> {
+  template <typename ViewTypeD, typename ViewTypeA>
+  KOKKOS_INLINE_FUNCTION static int invoke(const ViewTypeD &D, const ViewTypeA &A) {
+    ordinal_type m = A.extent(0);
+    ordinal_type n = A.extent(1);
+    if (n == ordinal_type(D.extent(0))) {
+      // apply from right
+      for (ordinal_type j=0; j<n; j++) {
+        for (ordinal_type i=0; i<m; i++) {
+          A(i, j) /= D(j, j);
+        }
+      }
+    } else {
+      return -1;
+    }
+    return 0;
+  }
+
+  template <typename MemberType, typename ViewTypeD, typename ViewTypeA>
+  KOKKOS_INLINE_FUNCTION static int invoke(MemberType &member, const ViewTypeD &D, const ViewTypeA &A) {
+    KOKKOS_IF_ON_DEVICE((
+      ordinal_type m = A.extent(0);
+      ordinal_type n = A.extent(1);
+      // apply from right
+      Kokkos::parallel_for(Kokkos::TeamVectorRange(member, m), [&](const ordinal_type &i) {
+        for (ordinal_type j=0; j<n; j++) {
+          A(i, j) /= D(j, j);
+        }
+      });
+    ))
+    KOKKOS_IF_ON_HOST((
+      invoke(D, A);
+    ))
+    return 0;
+ }
 };
 
 } // namespace Tacho

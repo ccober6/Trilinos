@@ -15,13 +15,16 @@
 /// \author Mark Hoemmen
 
 #include "BelosTpetraAdapter.hpp"
+#include "KokkosKernels_ArithTraits.hpp"
 #include "MatrixMarket_Tpetra.hpp"
 #include "Teuchos_ArrayView.hpp"
 #include "Teuchos_FancyOStream.hpp"
+#include "Teuchos_SerialDenseMatrix.hpp"
 #include "Teuchos_oblackholestream.hpp"
 #include "Teuchos_ParameterListAcceptorDefaultBase.hpp"
 #include "Teuchos_TypeNameTraits.hpp"
-#include "Trilinos_Util_iohb.h"
+#include "Tpetra_Util_iohb.h"
+#include <type_traits>
 
 namespace Belos {
   namespace Tpetra {
@@ -112,12 +115,12 @@ namespace Belos {
         int *colptr,*rowind;
         nnz = -1;
         if (MyPID == 0) {
-          info = readHB_newmat_double(filename.c_str(),&dim,&dim2,&nnz,&colptr,&rowind,&dvals);
+          info = ::Tpetra::HB::readHB_newmat_double(filename.c_str(),&dim,&dim2,&nnz,&colptr,&rowind,&dvals);
           // find maximum NNZ over all rows
           std::vector<int> rnnz(dim,0);
           for (int *ri=rowind; ri<rowind+nnz; ++ri) {
             ++rnnz[*ri-1];
-          }  
+          }
           rnnzmax = *std::max_element(rnnz.begin(),rnnz.end());
         }
         else {
@@ -147,15 +150,15 @@ namespace Belos {
           const int *rptr = rowind;
           for (int c=0; c<dim; ++c) {
             for (int colnnz=0; colnnz < colptr[c+1]-colptr[c]; ++colnnz) {
-              A->insertGlobalValues (static_cast<global_ordinal_type> (*rptr++ - 1), 
-                                     Teuchos::tuple<global_ordinal_type> (c), 
+              A->insertGlobalValues (static_cast<global_ordinal_type> (*rptr++ - 1),
+                                     Teuchos::tuple<global_ordinal_type> (c),
                                      Teuchos::tuple (sptr[0]));
               sptr++;
             }
           }
 
           // Clean up.
-          free( svals );
+          delete[] svals;
           free( dvals );
           free( colptr );
           free( rowind );

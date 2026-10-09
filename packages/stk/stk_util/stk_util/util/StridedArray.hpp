@@ -72,7 +72,6 @@ public:
   {
   }
 
-  KOKKOS_INLINE_FUNCTION
   StridedArray(PairIter<T*> data,
                [[maybe_unused]] int stride_in=defaultStride)
   : dataPointer(data.begin()),
@@ -102,6 +101,12 @@ public:
   unsigned size() const
   { 
     return length;
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  bool empty() const
+  {
+    return size() == 0;
   }
 
   KOKKOS_INLINE_FUNCTION

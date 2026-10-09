@@ -1,24 +1,11 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSBLAS3_GEMM_SPEC_HPP_
 #define KOKKOSBLAS3_GEMM_SPEC_HPP_
 
 #include "KokkosKernels_config.h"
 #include "Kokkos_Core.hpp"
-#include "Kokkos_InnerProductSpaceTraits.hpp"
+#include "KokkosKernels_InnerProductSpaceTraits.hpp"
 
 #if !defined(KOKKOSKERNELS_ETI_ONLY) || KOKKOSKERNELS_IMPL_COMPILE_LIBRARY
 #include "KokkosBlas3_gemm_impl.hpp"
@@ -162,7 +149,7 @@ struct GEMM {
       if (std::is_same<execution_space, Kokkos::ROCm>::value) team_size = blockA0;
 #endif
 #if defined(KOKKOS_ENABLE_SYCL)
-      if (std::is_same<execution_space, Kokkos::Experimental::SYCL>::value) team_size = blockA0;
+      if (std::is_same<execution_space, Kokkos::SYCL>::value) team_size = blockA0;
 #endif
 
       // Call the correct kernel

@@ -10,21 +10,26 @@
 #ifndef ROL_OED_DOUBLE_WELL_PENALTY_DEF_HPP
 #define ROL_OED_DOUBLE_WELL_PENALTY_DEF_HPP
 
+#include "ROL_OED_DesignVector.hpp"
+
 namespace ROL {
 namespace OED {
 
 template<typename Real>
-DoubleWellPenalty<Real>::DoubleWellPenalty()
-  : ProfiledClass<Real,std::string>("OED::DoubleWellPenalty") {}
+DoubleWellPenalty<Real>::DoubleWellPenalty(unsigned type)
+  : ProfiledClass<Real,std::string>("OED::DoubleWellPenalty"),
+    type_(type), bdalg_(false) {}
 
 template<typename Real>
 std::vector<Real>& DoubleWellPenalty<Real>::getData(Vector<Real> &x) const {
-  return *dynamic_cast<StdVector<Real>&>(x).getVector();
+  if (bdalg_) return *(dynamicPtrCast<StdVector<Real>>(dynamic_cast<DesignVector<Real>&>(x).getVector())->getVector());
+  else        return *dynamic_cast<StdVector<Real>&>(x).getVector();
 }
 
 template<typename Real>
 const std::vector<Real>& DoubleWellPenalty<Real>::getConstData(const Vector<Real> &x) const {
-  return *dynamic_cast<const StdVector<Real>&>(x).getVector();
+  if (bdalg_) return *(dynamicPtrCast<const StdVector<Real>>(dynamic_cast<const DesignVector<Real>&>(x).getVector())->getVector());
+  else        return *dynamic_cast<const StdVector<Real>&>(x).getVector();
 }
 
 template<typename Real>
@@ -38,10 +43,11 @@ Real DoubleWellPenalty<Real>::value( const Vector<Real> &x, Real &tol ) {
   const Real one(1);
   const std::vector<Real> &xdata = getConstData(x);
   Real mval(0), gval(0); 
-  for (const auto &xi : xdata) mval += xi*xi*(one-xi)*(one-xi);
+  for (const auto &xi : xdata) mval += (type_==1u) ? xi*(one-xi) : xi*xi*(one-xi)*(one-xi);
   sumAll(&mval,&gval,1,x);
   stopTimer("value");
   return gval;
+  //return gval;
 }
 
 template<typename Real>
@@ -53,7 +59,7 @@ void DoubleWellPenalty<Real>::gradient( Vector<Real> &g, const Vector<Real> &x, 
   const std::vector<Real> &xdata = getConstData(x);
   for (int i = 0; i < static_cast<int>(gdata.size()); ++i) {
     xi       = xdata[i];
-    gdata[i] = two*xi*(two*xi*xi-three*xi+one);
+    gdata[i] = (type_==1u) ? one-two*xi : two*xi*(two*xi*xi-three*xi+one);
   }
   stopTimer("gradient");
 }
@@ -69,7 +75,7 @@ void DoubleWellPenalty<Real>::hessVec( Vector<Real> &hv, const Vector<Real> &v, 
   for (int i = 0; i < static_cast<int>(hvdata.size()); ++i) {
     xi        = xdata[i];
     vi        = vdata[i];
-    hvdata[i] = (three*(two*xi-one)*(two*xi-one)-one)*vi;
+    hvdata[i] = (type_==1u) ? -two*vi : (three*(two*xi-one)*(two*xi-one)-one)*vi;
   }
   stopTimer("hessVec");
 }

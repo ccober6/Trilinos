@@ -54,12 +54,10 @@ namespace Intrepid2 {
       }
 
       typedef typename Kokkos::DynRankView<typename InputViewType::value_type, typename WorkViewType::memory_space> ViewType;
-      auto vcprop = Kokkos::common_view_alloc_prop(input);
       auto ptr = work.data();
 
-      switch (OpType) {
-      case OPERATOR_VALUE: {
-        const ViewType phis(Kokkos::view_wrap(ptr, vcprop), card, npts), dummyView;
+      if constexpr (OpType == OPERATOR_VALUE) {
+        const ViewType phis = createMatchingUnmanagedView<ViewType>(input, ptr, card, npts), dummyView;
 
         Impl::Basis_HGRAD_TRI_Cn_FEM_ORTH::
           Serial<OpType>::getValues(phis, input, dummyView, order);
@@ -67,33 +65,30 @@ namespace Intrepid2 {
         for (ordinal_type i=0;i<card;++i)
           for (ordinal_type j=0;j<npts;++j)
             for (ordinal_type d=0;d<spaceDim;++d) {
-              output.access(i,j,d) = 0.0;
+              output(i,j,d) = 0.0;
               for (ordinal_type k=0;k<cardPn;++k)
-                output.access(i,j,d) += coeffs(k+d*cardPn,i) * phis(k,j);
+                output(i,j,d) += coeffs(k+d*cardPn,i) * phis(k,j);
             }
-        break;
       }
-      case OPERATOR_CURL: {
-        const ViewType phis(Kokkos::view_wrap(ptr, vcprop), card, npts, spaceDim);
+      else if constexpr (OpType == OPERATOR_CURL) {
+        const ViewType phis = createMatchingUnmanagedView<ViewType>(input, ptr, card, npts, spaceDim);
         ptr += card*npts*spaceDim*get_dimension_scalar(input);
-        const ViewType workView(Kokkos::view_wrap(ptr, vcprop), card, npts, spaceDim+1);
+        const ViewType workView = createMatchingUnmanagedView<ViewType>(input, ptr, card, npts, spaceDim+1);
 
         Impl::Basis_HGRAD_TRI_Cn_FEM_ORTH::
           Serial<OPERATOR_GRAD>::getValues(phis, input, workView, order);
 
         for (ordinal_type i=0;i<card;++i)
           for (ordinal_type j=0;j<npts;++j) {
-            output.access(i,j) = 0.0;
+            output(i,j) = 0.0;
             for (ordinal_type k=0; k<cardPn; ++k)
-              output.access(i,j) += - coeffs(k,i)*phis(k,j,1)              // - dy of x component
+              output(i,j) += - coeffs(k,i)*phis(k,j,1)              // - dy of x component
                 + coeffs(k+cardPn,i)*phis(k,j,0);      // dx of y component
           }
-        break;
       }
-      default: {
+      else {
         INTREPID2_TEST_FOR_ABORT( true,
                                   ">>> ERROR (Basis_HCURL_TRI_In_FEM): Operator type not implemented");
-      }
       }
     }
 
@@ -119,25 +114,22 @@ namespace Intrepid2 {
       const auto loopSize = loopSizeTmp1 + loopSizeTmp2;
       Kokkos::RangePolicy<ExecSpaceType,Kokkos::Schedule<Kokkos::Static> > policy(space, 0, loopSize);
 
-      typedef typename inputPointViewType::value_type inputPointType;
+      //typedef typename inputPointViewType::value_type inputPointType;
 
       const ordinal_type cardinality = outputValues.extent(0);
       const ordinal_type spaceDim = 2;
 
-      auto vcprop = Kokkos::common_view_alloc_prop(inputPoints);
-      typedef typename Kokkos::DynRankView< inputPointType, typename inputPointViewType::memory_space> workViewType;
-
       switch (operatorType) {
       case OPERATOR_VALUE: {
-        workViewType  work(Kokkos::view_alloc(space, "Basis_HCURL_TRI_In_FEM::getValues::work", vcprop), cardinality, inputPoints.extent(0));
-        typedef Functor<outputValueViewType,inputPointViewType,vinvViewType, workViewType,
+        auto work = createMatchingDynRankView(inputPoints, "Basis_HCURL_TRI_In_FEM::getValues::work", cardinality, inputPoints.extent(0));
+        typedef Functor<outputValueViewType,inputPointViewType,vinvViewType, decltype(work),
           OPERATOR_VALUE,numPtsPerEval> FunctorType;
         Kokkos::parallel_for( policy, FunctorType(outputValues, inputPoints, coeffs, work) );
         break;
       }
       case OPERATOR_CURL: {
-        workViewType  work(Kokkos::view_alloc(space, "Basis_HCURL_TRI_In_FEM::getValues::work", vcprop), cardinality*(2*spaceDim+1), inputPoints.extent(0));
-        typedef Functor<outputValueViewType,inputPointViewType,vinvViewType, workViewType,
+        auto work = createMatchingDynRankView(inputPoints, "Basis_HCURL_TRI_In_FEM::getValues::work", cardinality*(2*spaceDim+1), inputPoints.extent(0));
+        typedef Functor<outputValueViewType,inputPointViewType,vinvViewType, decltype(work),
           OPERATOR_CURL,numPtsPerEval> FunctorType;
         Kokkos::parallel_for( policy, FunctorType(outputValues, inputPoints, coeffs, work) );
         break;
@@ -454,14 +446,14 @@ namespace Intrepid2 {
 
   template<typename DT, typename OT, typename PT>
   void 
-  Basis_HCURL_TRI_In_FEM<DT,OT,PT>::getScratchSpaceSize(       
-                                    ordinal_type& perTeamSpaceSize,
+  Basis_HCURL_TRI_In_FEM<DT,OT,PT>::getScratchSpaceSize(        
                                     ordinal_type& perThreadSpaceSize,
                               const PointViewType inputPoints,
                               const EOperator operatorType) const {
-    perTeamSpaceSize = 0;
+    using ScalarType = typename ScalarTraits<typename PointViewType::value_type>::scalar_type;
+    using ScratchViewType = Kokkos::DynRankView<ScalarType, typename DT::execution_space::scratch_memory_space, Kokkos::MemoryTraits<Kokkos::Unmanaged> >;
     ordinal_type scalarWorkViewExtent = (operatorType == OPERATOR_VALUE) ? this->basisCardinality_ : 5*this->basisCardinality_;
-    perThreadSpaceSize = scalarWorkViewExtent*get_dimension_scalar(inputPoints)*sizeof(typename BasisBase::scalarType);
+    perThreadSpaceSize = ScratchViewType::shmem_size(scalarWorkViewExtent*get_dimension_scalar(inputPoints));
   }
 
   template<typename DT, typename OT, typename PT>
@@ -472,7 +464,7 @@ namespace Intrepid2 {
       const PointViewType  inputPoints,
       const EOperator operatorType,
       const typename Kokkos::TeamPolicy<typename DT::execution_space>::member_type& team_member,
-      const typename DT::execution_space::scratch_memory_space & scratchStorage, 
+      const int threadScratchLevel, 
       const ordinal_type subcellDim,
       const ordinal_type subcellOrdinal) const {
 
@@ -484,15 +476,15 @@ namespace Intrepid2 {
       using WorkViewType = Kokkos::DynRankView< ScalarType,typename DT::execution_space::scratch_memory_space,Kokkos::MemoryTraits<Kokkos::Unmanaged> >;
       ordinal_type scalarSizePerPoint = (operatorType == OPERATOR_VALUE) ? this->basisCardinality_ : 5*this->basisCardinality_;
       ordinal_type sizePerPoint = scalarSizePerPoint*get_dimension_scalar(inputPoints);
-      WorkViewType workView(scratchStorage, sizePerPoint*team_member.team_size());
+      
+      WorkViewType  work(team_member.thread_scratch(threadScratchLevel), sizePerPoint);
       using range_type = Kokkos::pair<ordinal_type,ordinal_type>;
-
+      
       switch(operatorType) {
         case OPERATOR_VALUE:
           Kokkos::parallel_for (Kokkos::TeamThreadRange (team_member, numPoints), [=, &coeffs_ = this->coeffs_] (ordinal_type& pt) {
             auto       output = Kokkos::subview( outputValues, Kokkos::ALL(), range_type  (pt,pt+1), Kokkos::ALL() );
             const auto input  = Kokkos::subview( inputPoints,                 range_type(pt, pt+1), Kokkos::ALL() );
-            WorkViewType  work(workView.data() + sizePerPoint*team_member.team_rank(), sizePerPoint);
             Impl::Basis_HCURL_TRI_In_FEM::Serial<OPERATOR_VALUE>::getValues( output, input, work, coeffs_ );
           });
           break;
@@ -500,7 +492,6 @@ namespace Intrepid2 {
           Kokkos::parallel_for (Kokkos::TeamThreadRange (team_member, numPoints), [=, &coeffs_ = this->coeffs_] (ordinal_type& pt) {
             auto       output = Kokkos::subview( outputValues, Kokkos::ALL(), range_type(pt,pt+1), Kokkos::ALL() );
             const auto input  = Kokkos::subview( inputPoints,                 range_type(pt,pt+1), Kokkos::ALL() );
-            WorkViewType  work(workView.data() + sizePerPoint*team_member.team_rank(), sizePerPoint);
             Impl::Basis_HCURL_TRI_In_FEM::Serial<OPERATOR_CURL>::getValues( output, input, work, coeffs_ );
           });
           break;

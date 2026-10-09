@@ -364,7 +364,10 @@ protected:
                  const OrdinalType numCols)
   {
     const size_t size = size_t(numRows) * size_t(numCols);
-    return new ScalarType[size];
+    if (size > 0)
+      return new ScalarType[size];
+    else
+      return nullptr;
   }
 
   OrdinalType numRows_ = 0;
@@ -415,7 +418,9 @@ SerialDenseMatrix<OrdinalType, ScalarType>::SerialDenseMatrix(
 
 template<typename OrdinalType, typename ScalarType>
 SerialDenseMatrix<OrdinalType, ScalarType>::SerialDenseMatrix(const SerialDenseMatrix<OrdinalType, ScalarType> &Source, ETransp trans)
-  : valuesCopied_(true)
+  : CompObject(Source),
+    BLAS<OrdinalType, ScalarType>(Source),
+    valuesCopied_(true)
 {
   if ( trans == Teuchos::NO_TRANS )
   {

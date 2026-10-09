@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSBATCHED_VECTOR_HPP
 #define KOKKOSBATCHED_VECTOR_HPP
 
@@ -212,6 +199,10 @@ struct MagnitudeScalarType<double> {
   typedef double type;
 };
 template <>
+struct MagnitudeScalarType<long double> {
+  typedef long double type;
+};
+template <>
 struct MagnitudeScalarType<Kokkos::complex<float>> {
   typedef float type;
 };
@@ -229,6 +220,10 @@ struct MagnitudeScalarType<Vector<SIMD<double>, l>> {
   typedef double type;
 };
 template <int l>
+struct MagnitudeScalarType<Vector<SIMD<long double>, l>> {
+  typedef long double type;
+};
+template <int l>
 struct MagnitudeScalarType<Vector<SIMD<Kokkos::complex<float>>, l>> {
   typedef float type;
 };
@@ -242,7 +237,7 @@ struct MagnitudeScalarType<Vector<SIMD<Kokkos::complex<double>>, l>> {
 #include "KokkosBatched_Vector_SIMD.hpp"
 
 // arith traits overload for vector types
-namespace Kokkos {
+namespace KokkosKernels {
 
 // do not use Vector alone as other can use the name.
 
@@ -318,6 +313,6 @@ class ArithTraits<KokkosBatched::Vector<KokkosBatched::SIMD<Kokkos::complex<T>>,
   }
 };
 
-}  // namespace Kokkos
+}  // namespace KokkosKernels
 
 #endif

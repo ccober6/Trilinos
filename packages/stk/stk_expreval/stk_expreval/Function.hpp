@@ -55,6 +55,7 @@
 #include <cmath>
 #include <ctime>
 #include <iostream>
+#include <limits>
 
 namespace stk {
 namespace expreval {
@@ -167,7 +168,7 @@ double real_rand()
 /// Sets x as the random number seed. Interface to the srand function provided by the
 /// ANSI C math library.
 KOKKOS_INLINE_FUNCTION
-double real_srand(double x)
+double real_srand([[maybe_unused]]double x)
 {
   KOKKOS_IF_ON_HOST((
     std::srand(static_cast<int>(x));
@@ -201,7 +202,7 @@ extern int sRandomRangeLowValue;
 
 /// Sets x as the "seed" for the pseudo-random number generator.
 KOKKOS_INLINE_FUNCTION
-void random_seed(double x)
+void random_seed([[maybe_unused]]double x)
 {
   KOKKOS_IF_ON_HOST((
     int y = std::hash<double>{}(x);
@@ -242,7 +243,7 @@ double random0()
 
 /// Non-platform specific (pseudo) random number generator.
 KOKKOS_INLINE_FUNCTION
-double random1(double seed)
+double random1([[maybe_unused]]double seed)
 {
   KOKKOS_IF_ON_HOST((
     random_seed(seed);
@@ -270,6 +271,8 @@ double time_space_random(double t, double x, double y, double z)
   return seeded_pseudo_random(seed, low, high);
 }
 
+inline constexpr double minDouble = std::numeric_limits<double>::min();
+
 KOKKOS_INLINE_FUNCTION
 double time_space_normal(double t, double x, double y, double z, double mu, double sigma, double minR, double maxR)
 {
@@ -282,12 +285,10 @@ double time_space_normal(double t, double x, double y, double z, double mu, doub
   int low = 0;
   int high = 0;
 
-  static const double epsilon = DBL_MIN;
-
   // Box-Muller transformation from two uniform random numbers
   // to a gaussian distribution
-  double u1 = std::fmax(epsilon, seeded_pseudo_random(seed, low, high));
-  double u2 = std::fmax(epsilon, seeded_pseudo_random(seed, low, high));
+  double u1 = std::fmax(minDouble, seeded_pseudo_random(seed, low, high));
+  double u2 = std::fmax(minDouble, seeded_pseudo_random(seed, low, high));
 
   double z0 = std::sqrt(-2.0 * std::log(u1)) * std::cos(two_pi() * u2);
 

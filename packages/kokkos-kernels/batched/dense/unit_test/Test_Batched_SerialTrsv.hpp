@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 /// \author Kyungjoo Kim (kyukim@sandia.gov)
 /// \author Yuuichi Asahi (yuuichi.asahi@cea.fr)
 
@@ -110,7 +97,7 @@ struct Functor_BatchedSerialGemv {
 template <typename DeviceType, typename ScalarType, typename ValueType, typename LayoutType, typename ParamTagType,
           typename AlgoTagType>
 void impl_test_batched_trsv_blocking(const int N, const int BlkSize) {
-  using ats        = Kokkos::ArithTraits<ValueType>;
+  using ats        = KokkosKernels::ArithTraits<ValueType>;
   using View2DType = Kokkos::View<ValueType **, LayoutType, DeviceType>;
   using View3DType = Kokkos::View<ValueType ***, LayoutType, DeviceType>;
 
@@ -195,7 +182,7 @@ void impl_test_batched_trsv_blocking(const int N, const int BlkSize) {
 template <typename DeviceType, typename ScalarType, typename ValueType, typename LayoutType, typename ParamTagType,
           typename AlgoTagType>
 void impl_test_batched_trsv_analytical(const std::size_t N) {
-  using ats      = typename Kokkos::ArithTraits<ValueType>;
+  using ats      = typename KokkosKernels::ArithTraits<ValueType>;
   using RealType = typename ats::mag_type;
 
   using View2DType        = Kokkos::View<ValueType **, LayoutType, DeviceType>;
@@ -304,7 +291,7 @@ void impl_test_batched_trsv_analytical(const std::size_t N) {
 template <typename DeviceType, typename ScalarType, typename ValueType, typename LayoutType, typename ParamTagType,
           typename AlgoTagType>
 void impl_test_batched_trsv(const std::size_t N, const std::size_t BlkSize) {
-  using ats      = typename Kokkos::ArithTraits<ValueType>;
+  using ats      = typename KokkosKernels::ArithTraits<ValueType>;
   using RealType = typename ats::mag_type;
 
   using View2DType        = Kokkos::View<ValueType **, LayoutType, DeviceType>;
@@ -414,19 +401,12 @@ int test_batched_trsv() {
                                                   AlgoTagType>(1);
     Test::Trsv::impl_test_batched_trsv_analytical<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
                                                   AlgoTagType>(2);
-
-    // FIXME: ConjTranspose with blocking is not implemented yet
-    if constexpr (!std::is_same_v<typename ParamTagType::trans, Trans::ConjTranspose>) {
-      Test::Trsv::impl_test_batched_trsv_blocking<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
-                                                  AlgoTagType>(0, 10);
-    }
+    Test::Trsv::impl_test_batched_trsv_blocking<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
+                                                AlgoTagType>(0, 10);
 
     for (int i = 0; i < 10; ++i) {
-      // FIXME: ConjTranspose with blocking is not implemented yet
-      if constexpr (!std::is_same_v<typename ParamTagType::trans, Trans::ConjTranspose>) {
-        Test::Trsv::impl_test_batched_trsv_blocking<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
-                                                    AlgoTagType>(1, i);
-      }
+      Test::Trsv::impl_test_batched_trsv_blocking<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
+                                                  AlgoTagType>(1, i);
       Test::Trsv::impl_test_batched_trsv<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType, AlgoTagType>(1,
                                                                                                                    i);
       Test::Trsv::impl_test_batched_trsv<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType, AlgoTagType>(2,
@@ -441,19 +421,12 @@ int test_batched_trsv() {
                                                   AlgoTagType>(1);
     Test::Trsv::impl_test_batched_trsv_analytical<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
                                                   AlgoTagType>(2);
-
-    // FIXME: ConjTranspose with blocking is not implemented yet
-    if constexpr (!std::is_same_v<typename ParamTagType::trans, Trans::ConjTranspose>) {
-      Test::Trsv::impl_test_batched_trsv_blocking<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
-                                                  AlgoTagType>(0, 10);
-    }
+    Test::Trsv::impl_test_batched_trsv_blocking<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
+                                                AlgoTagType>(0, 10);
 
     for (int i = 0; i < 10; ++i) {
-      // FIXME: ConjTranspose with blocking is not implemented yet
-      if constexpr (!std::is_same_v<typename ParamTagType::trans, Trans::ConjTranspose>) {
-        Test::Trsv::impl_test_batched_trsv_blocking<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
-                                                    AlgoTagType>(1, i);
-      }
+      Test::Trsv::impl_test_batched_trsv_blocking<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType,
+                                                  AlgoTagType>(1, i);
       Test::Trsv::impl_test_batched_trsv<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType, AlgoTagType>(1,
                                                                                                                    i);
       Test::Trsv::impl_test_batched_trsv<DeviceType, ScalarType, ValueType, LayoutType, ParamTagType, AlgoTagType>(2,

@@ -29,15 +29,20 @@ TRIBITS_COPY_FILES_TO_BINARY_DIR(main_driver_files
   SOURCE_FILES
     energy-ss.xml
     energy-ss-tp.xml
+    energy-ss-tp-fe-assembly.xml
     energy-ss-point-calc.xml
     energy-ss-tp-delay-prec.xml
     energy-ss-loca-eigenvalue.xml
     energy-ss-blocked.xml
     energy-transient-tempus-blocked.xml
-    energy-transient-tempus-opt-blocked.xml
+    energy-transient-tempus-opt-blocked-fd-deriv.xml
+    energy-transient-tempus-opt-blocked-analytic-deriv.xml
+    energy-transient-tempus-opt-nonblocked-analytic-deriv.xml
+    energy-transient-tempus-opt-blocked-probe-analytic-deriv.xml
     rol_params.xml
     energy-neumann.xml
     energy-ss-blocked-tp.xml
+    energy-ss-blocked-tp-fe-assembly.xml
     periodic_wedge.xml
     periodic_wedge.pam
     energy-periodic-32bit-limit.xml
@@ -75,6 +80,29 @@ TRIBITS_ADD_ADVANCED_TEST(
     PASS_REGULAR_EXPRESSION "panzer::MainDriver run completed."
   )
 
+# Assembling the Jacobian into a Tpetra::FECrsMatrix.  Tested against
+# analytic solution and the classic assembly path.
+TRIBITS_ADD_ADVANCED_TEST(
+  main_driver_energy-ss-tp-FEAssembly
+  TEST_0 EXEC main_driver
+    ARGS  --i=energy-ss-tp-fe-assembly.xml --exodus-io-num-procs=1 --assembly=fe
+    PASS_REGULAR_EXPRESSION "panzer::MainDriver run completed."
+    NUM_MPI_PROCS 2
+    OUTPUT_FILE main_driver-FEAssembly-fe.out
+  TEST_1 EXEC main_driver
+    ARGS  --i=energy-ss-tp-fe-assembly.xml --exodus-io-num-procs=1 --assembly=classic
+    PASS_REGULAR_EXPRESSION "panzer::MainDriver run completed."
+    NUM_MPI_PROCS 2
+    OUTPUT_FILE main_driver-FEAssembly-classic.out
+  TEST_2 CMND python3
+    ARGS ${PACKAGE_SOURCE_DIR}/example/utilities/compareAssemblyModes.py
+         main_driver-FEAssembly-fe.out
+         main_driver-FEAssembly-classic.out
+         "Temperature Integral=0.5"
+    PASS_REGULAR_EXPRESSION "Test Passed"
+  COMM mpi
+  )
+
 TRIBITS_ADD_ADVANCED_TEST(
   main_driver_energy-ss-point-calc
   TEST_0 EXEC main_driver
@@ -102,6 +130,33 @@ TRIBITS_ADD_ADVANCED_TEST(
   TEST_0 EXEC main_driver
     ARGS  --i=energy-ss-blocked-tp.xml
     PASS_REGULAR_EXPRESSION "panzer::MainDriver run completed."
+  )
+
+# Blocked counterpart of main_driver_energy-ss-tp-FEAssembly: assembles each block of the
+# Jacobian into a Tpetra::FECrsMatrix.  Tested against the analytic solution and the classic
+# assembly path.  The four responses cover all four blocks of the field order.
+TRIBITS_ADD_ADVANCED_TEST(
+  main_driver_energy-ss-blocked-tp-FEAssembly
+  TEST_0 EXEC main_driver
+    ARGS  --i=energy-ss-blocked-tp-fe-assembly.xml --assembly=fe
+    PASS_REGULAR_EXPRESSION "panzer::MainDriver run completed."
+    NUM_MPI_PROCS 2
+    OUTPUT_FILE main_driver-blocked-FEAssembly-fe.out
+  TEST_1 EXEC main_driver
+    ARGS  --i=energy-ss-blocked-tp-fe-assembly.xml --assembly=classic
+    PASS_REGULAR_EXPRESSION "panzer::MainDriver run completed."
+    NUM_MPI_PROCS 2
+    OUTPUT_FILE main_driver-blocked-FEAssembly-classic.out
+  TEST_2 CMND python3
+    ARGS ${PACKAGE_SOURCE_DIR}/example/utilities/compareAssemblyModes.py
+         main_driver-blocked-FEAssembly-fe.out
+         main_driver-blocked-FEAssembly-classic.out
+         "T0 Integral=0.5"
+         "T2 Integral=0.5"
+         "T3 Integral=0.5"
+         "T4 Integral=0.5"
+    PASS_REGULAR_EXPRESSION "Test Passed"
+  COMM mpi
   )
 
 TRIBITS_ADD_ADVANCED_TEST(
@@ -155,11 +210,54 @@ IF(${PACKAGE_NAME}_ENABLE_Teko)
       TRIBITS_ADD_EXECUTABLE(
         main_driver_opt
         SOURCES main_driver_opt.cpp ${main_driver_SOURCES} user_app_ROLTempusReducedObjective.hpp user_app_TransientObjective.hpp user_app_TransientObjective_impl.hpp user_app_TransientObjective.cpp user_app_Utilities.hpp user_app_Utilities.cpp
+      )
+      # Only run in opt builds. It is too slow for debug builds and we
+      # get random timeouts.  Also protect against case sensitivity in
+      # the build type.
+      option(PANZER_THIS_IS_AN_OPT_BUILD
+       "Enable the transient optimization tests (automatically disabled for Debug builds)."
+       TRUE)
+      string(TOUPPER "${CMAKE_BUILD_TYPE}" _panzer_build_type_upper_case)
+      IF (_panzer_build_type_upper_case STREQUAL "DEBUG")
+        set(PANZER_THIS_IS_AN_OPT_BUILD FALSE)
+      ENDIF()
+      TRIBITS_ADD_ADVANCED_TEST(
+        main_driver_energy-transient-tempus-opt-blocked-fd-deriv
+        EXCLUDE_IF_NOT_TRUE PANZER_THIS_IS_AN_OPT_BUILD
+        TEST_0 EXEC main_driver_opt
+          ARGS --i=energy-transient-tempus-opt-blocked-fd-deriv.xml
+          PASS_REGULAR_EXPRESSION "panzer::MainDriverOpt run completed."
+          NUM_MPI_PROCS 4
         )
       TRIBITS_ADD_ADVANCED_TEST(
-        main_driver_energy-transient-tempus-opt-blocked
+        main_driver_energy-transient-tempus-opt-blocked-analytic-deriv
+        EXCLUDE_IF_NOT_TRUE PANZER_THIS_IS_AN_OPT_BUILD
         TEST_0 EXEC main_driver_opt
-          PASS_REGULAR_EXPRESSION "panzer::MainDriver run completed."
+          ARGS --i=energy-transient-tempus-opt-blocked-analytic-deriv.xml
+          PASS_REGULAR_EXPRESSION "panzer::MainDriverOpt run completed."
+          NUM_MPI_PROCS 4
+        )
+      # Same problem on a single (non-blocked) field order, so the plain
+      # TpetraLinearObjFactory and GatherSolution/GatherTangent_Tpetra are
+      # covered rather than only their blocked counterparts.
+      TRIBITS_ADD_ADVANCED_TEST(
+        main_driver_energy-transient-tempus-opt-nonblocked-analytic-deriv
+        EXCLUDE_IF_NOT_TRUE PANZER_THIS_IS_AN_OPT_BUILD
+        TEST_0 EXEC main_driver_opt
+          ARGS --i=energy-transient-tempus-opt-nonblocked-analytic-deriv.xml
+          PASS_REGULAR_EXPRESSION "panzer::MainDriverOpt run completed."
+          NUM_MPI_PROCS 4
+        )
+      # Objective driven by a probe response on TEST_TEMPERATURE, which lives in
+      # a non-zero block of the product vector, so the blocked probe derivative
+      # scatter is exercised.
+      TRIBITS_ADD_ADVANCED_TEST(
+        main_driver_energy-transient-tempus-opt-blocked-probe-analytic-deriv
+        EXCLUDE_IF_NOT_TRUE PANZER_THIS_IS_AN_OPT_BUILD
+        TEST_0 EXEC main_driver_opt
+          ARGS --i=energy-transient-tempus-opt-blocked-probe-analytic-deriv.xml
+          PASS_REGULAR_EXPRESSION "panzer::MainDriverOpt run completed."
+          NUM_MPI_PROCS 4
         )
     ENDIF()
 

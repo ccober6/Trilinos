@@ -27,7 +27,7 @@ namespace BaskerNS
 
     static 
     inline
-    int my_strong_component
+    int strong_component
     (
      Int           &n,
      Int           *col_ptr,
@@ -79,7 +79,7 @@ namespace BaskerNS
     //=========strong componenet===========
     static 
     inline
-    int my_strong_component 
+    int strong_component 
     (
      int           &n,
      int           *col_ptr,
@@ -104,8 +104,8 @@ namespace BaskerNS
         &(perm_in[0]), p, r, work);
       */
       nblks = trilinos_btf_strongcomp(n, col_ptr,
-				    row_idx, 
-				    perm_in, p, r, work);
+                                    row_idx, 
+                                    perm_in, p, r, work);
       
       #ifdef BASKER_DEBUG_ORDER_BTF
       printf("\nBTF perm: \n");
@@ -219,18 +219,21 @@ namespace BaskerNS
   public:
     static 
     inline
-    int my_strong_component 
+    int strong_component 
     (   
-     long           &n,
-     long           *col_ptr,
-     long          *row_idx,
-     long           &nblks,
-     long           *perm,
-     long           *perm_in,
-     long          *CC
+     UF_long           &n,
+     UF_long           *col_ptr,
+     UF_long           *row_idx,
+     UF_long           &nblks,
+     UF_long           *perm,
+     UF_long           *perm_in,
+     long              *CC
     )
     {
-      typedef long  l_Int;
+      // NOTE: must be UF_long (not plain `long`), since on Win64 (LLP64) UF_long
+      // is __int64 (64-bit) while `long` is only 32-bit; the SuiteSparse "_l"
+      // routines below always take UF_long* (see trilinos_UFconfig.h).
+      typedef UF_long  l_Int;
       
       //l_Int p[n]; //output row_per
       l_Int *p = new l_Int[n];
@@ -267,42 +270,42 @@ namespace BaskerNS
       printf("\n");
       #endif
 
-    BASKER_ASSERT(n > 0, "M.nrow btf");
-    for(l_Int i = 0; i < n; i++)
-    {
-      perm[p[i]] = i;
-    }
+      BASKER_ASSERT(n > 0, "M.nrow btf");
+      for(l_Int i = 0; i < n; i++)
+      {
+        perm[p[i]] = i;
+      }
 
-    BASKER_ASSERT((nblks+1) > 0, "nblks+1 btf");
-    for(l_Int i = 0; i < nblks+1; i++)
-    {
-      CC[i] = r[i];
-    }
+      BASKER_ASSERT((nblks+1) > 0, "nblks+1 btf");
+      for(l_Int i = 0; i < nblks+1; i++)
+      {
+        CC[i] = r[i];
+      }
 
-    delete [] p;
-    delete [] r;
-    delete [] work;
+      delete [] p;
+      delete [] r;
+      delete [] work;
 
-    return 0;
-  }//strong_component<long int, Entry, Exe_Space>
+      return 0;
+    }//strong_component<long int, Entry, Exe_Space>
 
     //==========================AMD===================
     static
     inline
     int amd_order
     (
-     long n, 
-     long *col_ptr,
-     long *row_idx,
-     long *p,
+     UF_long n,
+     UF_long *col_ptr,
+     UF_long *row_idx,
+     UF_long *p,
      bool verbose
     )
     {
       double Info[TRILINOS_AMD_INFO];
-      for(long i = 0; i < TRILINOS_AMD_INFO; ++i)
+      for(UF_long i = 0; i < TRILINOS_AMD_INFO; ++i)
       {Info[i] = 0;}
 
-      long ret = trilinos_amd_l_order(n, col_ptr, row_idx, p, NULL, Info);
+      UF_long ret = trilinos_amd_l_order(n, col_ptr, row_idx, p, NULL, Info);
 
       if (verbose) {
         if(ret == TRILINOS_AMD_OUT_OF_MEMORY)
@@ -320,20 +323,20 @@ namespace BaskerNS
     inline
     int amd_order
     (
-     long n, 
-     long *col_ptr,
-     long *row_idx,
-     long *p,
+     UF_long n,
+     UF_long *col_ptr,
+     UF_long *row_idx,
+     UF_long *p,
      double &l_nnz,
      double &lu_work,
      bool verbose
     )
     {
       double Info[TRILINOS_AMD_INFO];
-      for(long i = 0; i < TRILINOS_AMD_INFO; ++i)
+      for(UF_long i = 0; i < TRILINOS_AMD_INFO; ++i)
       {Info[i] = 0;}
 
-      long ret = trilinos_amd_l_order(n, col_ptr, row_idx, p, NULL, Info);
+      UF_long ret = trilinos_amd_l_order(n, col_ptr, row_idx, p, NULL, Info);
 
       if (verbose) {
         if(ret == TRILINOS_AMD_OUT_OF_MEMORY)

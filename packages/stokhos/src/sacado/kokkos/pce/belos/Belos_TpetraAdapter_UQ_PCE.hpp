@@ -466,7 +466,7 @@ namespace Belos {
         KokkosBlas::gemm (
           &ctransA, &ctransB,                  
           alpha, flat_A_view, flat_B_view,
-          Kokkos::ArithTraits<dot_type>::zero(),
+          KokkosKernels::ArithTraits<dot_type>::zero(),
           C_view_dev);
       }
       // reduce across processors -- could check for RDMA

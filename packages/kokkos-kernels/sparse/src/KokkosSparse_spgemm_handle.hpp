@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSSPARSE_SPGEMMHANDLE_HPP
 #define KOKKOSSPARSE_SPGEMMHANDLE_HPP
 
@@ -46,15 +33,6 @@ enum SPGEMMAlgorithm {
   SPGEMM_KK_DENSE,
   SPGEMM_KK_MEMORY,
   SPGEMM_KK_LP,  // KKVARIANTS
-  SPGEMM_CUSPARSE [[deprecated("cuSPARSE is now used automatically in all "
-                               "supported SpGEMM calls, if enabled.")]],
-  SPGEMM_MKL [[deprecated("MKL is now used automatically in all supported "
-                          "SpGEMM calls, if enabled.")]],
-  SPGEMM_MKL2PHASE [[deprecated("MKL is now used automatically in all "
-                                "supported SpGEMM calls, if enabled.")]],
-  SPGEMM_ROCSPARSE [[deprecated("rocSPARSE is now used automatically in all "
-                                "supported SpGEMM calls, if enabled.")]],
-
   // TRIANGLE COUNTING SPECIALIZED
   SPGEMM_KK_TRIANGLE_AI,        // SPGEMM_KK_TRIANGLE_DEFAULT, SPGEMM_KK_TRIANGLE_MEM,
                                 // SPGEMM_KK_TRIANGLE_DENSE,
@@ -83,8 +61,36 @@ enum SPGEMMAlgorithm {
   SPGEMM_KK_MEMORY_SPREADTEAM,
   SPGEMM_KK_MEMORY_BIGSPREADTEAM,
   SPGEMM_KK_MEMORY2,
-  SPGEMM_KK_MEMSPEED
+  SPGEMM_KK_MEMSPEED,
+  // Algorithms for specific TPLs
+  SPGEMM_CUSPARSE_DETERMINISTIC,     // Used in SPGEMMreuse, until deprecated in CUDA 13.2.1 (aka cusparse 12.7.10).
+  SPGEMM_CUSPARSE_NONDETERMINISTIC,  //
+  SPGEMM_CUSPARSE_ALG1,              // Added for SPGEMM (non-reuse) in CUDA 12.0.1 (aka cusparse 12.0.1)
+  SPGEMM_CUSPARSE_ALG2,              //
+  SPGEMM_CUSPARSE_ALG3               //
 };
+
+namespace Impl {
+// Helpers to categorize algorithm choices
+inline bool is_cusparse_spgemm_algorithm(SPGEMMAlgorithm alg) {
+  switch (alg) {
+    case SPGEMM_CUSPARSE_DETERMINISTIC:
+    case SPGEMM_CUSPARSE_NONDETERMINISTIC:
+    case SPGEMM_CUSPARSE_ALG1:
+    case SPGEMM_CUSPARSE_ALG2:
+    case SPGEMM_CUSPARSE_ALG3: return true;
+    default:;
+  }
+  return false;
+}
+
+/// Return true if the given algorithm is always a native (KokkosKernels)
+/// implementation, and false if it may be implemented by a TPL.
+inline bool is_spgemm_algorithm_native(SPGEMMAlgorithm a) {
+  if (a == SPGEMM_DEFAULT || is_cusparse_spgemm_algorithm(a)) return false;
+  return true;
+}
+}  // namespace Impl
 
 enum SPGEMMAccumulator {
   SPGEMM_ACC_DEFAULT,
@@ -110,14 +116,16 @@ class SPGEMMHandle {
 
   typedef typename Kokkos::View<size_type *, HandleTempMemorySpace> row_lno_temp_work_view_t;
   typedef typename Kokkos::View<size_type *, HandlePersistentMemorySpace> row_lno_persistent_work_view_t;
-  typedef typename row_lno_persistent_work_view_t::HostMirror row_lno_persistent_work_host_view_t;  // Host view type
+  typedef
+      typename row_lno_persistent_work_view_t::host_mirror_type row_lno_persistent_work_host_view_t;  // Host view type
 
   typedef typename Kokkos::View<nnz_scalar_t *, HandleTempMemorySpace> scalar_temp_work_view_t;
   typedef typename Kokkos::View<nnz_scalar_t *, HandlePersistentMemorySpace> scalar_persistent_work_view_t;
 
   typedef typename Kokkos::View<nnz_lno_t *, HandleTempMemorySpace> nnz_lno_temp_work_view_t;
   typedef typename Kokkos::View<nnz_lno_t *, HandlePersistentMemorySpace> nnz_lno_persistent_work_view_t;
-  typedef typename nnz_lno_persistent_work_view_t::HostMirror nnz_lno_persistent_work_host_view_t;  // Host view type
+  typedef
+      typename nnz_lno_persistent_work_view_t::host_mirror_type nnz_lno_persistent_work_host_view_t;  // Host view type
 
 #ifdef KOKKOSKERNELS_ENABLE_TPL_ROCSPARSE
   struct rocSparseSpgemmHandleType {
@@ -151,11 +159,9 @@ class SPGEMMHandle {
       rocsparse_destroy_mat_descr(descr_D);
     }
   };
-
 #endif
 
 #ifdef KOKKOSKERNELS_ENABLE_TPL_CUSPARSE
-#if (CUDA_VERSION >= 11000)
   struct cuSparseSpgemmHandleType {
     KokkosKernels::Experimental::Controls kkControls;
     cusparseHandle_t cusparseHandle;
@@ -171,12 +177,56 @@ class SPGEMMHandle {
     size_t bufferSize3, bufferSize4, bufferSize5;
     void *buffer3, *buffer4, *buffer5;
 
-    cuSparseSpgemmHandleType(bool transposeA, bool transposeB) {
+    // If algKK names a cuSparse SpGEMM/SpGEMMreuse algorithm, throw exception if it is not
+    // supported by this version.
+    //
+    // If algCusparse is non-null, also set *algCusparse to the corresponding cuSPARSE algorithm.
+    static void checkAlgorithm(SPGEMMAlgorithm algKK, cusparseSpGEMMAlg_t *algCusparse = nullptr) {
+      cusparseSpGEMMAlg_t result = CUSPARSE_SPGEMM_DEFAULT;
+      switch (algKK) {
+#if (CUSPARSE_VERSION < 12710)
+        // Note: 'determinitic' is the spelling used in cuSPARSE!
+        case SPGEMM_CUSPARSE_DETERMINISTIC: result = CUSPARSE_SPGEMM_CSR_ALG_DETERMINITIC; break;
+        case SPGEMM_CUSPARSE_NONDETERMINISTIC: result = CUSPARSE_SPGEMM_CSR_ALG_NONDETERMINITIC; break;
+#else
+        case SPGEMM_CUSPARSE_DETERMINISTIC:
+        case SPGEMM_CUSPARSE_NONDETERMINISTIC: {
+          std::ostringstream out;
+          out << "cuSPARSE SpGEMMreuse algorithms\n";
+          out << "KokkosSparse::SPGEMM_CUSPARSE_DETERMINISTIC (CUSPARSE_SPGEMM_CSR_ALG_DETERMINITIC) and\n";
+          out << "KokkosSparse::SPGEMM_CUSPARSE_NONDETERMINISTIC (CUSPARSE_SPGEMM_CSR_ALG_NONDETERMINITIC)\n";
+          out << "are deprecated starting in cuSPARSE 12.7.10 (corresponding to CUDA 13.2.1) and not supported by "
+                 "KokkosKernels";
+          throw std::invalid_argument(out.str());
+        }
+#endif
+#if (CUSPARSE_VERSION >= 12001)
+        case SPGEMM_CUSPARSE_ALG1: result = CUSPARSE_SPGEMM_ALG1; break;
+        case SPGEMM_CUSPARSE_ALG2: result = CUSPARSE_SPGEMM_ALG2; break;
+        case SPGEMM_CUSPARSE_ALG3: result = CUSPARSE_SPGEMM_ALG3; break;
+#else
+        case SPGEMM_CUSPARSE_ALG1:
+        case SPGEMM_CUSPARSE_ALG2:
+        case SPGEMM_CUSPARSE_ALG3: {
+          std::ostringstream out;
+          out << "cuSPARSE SpGEMM algorithms KokkosSparse::SPGEMM_CUSPARSE_ALG1, KokkosSparse::SPGEMM_CUSPARSE_ALG2\n";
+          out << "and KokkosSparse::SPGEMM_CUSPARSE_ALG3 are not supported in this version of cuSPARSE";
+          throw std::invalid_argument(out.str());
+        }
+#endif
+        default:;
+      }
+      if (algCusparse) *algCusparse = result;
+    }
+
+    cuSparseSpgemmHandleType(SPGEMMAlgorithm algKK, bool transposeA, bool transposeB) {
       opA        = transposeA ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
       opB        = transposeB ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
       scalarType = Impl::cuda_data_type_from<nnz_scalar_t>();
 
-      alg         = CUSPARSE_SPGEMM_DEFAULT;
+      // Validate algKK and (if valid) set this->alg to the corresponding cuSPARSE algorithm enum.
+      checkAlgorithm(algKK, &alg);
+
       bufferSize3 = bufferSize4 = bufferSize5 = 0;
       buffer3 = buffer4 = buffer5 = nullptr;
 
@@ -194,24 +244,6 @@ class SPGEMMHandle {
       KOKKOS_IMPL_CUDA_SAFE_CALL(cudaFree(buffer5));
     }
   };
-#else
-  struct cuSparseSpgemmHandleType {
-    cusparseHandle_t cusparseHandle;
-    // Descriptor for any general matrix with index base 0
-    cusparseMatDescr_t generalDescr;
-
-    cuSparseSpgemmHandleType(bool /* transposeA */, bool /* transposeB */) {
-      KokkosKernels::Experimental::Controls kkControls;
-      // Get singleton cusparse handle from default controls
-      cusparseHandle = kkControls.getCusparseHandle();
-
-      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseCreateMatDescr(&generalDescr));
-      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSetMatType(generalDescr, CUSPARSE_MATRIX_TYPE_GENERAL));
-      KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseSetMatIndexBase(generalDescr, CUSPARSE_INDEX_BASE_ZERO));
-    }
-    ~cuSparseSpgemmHandleType() { KOKKOSSPARSE_IMPL_CUSPARSE_SAFE_CALL(cusparseDestroyMatDescr(generalDescr)); }
-  };
-#endif
 #endif
 
 #ifdef KOKKOSKERNELS_ENABLE_TPL_MKL
@@ -422,8 +454,8 @@ class SPGEMMHandle {
   /**
    * \brief Default constructor.
    */
-  SPGEMMHandle(SPGEMMAlgorithm gs = SPGEMM_DEFAULT)
-      : algorithm_type(gs),
+  SPGEMMHandle(SPGEMMAlgorithm alg = SPGEMM_DEFAULT)
+      : algorithm_type(alg),
         accumulator_type(SPGEMM_ACC_DEFAULT),
         result_nnz_size(0),
         called_symbolic(false),
@@ -493,8 +525,13 @@ class SPGEMMHandle {
         mkl_spgemm_handle(nullptr)
 #endif
   {
-    if (gs == SPGEMM_DEFAULT) {
-      this->choose_default_algorithm();
+    if (Impl::is_cusparse_spgemm_algorithm(alg)) {
+#ifdef KOKKOSKERNELS_ENABLE_TPL_CUSPARSE
+      // Check that the algorithm is supported by this version of cuSPARSE
+      cuSparseSpgemmHandleType::checkAlgorithm(alg);
+#else
+      throw std::invalid_argument("SPGEMMHandle: a cuSPARSE algorithm was selected but cuSPARSE is not enabled");
+#endif
     }
   }
 
@@ -508,7 +545,7 @@ class SPGEMMHandle {
 #ifdef KOKKOSKERNELS_ENABLE_TPL_MKL
     this->destroy_mkl_spgemm_handle();
 #endif
-  };
+  }
 
 #ifdef KOKKOSKERNELS_ENABLE_TPL_ROCSPARSE
   void create_rocsparse_spgemm_handle(bool transA, bool transB) {
@@ -530,7 +567,7 @@ class SPGEMMHandle {
 #ifdef KOKKOSKERNELS_ENABLE_TPL_CUSPARSE
   void create_cusparse_spgemm_handle(bool transA, bool transB) {
     this->destroy_cusparse_spgemm_handle();
-    this->cusparse_spgemm_handle = new cuSparseSpgemmHandleType(transA, transB);
+    this->cusparse_spgemm_handle = new cuSparseSpgemmHandleType(get_algorithm_type(), transA, transB);
   }
   void destroy_cusparse_spgemm_handle() {
     if (this->cusparse_spgemm_handle != nullptr) {
@@ -557,60 +594,71 @@ class SPGEMMHandle {
   mklSpgemmHandleType *get_mkl_spgemm_handle() { return this->mkl_spgemm_handle; }
 #endif
 
-  void choose_default_algorithm() {
+  // Return the default native algorithm for this handle's execution space.
+  // this->algorithm_type is not changed.
+  SPGEMMAlgorithm get_default_native_algorithm() {
 #if defined(KOKKOS_ENABLE_SERIAL)
     if (std::is_same<Kokkos::Serial, ExecutionSpace>::value) {
-      this->algorithm_type = SPGEMM_SERIAL;
 #ifdef VERBOSE
       std::cout << "Serial Execution Space, Default Algorithm: SPGEMM_SERIAL" << std::endl;
 #endif
+      return SPGEMM_SERIAL;
     }
 #endif
 
 #if defined(KOKKOS_ENABLE_THREADS)
     if (std::is_same<Kokkos::Threads, ExecutionSpace>::value) {
-      this->algorithm_type = SPGEMM_SERIAL;
 #ifdef VERBOSE
       std::cout << "THREADS Execution Space, Default Algorithm: SPGEMM_SERIAL" << std::endl;
 #endif
+      return SPGEMM_SERIAL;
     }
 #endif
 
 #if defined(KOKKOS_ENABLE_OPENMP)
     if (std::is_same<Kokkos::OpenMP, ExecutionSpace>::value) {
-      this->algorithm_type = SPGEMM_SERIAL;
 #ifdef VERBOSE
       std::cout << "OpenMP Execution Space, Default Algorithm: SPGEMM_SERIAL" << std::endl;
 #endif
+      return SPGEMM_SERIAL;
     }
 #endif
 
 #if defined(KOKKOS_ENABLE_CUDA)
     if (std::is_same<Kokkos::Cuda, ExecutionSpace>::value) {
-      this->algorithm_type = SPGEMM_KK;
 #ifdef VERBOSE
       std::cout << "Cuda Execution Space, Default Algorithm: SPGEMM_KK" << std::endl;
 #endif
+      return SPGEMM_KK;
     }
 #endif
 
 #if defined(KOKKOS_ENABLE_HIP)
     if (std::is_same<Kokkos::HIP, ExecutionSpace>::value) {
-      this->algorithm_type = SPGEMM_KK;
 #ifdef VERBOSE
       std::cout << "HIP Execution Space, Default Algorithm: SPGEMM_KK" << std::endl;
 #endif
+      return SPGEMM_KK;
     }
 #endif
 
 #if defined(KOKKOS_ENABLE_SYCL)
-    if (std::is_same<Kokkos::Experimental::SYCL, ExecutionSpace>::value) {
-      this->algorithm_type = SPGEMM_KK;
+    if (std::is_same<Kokkos::SYCL, ExecutionSpace>::value) {
 #ifdef VERBOSE
       std::cout << "SYCL Execution Space, Default Algorithm: SPGEMM_KK" << std::endl;
 #endif
+      return SPGEMM_KK;
     }
 #endif
+#ifdef VERBOSE
+    std::cout << "Execution Space not handled directly: defaulting to SPGEMM_KK" << std::endl;
+#endif
+    return SPGEMM_KK;
+  }
+
+  [[deprecated("Do not use choose_default_algorithm since it can prevent TPLs from being used")]] void
+  choose_default_algorithm() {
+    this->algorithm_type = get_default_native_algorithm();
   }
 
   void set_compression(bool compress_second_matrix_) { this->compress_second_matrix = compress_second_matrix_; }
@@ -641,7 +689,7 @@ class SPGEMMHandle {
   nnz_lno_t get_max_compresed_result_nnz() const { return this->max_nnz_compressed_result; }
 
   // setters
-  void set_algorithm_type(const SPGEMMAlgorithm &sgs_algo) { this->algorithm_type = sgs_algo; }
+  void set_algorithm_type(const SPGEMMAlgorithm &algo) { this->algorithm_type = algo; }
   void set_call_symbolic(bool call = true) { this->called_symbolic = call; }
   void set_computed_rowptrs() { this->computed_rowptrs = true; }
   void set_computed_rowflops() { this->computed_rowflops = true; }
@@ -744,9 +792,9 @@ class SPGEMMHandle {
   }
 };
 
-inline SPGEMMAlgorithm StringToSPGEMMAlgorithm(std::string &name) {
+inline SPGEMMAlgorithm StringToSPGEMMAlgorithm(const std::string &name) {
   if (name == "SPGEMM_DEFAULT")
-    return SPGEMM_KK;
+    return SPGEMM_DEFAULT;
   else if (name == "SPGEMM_KK")
     return SPGEMM_KK;
   else if (name == "SPGEMM_KK_MEMORY")
@@ -758,25 +806,19 @@ inline SPGEMMAlgorithm StringToSPGEMMAlgorithm(std::string &name) {
   else if (name == "SPGEMM_KK_MEMSPEED")
     return SPGEMM_KK;
   else if (name == "SPGEMM_DEBUG")
-    return SPGEMM_SERIAL;
+    return SPGEMM_DEBUG;
   else if (name == "SPGEMM_SERIAL")
     return SPGEMM_SERIAL;
-  else if (name == "SPGEMM_CUSPARSE")
-    throw std::runtime_error(
-        "Enum value SPGEMM_CUSPARSE is deprecated. cuSPARSE is automatically "
-        "used in all supported SpGEMM calls.");
-  else if (name == "SPGEMM_MKL")
-    throw std::runtime_error(
-        "Enum value SPGEMM_MKL is deprecated. MKL is automatically used in all "
-        "supported SpGEMM calls.");
-  else if (name == "SPGEMM_MKL2PHASE")
-    throw std::runtime_error(
-        "Enum value SPGEMM_MKL2PHASE is deprecated. MKL is automatically used "
-        "in all supported SpGEMM calls.");
-  else if (name == "SPGEMM_ROCSPARSE")
-    throw std::runtime_error(
-        "Enum value SPGEMM_ROCSPARSE is deprecated. rocSPARSE is automatically "
-        "used in all supported SpGEMM calls.");
+  else if (name == "SPGEMM_CUSPARSE_DETERMINISTIC")
+    return SPGEMM_CUSPARSE_DETERMINISTIC;
+  else if (name == "SPGEMM_CUSPARSE_NONDETERMINISTIC")
+    return SPGEMM_CUSPARSE_NONDETERMINISTIC;
+  else if (name == "SPGEMM_CUSPARSE_ALG1")
+    return SPGEMM_CUSPARSE_ALG1;
+  else if (name == "SPGEMM_CUSPARSE_ALG2")
+    return SPGEMM_CUSPARSE_ALG2;
+  else if (name == "SPGEMM_CUSPARSE_ALG3")
+    return SPGEMM_CUSPARSE_ALG3;
   else
     throw std::runtime_error("Invalid SPGEMMAlgorithm name");
 }

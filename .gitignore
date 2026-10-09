@@ -37,9 +37,6 @@ doxygen_objdb_*.tmp
 # Ignore local gitdist config file (.gitdis.default is in git repo)
 /.gitdist
 
-# Ignore user-specific pre-commit files
-/.pre-commit-config.yaml
-
 # Allow github Kokkos to be cloned under Trilinos
 /kokkos/
 
@@ -167,3 +164,6 @@ rsync.*
 # clangd server stuff
 .cache/
 compile_commands.json
+
+# virtual environment used for PR reproducer script
+/commonTools/pr_reproducer/.pr_reproducer_venv/

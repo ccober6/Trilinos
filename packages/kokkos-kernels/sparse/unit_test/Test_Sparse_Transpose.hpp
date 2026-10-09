@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 /// \file Test_Common_Transpose.hpp
 
@@ -27,6 +14,7 @@
 #include <KokkosKernels_default_types.hpp>
 #include <KokkosSparse_CrsMatrix.hpp>
 #include <KokkosSparse_SortCrs.hpp>
+#include "KokkosKernels_ArithTraits.hpp"
 
 template <typename size_type, typename V>
 struct ExactCompare {
@@ -40,11 +28,10 @@ struct ExactCompare {
   V v2;
 };
 
-template <typename device_t>
+template <typename device_t, typename scalar_t>
 void testTranspose(int numRows, int numCols, bool doValues) {
   using exec_space  = typename device_t::execution_space;
   using range_pol   = Kokkos::RangePolicy<exec_space>;
-  using scalar_t    = KokkosKernels::default_scalar;
   using lno_t       = KokkosKernels::default_lno_t;
   using size_type   = KokkosKernels::default_size_type;
   using crsMat_t    = typename KokkosSparse::CrsMatrix<scalar_t, lno_t, device_t, void, size_type>;
@@ -99,6 +86,43 @@ void testTranspose(int numRows, int numCols, bool doValues) {
     Kokkos::parallel_reduce(range_pol(0, input_mat.nnz()),
                             ExactCompare<size_type, values_t>(input_mat.values, tt_values), valuesDiffs);
     EXPECT_EQ(size_type(0), valuesDiffs);
+  }
+
+  if constexpr (std::is_same<scalar_t, kokkos_complex_double>::value) {
+    using KAT = KokkosKernels::ArithTraits<scalar_t>;
+    if (doValues && KAT::isComplex) {
+      // sort the non-conjugated transpose
+      KokkosSparse::sort_crs_matrix<exec_space, c_rowmap_t, entries_t, values_t>(t_rowmap, t_entries, t_values);
+      auto j = scalar_t(0, 1);
+      // Multiply input values by j.
+      // Copy tranpose matrix data and apply conjugation.
+      rowmap_t t_rowmap_conj("Rowmap^H", numCols + 1);
+      entries_t t_entries_conj(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Entries^T"),
+                               input_mat.graph.entries.extent(0));
+      values_t t_values_conj(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Values^H"), input_mat.values.extent(0));
+      values_t t_values_conj_correct(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Values^H"),
+                                     input_mat.values.extent(0));
+      Kokkos::parallel_for(
+          range_pol(0, input_mat.nnz()), KOKKOS_LAMBDA(const size_type i) {
+            input_mat.values(i)      = j * input_mat.values(i);
+            t_values_conj_correct(i) = KAT::conj(j * t_values(i));
+          });
+      // Transpose matrix with conjugation
+      KokkosSparse::Impl::transpose_matrix<c_rowmap_t, c_entries_t, c_values_t, rowmap_t, entries_t, values_t, rowmap_t,
+                                           exec_space>(numRows, numCols, input_mat.graph.row_map,
+                                                       input_mat.graph.entries, input_mat.values, t_rowmap_conj,
+                                                       t_entries_conj, t_values_conj, true);
+      // sort the conjugated transpose
+      KokkosSparse::sort_crs_matrix<exec_space, c_rowmap_t, entries_t, values_t>(t_rowmap_conj, t_entries_conj,
+                                                                                 t_values_conj);
+      {
+        // Check values
+        size_type valuesDiffs;
+        Kokkos::parallel_reduce(range_pol(0, input_mat.nnz()),
+                                ExactCompare<size_type, values_t>(t_values_conj, t_values_conj_correct), valuesDiffs);
+        EXPECT_EQ(size_type(0), valuesDiffs);
+      }
+    }
   }
 }
 
@@ -157,9 +181,9 @@ void testTransposeBsrRef() {
     const scalar_t valuesPtr[]   = {0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3, 2.0, 2.1, 2.2, 2.3, 3.0, 3.1,
                                     3.2, 3.3, 4.0, 4.1, 4.2, 4.3, 5.0, 5.1, 5.2, 5.3, 6.0, 6.1, 6.2, 6.3};
 
-    typename rowmap_t::HostMirror::const_type row_map_h(row_mapPtr, numRows + 1);
-    typename entries_t::HostMirror::const_type entries_h(entriesPtr, nnz);
-    typename values_t::HostMirror::const_type values_h(valuesPtr, nnz * block_size * block_size);
+    typename rowmap_t::host_mirror_type::const_type row_map_h(row_mapPtr, numRows + 1);
+    typename entries_t::host_mirror_type::const_type entries_h(entriesPtr, nnz);
+    typename values_t::host_mirror_type::const_type values_h(valuesPtr, nnz * block_size * block_size);
 
     Kokkos::deep_copy(row_map, row_map_h);
     Kokkos::deep_copy(entries, entries_h);
@@ -180,9 +204,9 @@ void testTransposeBsrRef() {
     const scalar_t valuesPtr[]   = {3.0, 3.2, 3.1, 3.3, 2.0, 2.2, 2.1, 2.3, 4.0, 4.2, 4.1, 4.3, 5.0, 5.2,
                                     5.1, 5.3, 0.0, 0.2, 0.1, 0.3, 1.0, 1.2, 1.1, 1.3, 6.0, 6.2, 6.1, 6.3};
 
-    typename rowmap_t::HostMirror::const_type row_map_h(row_mapPtr, numRows + 1);
-    typename entries_t::HostMirror::const_type entries_h(entriesPtr, nnz);
-    typename values_t::HostMirror::const_type values_h(valuesPtr, nnz * block_size * block_size);
+    typename rowmap_t::host_mirror_type::const_type row_map_h(row_mapPtr, numRows + 1);
+    typename entries_t::host_mirror_type::const_type entries_h(entriesPtr, nnz);
+    typename values_t::host_mirror_type::const_type values_h(valuesPtr, nnz * block_size * block_size);
 
     Kokkos::deep_copy(row_map, row_map_h);
     Kokkos::deep_copy(entries, entries_h);
@@ -244,27 +268,37 @@ void testTransposeBsr(int numRows, int numCols, int blockSize) {
 
 TEST_F(TestCategory, sparse_transpose_matrix) {
   // Test both matrix and graph transpose with various sizes
-  testTranspose<TestDevice>(0, 0, true);
-  testTranspose<TestDevice>(100, 0, true);
-  testTranspose<TestDevice>(0, 100, true);
-  testTranspose<TestDevice>(100, 100, true);
-  testTranspose<TestDevice>(500, 50, true);
-  testTranspose<TestDevice>(50, 500, true);
-  testTranspose<TestDevice>(4000, 2000, true);
-  testTranspose<TestDevice>(2000, 4000, true);
-  testTranspose<TestDevice>(2000, 2000, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(0, 0, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(100, 0, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(0, 100, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(100, 100, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(500, 50, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(50, 500, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(4000, 2000, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(2000, 4000, true);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(2000, 2000, true);
+
+  testTranspose<TestDevice, kokkos_complex_double>(0, 0, true);
+  testTranspose<TestDevice, kokkos_complex_double>(100, 0, true);
+  testTranspose<TestDevice, kokkos_complex_double>(0, 100, true);
+  testTranspose<TestDevice, kokkos_complex_double>(100, 100, true);
+  testTranspose<TestDevice, kokkos_complex_double>(500, 50, true);
+  testTranspose<TestDevice, kokkos_complex_double>(50, 500, true);
+  testTranspose<TestDevice, kokkos_complex_double>(4000, 2000, true);
+  testTranspose<TestDevice, kokkos_complex_double>(2000, 4000, true);
+  testTranspose<TestDevice, kokkos_complex_double>(2000, 2000, true);
 }
 
 TEST_F(TestCategory, sparse_transpose_graph) {
-  testTranspose<TestDevice>(0, 0, false);
-  testTranspose<TestDevice>(100, 0, false);
-  testTranspose<TestDevice>(0, 100, false);
-  testTranspose<TestDevice>(100, 100, false);
-  testTranspose<TestDevice>(500, 50, false);
-  testTranspose<TestDevice>(50, 500, false);
-  testTranspose<TestDevice>(4000, 2000, false);
-  testTranspose<TestDevice>(2000, 4000, false);
-  testTranspose<TestDevice>(2000, 2000, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(0, 0, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(100, 0, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(0, 100, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(100, 100, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(500, 50, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(50, 500, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(4000, 2000, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(2000, 4000, false);
+  testTranspose<TestDevice, KokkosKernels::default_scalar>(2000, 2000, false);
 }
 
 TEST_F(TestCategory, sparse_transpose_bsr_matrix) {

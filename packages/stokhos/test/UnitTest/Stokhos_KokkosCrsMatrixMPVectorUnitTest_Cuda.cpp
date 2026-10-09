@@ -25,15 +25,15 @@ bool test_cuda_embedded_vector(Ordinal num_blocks,
                                Teuchos::FancyOStream& out) {
   typedef Kokkos::Cuda Device;
 
-  const Ordinal VectorSize = NumPerThread * ThreadsPerVector;
-  typedef typename Storage::template apply_N<VectorSize>::type storage_type;
+  const Ordinal MyVectorSize = NumPerThread * ThreadsPerVector;
+  typedef typename Storage::template apply_N<MyVectorSize>::type storage_type;
   typedef Sacado::MP::Vector<storage_type> Vector;
 
   const Ordinal nGrid = 5;
   KokkosSparse::DeviceConfig dev_config(num_blocks, num_vec_threads, num_row_threads);
 
   bool success = test_embedded_vector<Vector>(
-    nGrid, VectorSize, dev_config, MultiplyOp(), out);
+    nGrid, MyVectorSize, dev_config, MultiplyOp(), out);
 
   return success;
 }
@@ -129,11 +129,17 @@ TEUCHOS_UNIT_TEST_TEMPLATE_2_DECL(
 // Notes:  SFS, DS are defined in main test header (we are also being lazy
 // and not putting ordinal/scalar/device in the names, assuming we will only
 // do one combination).
+#ifdef KOKKOS_ENABLE_IMPL_VIEW_LEGACY
 #define CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_ORDINAL_SCALAR_DEVICE( ORDINAL, SCALAR, DEVICE ) \
   CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_STORAGE_OP( SFS, DefaultMultiply ) \
   CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_STORAGE_OP( SFS, KokkosMultiply ) \
   CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_STORAGE_OP( DS, DefaultMultiply ) \
   CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_STORAGE_OP( DS, KokkosMultiply )
+#else
+#define CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_ORDINAL_SCALAR_DEVICE( ORDINAL, SCALAR, DEVICE ) \
+  CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_STORAGE_OP( SFS, DefaultMultiply ) \
+  CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_STORAGE_OP( SFS, KokkosMultiply )
+#endif
 
 CRS_MATRIX_MP_VECTOR_MULTIPLY_TESTS_ORDINAL_SCALAR_DEVICE(int, double, Cuda)
 

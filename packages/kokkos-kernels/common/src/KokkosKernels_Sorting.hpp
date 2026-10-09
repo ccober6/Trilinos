@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOSKERNELS_SORTING_HPP
 #define KOKKOSKERNELS_SORTING_HPP
 
@@ -66,7 +53,7 @@ namespace Impl {
 template <typename View, typename Ordinal, typename TeamMember, typename Comparator>
 struct BitonicSingleTeamFunctor {
   BitonicSingleTeamFunctor(View& v_, const Comparator& comp_) : v(v_), comp(comp_) {}
-  KOKKOS_INLINE_FUNCTION void operator()(const TeamMember t) const { Kokkos::Experimental::sort_team(t, v, comp); };
+  KOKKOS_INLINE_FUNCTION void operator()(const TeamMember t) const { Kokkos::Experimental::sort_team(t, v, comp); }
   View v;
   Comparator comp;
 };
@@ -82,7 +69,7 @@ struct BitonicChunkFunctor {
     Ordinal n          = chunkSize;
     if (chunkStart + n > Ordinal(v.extent(0))) n = v.extent(0) - chunkStart;
     Kokkos::Experimental::sort_team(t, Kokkos::subview(v, Kokkos::make_pair(chunkStart, chunkStart + n)), comp);
-  };
+  }
   View v;
   Comparator comp;
   Ordinal chunkSize;
@@ -112,7 +99,7 @@ struct BitonicPhase1Functor {
         }
       }
     });
-  };
+  }
   View v;
   Comparator comp;
   Ordinal boxSize;
@@ -170,7 +157,7 @@ struct BitonicPhase2Functor {
         });
       }
     }
-  };
+  }
   View v;
   Comparator comp;
   Ordinal boxSize;
@@ -229,9 +216,16 @@ KOKKOS_INLINE_FUNCTION void SerialRadixSort(ValueType* values, ValueType* values
   static_assert(std::is_integral<ValueType>::value && std::is_unsigned<ValueType>::value,
                 "radixSort can only be run on unsigned integers.");
   if (n <= 1) return;
-  ValueType maxVal = 0;
+  // sort 4 bits at a time, into 16 buckets
+  constexpr ValueType mask = 0xF;
+  // Find the maximum value so we know how many passes to run,
+  // and at the same time do the first round of counting buckets
+  ValueType maxVal  = 0;
+  Ordinal count[16] = {0};
   for (Ordinal i = 0; i < n; i++) {
-    if (maxVal < values[i]) maxVal = values[i];
+    auto val = values[i];
+    count[val & mask]++;
+    if (maxVal < val) maxVal = val;
   }
   // determine how many significant bits the data has
   int passes = 0;
@@ -241,46 +235,43 @@ KOKKOS_INLINE_FUNCTION void SerialRadixSort(ValueType* values, ValueType* values
   }
   // Is the data currently held in values (false) or valuesAux (true)?
   bool inAux = false;
-  // sort 4 bits at a time, into 16 buckets
-  ValueType mask = 0xF;
   // maskPos counts the low bit index of mask (0, 4, 8, ...)
   Ordinal maskPos = 0;
+  Ordinal offset[16];
   for (int p = 0; p < passes; p++) {
-    // Count the number of elements in each bucket
-    Ordinal count[16] = {0};
-    Ordinal offset[17];
-    if (!inAux) {
-      for (Ordinal i = 0; i < n; i++) {
-        count[(values[i] & mask) >> maskPos]++;
-      }
-    } else {
-      for (Ordinal i = 0; i < n; i++) {
-        count[(valuesAux[i] & mask) >> maskPos]++;
-      }
-    }
     offset[0] = 0;
     // get offset as the prefix sum for count
-    for (Ordinal i = 0; i < 16; i++) {
+    for (Ordinal i = 0; i < 15; i++) {
       offset[i + 1] = offset[i] + count[i];
+      count[i]      = 0;
     }
     // now for each element in [lo, hi), move it to its offset in the other
     // buffer this branch should be ok because whichBuf is the same on all
     // threads
     if (!inAux) {
       for (Ordinal i = 0; i < n; i++) {
-        Ordinal bucket                                = (values[i] & mask) >> maskPos;
-        valuesAux[offset[bucket + 1] - count[bucket]] = values[i];
-        count[bucket]--;
+        auto val                  = values[i];
+        Ordinal bucket            = (val >> maskPos) & mask;
+        valuesAux[offset[bucket]] = val;
+        offset[bucket]++;
+        if (p < passes - 1) {
+          Ordinal nextBucket = (val >> (maskPos + 4)) & mask;
+          count[nextBucket]++;
+        }
       }
     } else {
       for (Ordinal i = 0; i < n; i++) {
-        Ordinal bucket                             = (valuesAux[i] & mask) >> maskPos;
-        values[offset[bucket + 1] - count[bucket]] = valuesAux[i];
-        count[bucket]--;
+        auto val               = valuesAux[i];
+        Ordinal bucket         = (val >> maskPos) & mask;
+        values[offset[bucket]] = valuesAux[i];
+        offset[bucket]++;
+        if (p < passes - 1) {
+          Ordinal nextBucket = (val >> (maskPos + 4)) & mask;
+          count[nextBucket]++;
+        }
       }
     }
     inAux = !inAux;
-    mask  = mask << 4;
     maskPos += 4;
   }
   // Move values back into main array if they are currently in aux.
@@ -303,10 +294,18 @@ KOKKOS_INLINE_FUNCTION void SerialRadixSort2(ValueType* values, ValueType* value
   static_assert(std::is_integral<ValueType>::value && std::is_unsigned<ValueType>::value,
                 "radixSort can only be run on unsigned integers.");
   if (n <= 1) return;
-  ValueType maxVal = 0;
+  // sort 4 bits at a time, into 16 buckets
+  constexpr ValueType mask = 0xF;
+  // Find the maximum value so we know how many passes to run,
+  // and at the same time do the first round of counting buckets
+  ValueType maxVal  = 0;
+  Ordinal count[16] = {0};
   for (Ordinal i = 0; i < n; i++) {
-    if (maxVal < values[i]) maxVal = values[i];
+    auto val = values[i];
+    count[val & mask]++;
+    if (maxVal < val) maxVal = val;
   }
+  // determine how many significant bits the data has
   int passes = 0;
   while (maxVal) {
     maxVal >>= 4;
@@ -314,48 +313,45 @@ KOKKOS_INLINE_FUNCTION void SerialRadixSort2(ValueType* values, ValueType* value
   }
   // Is the data currently held in values (false) or valuesAux (true)?
   bool inAux = false;
-  // sort 4 bits at a time, into 16 buckets
-  ValueType mask = 0xF;
   // maskPos counts the low bit index of mask (0, 4, 8, ...)
   Ordinal maskPos = 0;
+  Ordinal offset[16];
   for (int p = 0; p < passes; p++) {
-    // Count the number of elements in each bucket
-    Ordinal count[16] = {0};
-    Ordinal offset[17];
-    if (!inAux) {
-      for (Ordinal i = 0; i < n; i++) {
-        count[(values[i] & mask) >> maskPos]++;
-      }
-    } else {
-      for (Ordinal i = 0; i < n; i++) {
-        count[(valuesAux[i] & mask) >> maskPos]++;
-      }
-    }
     offset[0] = 0;
     // get offset as the prefix sum for count
-    for (Ordinal i = 0; i < 16; i++) {
+    for (Ordinal i = 0; i < 15; i++) {
       offset[i + 1] = offset[i] + count[i];
+      count[i]      = 0;
     }
     // now for each element in [lo, hi), move it to its offset in the other
     // buffer this branch should be ok because whichBuf is the same on all
     // threads
     if (!inAux) {
       for (Ordinal i = 0; i < n; i++) {
-        Ordinal bucket                                = (values[i] & mask) >> maskPos;
-        valuesAux[offset[bucket + 1] - count[bucket]] = values[i];
-        permAux[offset[bucket + 1] - count[bucket]]   = perm[i];
-        count[bucket]--;
+        auto val                  = values[i];
+        Ordinal bucket            = (val >> maskPos) & mask;
+        valuesAux[offset[bucket]] = val;
+        permAux[offset[bucket]]   = perm[i];
+        offset[bucket]++;
+        if (p < passes - 1) {
+          Ordinal nextBucket = (val >> (maskPos + 4)) & mask;
+          count[nextBucket]++;
+        }
       }
     } else {
       for (Ordinal i = 0; i < n; i++) {
-        Ordinal bucket                             = (valuesAux[i] & mask) >> maskPos;
-        values[offset[bucket + 1] - count[bucket]] = valuesAux[i];
-        perm[offset[bucket + 1] - count[bucket]]   = permAux[i];
-        count[bucket]--;
+        auto val               = valuesAux[i];
+        Ordinal bucket         = (val >> maskPos) & mask;
+        values[offset[bucket]] = valuesAux[i];
+        perm[offset[bucket]]   = permAux[i];
+        offset[bucket]++;
+        if (p < passes - 1) {
+          Ordinal nextBucket = (val >> (maskPos + 4)) & mask;
+          count[nextBucket]++;
+        }
       }
     }
     inAux = !inAux;
-    mask  = mask << 4;
     maskPos += 4;
   }
   // Move values back into main array if they are currently in aux.

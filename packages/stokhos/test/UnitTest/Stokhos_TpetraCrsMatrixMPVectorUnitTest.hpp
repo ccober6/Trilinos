@@ -935,7 +935,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(
       for (LocalOrdinal j=0; j<VectorSize; ++j)
         val.fastAccessCoeff(j) = generate_vector_coefficient<BaseScalar,size_t>(
           nrow, VectorSize, row, j);
-        x_view(i,0) = val;
+      x_view(i,0) = val;
     }
   }
 
@@ -1120,7 +1120,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(
 
   // Solve
   RCP<Tpetra_Vector> x = Tpetra::createVector<Scalar>(map);
-  typedef Kokkos::ArithTraits<BaseScalar> BST;
+  typedef KokkosKernels::ArithTraits<BaseScalar> BST;
   typedef typename BST::mag_type base_mag_type;
   typedef typename Tpetra_Vector::mag_type mag_type;
   base_mag_type btol = 1e-9;
@@ -1273,7 +1273,7 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(
 
   // Solve
   RCP<Tpetra_Vector> x = Tpetra::createVector<Scalar>(map);
-  typedef Kokkos::ArithTraits<BaseScalar> BST;
+  typedef KokkosKernels::ArithTraits<BaseScalar> BST;
   typedef typename BST::mag_type base_mag_type;
   typedef typename Tpetra_Vector::mag_type mag_type;
   base_mag_type btol = 1e-9;
@@ -2253,8 +2253,8 @@ TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL(
   // of iterations across the ensemble when not doing ensemble reductions
   belosParams->set("Implicit Residual Scaling", "None");
 
-  RCP<Belos::PseudoBlockCGSolMgr<BelosScalar,MV,OP,true> > solver =
-    rcp(new Belos::PseudoBlockCGSolMgr<BelosScalar,MV,OP,true>(problem, belosParams));
+  RCP<Belos::PseudoBlockCGSolMgr<BelosScalar,MV,OP> > solver =
+    rcp(new Belos::PseudoBlockCGSolMgr<BelosScalar,MV,OP>(problem, belosParams));
   Belos::ReturnType ret = solver->solve();
   TEST_EQUALITY_CONST( ret, Belos::Converged );
 

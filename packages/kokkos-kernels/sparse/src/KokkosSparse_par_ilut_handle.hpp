@@ -1,18 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #include <Kokkos_Core.hpp>
 #include <iostream>
@@ -52,13 +39,15 @@ class PAR_ILUTHandle {
   using nnz_scalar_t       = typename std::remove_const<scalar_t_>::type;
   using const_nnz_scalar_t = const nnz_scalar_t;
 
-  using float_t = typename Kokkos::ArithTraits<nnz_scalar_t>::mag_type;
+  using float_t = typename KokkosKernels::ArithTraits<nnz_scalar_t>::mag_type;
 
   using nnz_row_view_t = typename Kokkos::View<size_type *, HandlePersistentMemorySpace>;
 
   using nnz_lno_view_t = typename Kokkos::View<nnz_lno_t *, HandlePersistentMemorySpace>;
 
   using nnz_value_view_t = typename Kokkos::View<nnz_scalar_t *, HandlePersistentMemorySpace>;
+
+  using nnz_float_view_t = typename Kokkos::View<float_t *, HandlePersistentMemorySpace>;
 
   using signed_integral_t = typename std::make_signed<typename nnz_row_view_t::non_const_value_type>::type;
 

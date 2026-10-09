@@ -1,22 +1,7 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 4.0
-//       Copyright (2022) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
-// See https://kokkos.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//@HEADER
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #pragma once
-// exclude from Cuda builds without lambdas enabled
-#if !defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_CUDA_LAMBDA)
 #include <list>
 #include <limits>
 #include <Kokkos_Core.hpp>
@@ -988,8 +973,9 @@ class coarse_builder {
 
         ordinal_t old_remaining_count = remaining_count;
         if (!is_host_space && max_entries >= 128) {
-          Kokkos::parallel_reduce("hashmap time", team_policy_t(old_remaining_count, 1, 64), hashmapAccumulator,
-                                  remaining_count);
+          Kokkos::parallel_reduce("hashmap time",
+                                  team_policy_t(old_remaining_count, 1, team_policy_t::vector_length_max()),
+                                  hashmapAccumulator, remaining_count);
         } else {
           if (use_dyn) {
             Kokkos::parallel_reduce("hashmap time", dyn_policy_t(0, old_remaining_count, Kokkos::ChunkSize(128)),
@@ -1098,8 +1084,9 @@ class coarse_builder {
 
         ordinal_t old_remaining_count = remaining_count;
         if (!is_host_space && max_entries >= 128) {
-          Kokkos::parallel_reduce("hashmap time", dyn_team_policy_t(old_remaining_count, 1, 64), hashmapAccumulator,
-                                  remaining_count);
+          Kokkos::parallel_reduce("hashmap time",
+                                  dyn_team_policy_t(old_remaining_count, 1, dyn_team_policy_t::vector_length_max()),
+                                  hashmapAccumulator, remaining_count);
         } else {
           Kokkos::parallel_reduce("hashmap time", dyn_policy_t(0, old_remaining_count), hashmapAccumulator,
                                   remaining_count);
@@ -1225,6 +1212,8 @@ class coarse_builder {
     } else {
       auto execSpaceEnum = KokkosKernels::Impl::kk_get_exec_space_type<exec_space>();
       int vectorLength   = KokkosKernels::Impl::kk_get_suggested_vector_size(n, g.nnz(), execSpaceEnum);
+      vectorLength =
+          (vectorLength < team_policy_t::vector_length_max() ? vectorLength : team_policy_t::vector_length_max());
       team_policy_t dummy(1, 1, vectorLength);
       int teamSize = dummy.team_size_max(translateF, Kokkos::ParallelForTag());
       Kokkos::parallel_for("move edges to coarse matrix",
@@ -1617,6 +1606,8 @@ class coarse_builder {
     } else {
       auto execSpaceEnum = KokkosKernels::Impl::kk_get_exec_space_type<exec_space>();
       int vectorLength   = KokkosKernels::Impl::kk_get_suggested_vector_size(n, g.nnz(), execSpaceEnum);
+      vectorLength =
+          (vectorLength < team_policy_t::vector_length_max() ? vectorLength : team_policy_t::vector_length_max());
       team_policy_t dummy(1, 1, vectorLength);
       int teamSize = dummy.team_size_max(countF, Kokkos::ParallelForTag());
       // count edges per vertex
@@ -1719,5 +1710,3 @@ class coarse_builder {
 
 }  // end namespace Experimental
 }  // end namespace KokkosGraph
-// exclude from Cuda builds without lambdas enabled
-#endif

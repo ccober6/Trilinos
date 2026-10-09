@@ -1,181 +1,541 @@
+#include <Akri_DiagWriter.hpp>
+#include <Akri_DistributedVector.hpp>
 #include <Akri_Optimize.hpp>
+#include <Akri_OptimizeTypes.hpp>
+#include <krino/mesh_utils/Akri_AllReduce.hpp>
+#include <Akri_ObjectiveInterface.hpp>
 #include <stk_math/StkVector.hpp>
 #include <stk_util/util/ReportHandler.hpp>
+#include <deque>
 #include <functional>
+#include <iostream>
 #include <tuple>
 #include <vector>
 
 namespace krino {
 
-std::tuple<double,double> line_search_armijo_1d(const std::function<double(double)> & fn, const double f0, const double dirDeriv0, const double xmin)
-{
-  // Uses the interpolation algorithm (Armijo backtracking)
-
-  static constexpr double xmax = 1.;
-  static constexpr double c1 = 1.e-4;
-
-  double xk = xmax;
-  double fk = fn(xk);
-
-  if (fk <= f0 + c1*xk*dirDeriv0)
-    return {xk, fk};
-
-  double xkp1 = -dirDeriv0 * xk*xk / (2.*(fk - f0 - dirDeriv0 * xk));
-  double fkp1 = fn(xkp1);
-
-  if (fkp1 <= f0 + c1*xkp1*dirDeriv0)
-    return {xkp1, fkp1};
-
-  while (xkp1 > xmin)
-  {
-    const double factor = 1. / (xk*xk * xkp1*xkp1 * (xkp1-xk));
-    const double a = factor * (xk*xk * (fkp1 - f0 - dirDeriv0*xkp1) - xkp1*xkp1 * (fk - f0 - dirDeriv0*xk));
-    const double b = factor * (-std::pow(xk,3) * (fkp1 - f0 - dirDeriv0*xkp1) + std::pow(xkp1,3) * (fk - f0 - dirDeriv0*xk));
-    double xkp2 = (-b + std::sqrt(std::abs(b*b - 3 * a * dirDeriv0))) / (3.0*a);
-    const double fkp2 = fn(xkp2);
-
-    if (fkp2 <= f0 + c1*xkp2*dirDeriv0)
-      return {xkp2, fkp2};
-
-    if ((xkp1 - xkp2) > xkp1 / 2.0 || (1 - xkp2/xkp1) < 0.96)
-      xkp2 = xkp1 / 2.0;
-
-    xk = xkp1;
-    xkp1 = xkp2;
-    fk = fkp1;
-    fkp1 = fkp2;
-  }
-
-  return {0., f0};
-}
-
-std::vector<double> xpby(const std::vector<double> & x, const double b, const std::vector<double> & y)
-{
-  std::vector<double> result;
-  result.reserve(x.size());
-  for (size_t i=0; i<x.size(); ++i)
-    result.push_back(x[i]+b*y[i]);
-  return result;
-}
 
 stk::math::Vector3d xpby(const stk::math::Vector3d & x, const double b, const stk::math::Vector3d & y)
 {
   return x + b*y;
 }
 
-double Dot(const std::vector<double> & x, const std::vector<double> & y)
+stk::math::Vector3d scalar_times_vector(const double a, const stk::math::Vector3d & x)
 {
-  STK_ThrowAssert(x.size() == y.size());
-  double dot = 0.;
-  for (size_t i=0; i<x.size(); ++i)
-    dot += x[i]*y[i];
-  return dot;
+  return a*x;
+}
+
+stk::math::Vector3d vectorSubtract(const stk::math::Vector3d& a, const stk::math::Vector3d& b)
+{
+  return a-b;
+}
+
+template<typename Objective, typename VEC>
+double compute_scaled_value(const Objective & objFn, const double scale, const VEC &x)
+{
+  return objFn.compute_value(x)/scale;
+}
+
+template<typename Objective, typename VEC>
+void fill_scaled_gradient(const Objective & objFn, const double scale, const VEC &x,  VEC & grad)
+{
+  const double invScale = 1./scale;
+  objFn.fill_gradient(x,grad);
+  for (double & g : grad)
+    g *= invScale;
 }
 
 template<typename VEC>
-std::tuple<VEC,double> line_search_armijo_vector(const std::function<double(const VEC&)> & fn,
-    const VEC& x0,
-    const VEC& dir,
-    const double f0,
-    const VEC& gradf0,
-    const double xmin)
+void rescale(double & scale, double & f, VEC & grad, double & gradMag)
 {
-  const auto fn1d = [&](const double x1d) { return fn(xpby(x0, x1d, dir)); };
-  const double dirDeriv = Dot(dir, gradf0);
-  const auto & [x1d, obj] = line_search_armijo_1d(fn1d, f0, dirDeriv, xmin);
-  return { xpby(x0, x1d, dir), obj };
+  const double invScale = 1./f;
+
+  scale *= f;
+  f = 1.;
+
+  for (double & g : grad)
+    g *= invScale;
+
+  gradMag *= invScale;
 }
 
-template<typename VEC>
-VEC zero_vector(const size_t);
-
-template<>
-stk::math::Vector3d zero_vector<stk::math::Vector3d>(const size_t) { return stk::math::Vector3d::ZERO; }
-
-template<>
-std::vector<double> zero_vector<std::vector<double>>(const size_t n) { return std::vector<double>(n, 0.); }
-
-
-template<typename VEC>
-VEC bfgs(const std::function<double(const VEC&)> & fn,
-    const std::function<VEC(const VEC&)> & gradient,
-    const VEC& x0,
-    const double tol,
-    const int maxIter)
+template<typename Objective, typename VEC>
+void project_solution(const Objective & objFn, VEC &x)
 {
-  size_t n = x0.size();
-  VEC x = x0;
-  std::vector<VEC> H(n, zero_vector<VEC>(n));
+  objFn.project_solution(x);
+}
 
-  // Initialize H as the identity matrix
-  for (size_t i = 0; i < n; ++i)
-    H[i][i] = 1.0;
+//----------------------------------------
+// Cubic minimizer in [xLo, xHi]
+//   matches phi & dphi at both ends.
+// If the root is outside [lo+eps, hi-eps], falls back to midpoint.
+//----------------------------------------
+double cubic_minimizer(
+    const double xLo,  const double xHi,
+    const double fLo,  const double fHi,
+    const double dfLo, const double dfHi,
+    const bool doAvoidSmallSteps)
+{
+    // compute coefficients of the interpolating cubic’s derivative
+    const double d1 = dfLo + dfHi - 3.0*(fLo - fHi)/(xLo - xHi);
+    const double d2sq = d1*d1 - dfLo*dfHi;
+    const double d2   = (d2sq > 0.0 ? std::sqrt(d2sq) : 0.0);
 
-  VEC g = gradient(x);
-  int iter = 0;
+    const double numerator   = (xHi - xLo)*(dfHi + d2 - d1);
+    const double denominator = (dfHi - dfLo + 2.0*d2);
+    double xCubic = xHi - (denominator != 0.0 ? numerator/denominator : 0.5*(xLo + xHi));
+    if (!doAvoidSmallSteps)
+      return std::max(xLo,std::min(xHi,xCubic));
 
-  while (std::sqrt(Dot(g,g)) > tol && iter < maxIter)
-  {
-    // Compute the search direction
-    VEC p = zero_vector<VEC>(n);
-    for (size_t i = 0; i < n; ++i)
+    // clamp to [lo+tol, hi-tol] to avoid too-small steps
+    const double tol = 0.1;
+    const double loBound = std::min(xLo, xHi) + tol*std::abs(xHi - xLo);
+    const double hiBound = std::max(xLo, xHi) - tol*std::abs(xHi - xLo);
+    if (xCubic < loBound || xCubic > hiBound)
+      xCubic = 0.5*(xLo + xHi);
+    return xCubic;
+}
+
+//----------------------------------------
+// Zoom phase: given bracket [alphaLo,alphaHi],
+// shrink it via cubic interpolation until
+// Wolfe condition is satisfied (or max_iters).
+//----------------------------------------
+template<typename Objective, typename VEC>
+void zoom_cubic(
+    const Objective & objFn,
+    const double scale,
+    const VEC &x0, const VEC &p,
+    double alphaLo, double alphaHi,
+    double fLo,   double fHi,
+    double dfLo,  double dfHi,
+    VEC & x,
+    double & f,
+    VEC & grad,
+    const double minAlpha,
+    const double c1, const double c2)
+{
+    const double f0 = fLo;
+    const double df0 = dfLo;
+    bool doAvoidSmallSteps = false;
+
+    unsigned iter = 0;
+    while(std::abs(alphaHi - alphaLo) > minAlpha)
     {
-        p[i] = -H[i][i] * g[i]; // Simplified for identity matrix
-    }
+        if (iter++ > 2)
+          doAvoidSmallSteps = true;
 
-    const auto [x_new, f_new] = line_search_armijo_vector(fn, x, p, fn(x), g);
+        // trial point by cubic interpolation
+        double alpha_j = cubic_minimizer( alphaLo, alphaHi, fLo,   fHi, dfLo,  dfHi, doAvoidSmallSteps);
+        x = xpby(x0, alpha_j, p);
+        f = compute_scaled_value(objFn, scale, x);
+        fill_scaled_gradient(objFn, scale, x, grad);
+        const double df = Dot(grad, p);
 
-    VEC s = zero_vector<VEC>(n);
-    for (size_t i = 0; i < n; ++i)
-        s[i] = x_new[i] - x[i];
+        // check Armijo:
+        if (f > f0 + c1*alpha_j*df0 || f >= fLo)
+        {
+            // insufficient decrease → shrink right end
+            alphaHi = alpha_j;
+            fHi   = f;
+            dfHi  = df;
+        }
+        else
+        {
+            // Armijo ok, check curvature:
+            if (df >= c2*df0)
+            {
+                return;  // Wolfe satisfied
+            }
 
-    if (Dot(s,s) == 0.)
-    {
-      return x;
-    }
-
-    VEC g_new = gradient(x_new);
-
-    VEC y = zero_vector<VEC>(n);
-    for (size_t i = 0; i < n; ++i)
-        y[i] = g_new[i] - g[i];
-
-    if (Dot(y,s) == 0.)
-    {
-      return x;
-    }
-
-    // Update H using the BFGS formula
-    const double rho = 1.0 / Dot(y,s);
-    std::vector<VEC> Hs(n, zero_vector<VEC>(n));
-    for (size_t i = 0; i < n; ++i) {
-        for (size_t j = 0; j < n; ++j) {
-            Hs[i][j] = H[i][j] + rho * (s[i] * y[j] + y[i] * s[j]) - (rho * Dot(y,H[i]) * s[i] * s[j]);
+            // curvature failed
+            if (df*(alphaHi - alphaLo) >= 0.0)
+            {
+                // force bracket to have opposite slope
+                alphaHi = alphaLo;
+                fHi   = fLo;
+                dfHi  = dfLo;
+            }
+            // shrink left end
+            alphaLo = alpha_j;
+            fLo   = f;
+            dfLo  = df;
         }
     }
-    H = Hs;
 
-    // Update x and g
-    x = x_new;
-    g = g_new;
-    iter++;
-  }
-
-  return x;
+    if (f >= f0)
+    {
+      // fallback: go back to x0 solution
+      x = x0;
+      f = f0;
+      fill_scaled_gradient(objFn, scale, x, grad);
+    }
 }
 
-template stk::math::Vector3d bfgs(const std::function<double(const stk::math::Vector3d&)> & fn,
-    const std::function<stk::math::Vector3d(const stk::math::Vector3d&)> & gradient,
-    const stk::math::Vector3d& x0,
-    const double tol,
-    const int maxIter);
+template<typename Objective, typename VEC>
+void line_search_wolfe_cubic(const Objective & objFn,
+    const double scale,
+    const VEC &x0,
+    const double f0,
+    const VEC &grad0,
+    const VEC &p,       // descent dir: grad(x)^T p < 0
+    VEC & x,
+    double & f,
+    VEC & grad,
+    const double minAlpha,
+    const double c1 = 1e-4,  // Armijo param
+    const double c2 = 0.9)   // curvature param (Wolfe)
+{
+    // evaluate at alpha=0
+    const double df0 = Dot(grad0, p);
+    if (df0 >= 0)
+    {
+      x = x0;
+      f = f0;
+      grad = grad0;
+      return;
+    }
 
-template std::vector<double> bfgs(const std::function<double(const std::vector<double>&)> & fn,
-    const std::function<std::vector<double>(const std::vector<double>&)> & gradient,
-    const std::vector<double>& x0,
-    const double tol,
-    const int maxIter);
+    // evaluate at alpha
+    double alpha = 1.0;
+    x = xpby(x0, alpha, p);
+    f = compute_scaled_value(objFn, scale, x);
 
+    while (!std::isfinite(f) || (f > f0 + c1*alpha*df0)) // Armijo
+    {
+      alpha *= 0.5;
+
+      if (alpha < minAlpha)
+      {
+        x = x0;
+        f = f0;
+        grad = grad0;
+        return;
+      }
+
+      x = xpby(x0, alpha, p);
+      f = compute_scaled_value(objFn, scale, x);
+    }
+
+    fill_scaled_gradient(objFn, scale, x, grad);
+    const double df = Dot(grad, p);
+
+    // unless alpha already satisfies Armijo and strong Wolfe, and is still decreasing, use bracketed cubic minimizer
+    if (df > 0 || std::abs(df) > -c2*df0)
+    {
+      zoom_cubic(objFn, scale,
+          x0, p,
+          /*alphaLo=*/0.0,/*alphaHi=*/alpha,
+          /*fLo=*/f0, /*fHi=*/f,
+          /*dfLo=*/df0, /*dfHi=*/df,
+          x, f, grad,
+          minAlpha,
+          c1, c2);
+    }
+}
+
+template<typename Objective, typename VEC>
+void line_search_armijo(const Objective & objFn,
+    const double scale,
+    const VEC & x0,
+    const double f0,
+    const VEC & grad0,
+    const VEC & p,
+    VEC & x,
+    double & f,
+    const double c1 = 1.e-4,
+    const unsigned maxIters = 45)
+{
+  const double gradDotP = Dot(grad0, p); // Directional derivative
+  if (gradDotP >= 0)
+  {
+    x = x0;
+    f = f0;
+    return;
+  }
+
+  double alpha = 1.0; // Start with maximum step size
+
+  for(unsigned iter=0; iter<maxIters; ++iter)
+  {
+    x = xpby(x0, alpha, p);
+    f = compute_scaled_value(objFn, scale, x);
+
+    // Check Armijo condition (sufficient decrease)
+    if (f <= f0 + c1 * alpha * gradDotP) // won't eval to true if f is NaN
+      return;
+
+    alpha *= 0.5; // Reduce step size
+  }
+
+  if (f >= f0)
+  {
+    x = x0; // Fallback to 0 step
+    f = f0;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Memory-update helper for L-BFGS
+// -----------------------------------------------------------------------------
+template<typename VEC>
+void update_LBFGS_Memory(
+    std::deque<VEC>& sList,
+    std::deque<VEC>& yList,
+    std::deque<double>& rhoList,
+    const VEC& s,
+    const VEC& y,
+    const unsigned maxLevels)
+{
+    const double ys = Dot(y, s);
+    if (ys <= 0.0)
+    {
+        // curvature condition failed; skip update
+        return;
+    }
+
+    const double rho = 1.0 / ys;
+
+    // if we're already storing m pairs, drop the oldest
+    if (sList.size() == maxLevels)
+    {
+        sList.pop_front();
+        yList.pop_front();
+        rhoList.pop_front();
+    }
+
+    sList.push_back(s);
+    yList.push_back(y);
+    rhoList.push_back(rho);
+}
+
+template<typename VEC>
+void reset_LBFGS_Memory(std::deque<VEC>& sList, std::deque<VEC>& yList, std::deque<double>& rhoList)
+{
+    sList.clear();
+    yList.clear();
+    rhoList.clear();
+}
+
+// -----------------------------------------------------------------------------
+// Two-loop recursion to compute H_k * grad (search direction)
+// -----------------------------------------------------------------------------
+template<typename VEC>
+VEC compute_LBFGS_Hgrad(
+    const VEC& grad,
+    const std::deque<VEC>& sList,
+    const std::deque<VEC>& yList,
+    const std::deque<double>& rhoList)
+{
+    const unsigned numLevels = sList.size();
+    VEC q = grad;
+    std::vector<double> alpha(numLevels);
+    std::vector<double> beta(numLevels);
+
+    // backward loop
+    for (int i = numLevels - 1; i >= 0; --i)
+    {
+        alpha[i] = rhoList[i] * Dot(sList[i], q);
+        q = xpby(q, -alpha[i], yList[i]);
+    }
+
+    // initial Hessian-scaling: gamma * I
+    double gamma = 1.0;
+    if (numLevels > 0)
+    {
+        const auto& sLast = sList.back();
+        const auto& yLast = yList.back();
+        const double sy = Dot(sLast, yLast);
+        const double yy = Dot(yLast, yLast);
+        if (yy > 1e-20)
+            gamma = sy / yy;
+    }
+    VEC r = scalar_times_vector(gamma, q);
+
+    // forward loop
+    for (unsigned i = 0; i < numLevels; ++i)
+    {
+        beta[i] = rhoList[i] * Dot(yList[i], r);
+        r = xpby(r, alpha[i] - beta[i], sList[i]);
+    }
+
+    return r;  // this is H_k * grad
+}
+
+// -----------------------------------------------------------------------------
+// L-BFGS optimizer
+// -----------------------------------------------------------------------------
+template<typename Objective, typename VEC>
+void lbfgs(const Objective & objFn,
+    VEC& x,
+    const double xTol,
+    const double gradTol,
+    const double scale0,
+    const unsigned maxIter,
+    const unsigned maxLevels,
+    const bool doOutput)
+{
+    double scale = scale0;
+    std::deque<VEC> sList, yList;
+    std::deque<double> rhoList;
+
+    double f = compute_scaled_value(objFn, scale, x);
+    VEC grad;
+    fill_scaled_gradient(objFn, scale, x, grad);
+
+    double gradMag = std::sqrt(Dot(grad, grad));
+    double dxMag = 0.;
+
+    for (unsigned iter = 0; iter < maxIter; ++iter)
+    {
+        if (gradMag < gradTol)
+        {
+          if (doOutput)
+            krinolog << "Gradient converged at iteration " << iter << stk::diag::dendl;
+          return;
+        }
+
+        // compute search direction p = - H_k * grad
+        const VEC Hgrad = compute_LBFGS_Hgrad(grad, sList, yList, rhoList);
+        const VEC p = scalar_times_vector(-1., Hgrad);
+
+        const double minAlpha = std::max(1.0e-14, std::min(1., xTol / std::sqrt(Dot(p, p))));
+
+        const auto xOld = x;
+        const auto gradOld = grad;
+        const double gradMagOld = gradMag;
+        const double fOld = f;
+        line_search_wolfe_cubic(objFn, scale, xOld, fOld, gradOld, p, x, f, grad, minAlpha);
+        project_solution(objFn, x);
+
+        const VEC s = vectorSubtract(x, xOld);
+        dxMag = std::sqrt(Dot(s,s));
+        if (doOutput)
+          krinolog << "L-BFGS iteration " << iter << ", |f|= " << std::abs(f*scale/scale0) << ", |grad|= " << gradMag*scale/scale0 << ", |dx|= " << dxMag << stk::diag::dendl;
+
+        if (dxMag < xTol)
+        {
+          if (doOutput)
+            krinolog << "Solution converged at iteration " << stk::diag::dendl;
+          return;
+        }
+
+        gradMag = std::sqrt(Dot(grad, grad));
+
+        if (gradMag < xTol*gradMagOld)
+        {
+          if (doOutput)
+            krinolog << "Restarting/rescaling due to large drop in gradient magnitude " << gradMag/gradMagOld << "\n";
+          rescale(scale, f, grad, gradMag);
+          reset_LBFGS_Memory(sList, yList, rhoList);
+        }
+        else
+        {
+          const auto y = vectorSubtract(grad, gradOld);
+          update_LBFGS_Memory(sList, yList, rhoList, s, y, maxLevels);
+        }
+    }
+
+    krinolog << "Reached max iterations " << maxIter<< ", |f|= " << std::abs(f) << ", |grad|= " << gradMag << ", |dx|= " << dxMag << stk::diag::dendl;
+    return;
+}
+
+template<typename Objective, typename VEC>
+void steepest_descent(const Objective & objFn,
+    VEC& x,
+    const double xTol,
+    const double gradTol,
+    const double scale,
+    const unsigned maxIter,
+    const bool doOutput)
+{
+  VEC grad;
+  fill_scaled_gradient(objFn, scale, x, grad);
+  double f = compute_scaled_value(objFn, scale, x);
+
+  double gradMag = std::sqrt(Dot(grad, grad));
+  if (gradMag == 0.)
+    return;
+  double scaling = 1.0/gradMag;
+
+  double dxSqr = 0.;
+
+  for (unsigned iter = 0; iter < maxIter; ++iter)
+  {
+    gradMag = std::sqrt(Dot(grad, grad));
+    if (gradMag < gradTol)
+    {
+      if (doOutput)
+        krinolog << "Gradient converged at iteration " << iter << stk::diag::dendl;
+      return;
+    }
+
+    // Compute the search direction
+    const VEC p = scalar_times_vector(-scaling, grad);
+
+    const auto xOld = x;
+    const auto gradOld = grad;
+    const double fOld = f;
+    line_search_armijo(objFn, scale, xOld, fOld, gradOld, p, x, f);
+    project_solution(objFn, x);
+
+    const VEC s = vectorSubtract(x, xOld);
+    dxSqr = Dot(s,s);
+    if (doOutput)
+      krinolog << "Steepest descent iteration " << iter << ", |f|= " << std::abs(f) << ", |grad|= " << gradMag << ", |dx|= " << std::sqrt(dxSqr) << stk::diag::dendl;
+    if (std::sqrt(dxSqr) < xTol)
+    {
+      krinolog << "Solution converged at iteration " << iter << stk::diag::dendl;
+      return;
+    }
+
+    fill_scaled_gradient(objFn, scale, x, grad);
+    const VEC y = vectorSubtract(grad, gradOld);
+    const double ys = Dot(y, s);
+    if (ys > 0.)
+      scaling = std::min(1.e6,std::max(1.e-6,dxSqr/ys)); //Barzilai–Borwein
+  }
+
+  krinolog << "Reached max iterations " << maxIter << ", |grad|= " << std::sqrt(Dot(grad,grad)) << ", |dx|= " << std::sqrt(dxSqr) << stk::diag::dendl;
+}
+
+template
+void steepest_descent(const Objective3DInterface & objFn,
+    stk::math::Vector3d & x,
+    const double xTol,
+    const double gradTol,
+    const double scale,
+    const unsigned maxIter,
+    const bool doOutput);
+
+template
+void steepest_descent(const ObjectiveInterface & objFn,
+    DistributedVector & x,
+    const double xTol,
+    const double gradTol,
+    const double scale,
+    const unsigned maxIter,
+    const bool doOutput);
+
+template
+void lbfgs(const Objective3DInterface & objFn,
+    stk::math::Vector3d & x,
+    const double xTol,
+    const double gradTol,
+    const double scale,
+    const unsigned maxIter,
+    const unsigned maxLevels,
+    const bool doOutput);
+
+template
+void lbfgs(const ObjectiveInterface & objFn,
+    DistributedVector & x,
+    const double xTol,
+    const double gradTol,
+    const double scale,
+    const unsigned maxIter,
+    const unsigned maxLevels,
+    const bool doOutput);
 
 }
 

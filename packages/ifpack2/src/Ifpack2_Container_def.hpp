@@ -11,6 +11,7 @@
 #define IFPACK2_CONTAINER_DEF_HPP
 
 #include <Ifpack2_Details_MultiVectorLocalGatherScatter.hpp>
+#include "Ifpack2_Details_Behavior.hpp"
 #include <Teuchos_Time.hpp>
 
 namespace Ifpack2 {
@@ -47,32 +48,32 @@ Container<MatrixType>::Container(
   else
     scalarsPerRow_ = 1;
   setBlockSizes(partitions);
-// Sanity check the partitions
-#ifdef HAVE_IFPACK2_DEBUG
-  // Check whether the input set of local row indices is correct.
-  const map_type& rowMap = *inputMatrix_->getRowMap();
-  for (int i = 0; i < numBlocks_; i++) {
-    Teuchos::ArrayView<const LO> blockRows = getBlockRows(i);
-    for (LO j = 0; j < blockSizes_[i]; j++) {
-      LO row = blockRows[j];
-      if (pointIndexed) {
-        // convert the point row to the corresponding block row
-        row /= bcrsBlockSize_;
+  // Sanity check the partitions
+  if (Ifpack2::Details::Behavior::debug()) {
+    // Check whether the input set of local row indices is correct.
+    const map_type& rowMap = *inputMatrix_->getRowMap();
+    for (int i = 0; i < numBlocks_; i++) {
+      Teuchos::ArrayView<const LO> blockRows = getBlockRows(i);
+      for (LO j = 0; j < blockSizes_[i]; j++) {
+        LO row = blockRows[j];
+        if (pointIndexed) {
+          // convert the point row to the corresponding block row
+          row /= bcrsBlockSize_;
+        }
+        TEUCHOS_TEST_FOR_EXCEPTION(
+            !rowMap.isNodeLocalElement(row),
+            std::invalid_argument,
+            "Ifpack2::Container: "
+            "On process "
+                << rowMap.getComm()->getRank() << " of "
+                << rowMap.getComm()->getSize() << ", in the given set of local row "
+                                                  "indices blockRows = "
+                << Teuchos::toString(blockRows) << ", the following "
+                                                   "entries is not valid local row index on the calling process: "
+                << row << ".");
       }
-      TEUCHOS_TEST_FOR_EXCEPTION(
-          !rowMap.isNodeLocalElement(row),
-          std::invalid_argument,
-          "Ifpack2::Container: "
-          "On process "
-              << rowMap.getComm()->getRank() << " of "
-              << rowMap.getComm()->getSize() << ", in the given set of local row "
-                                                "indices blockRows = "
-              << Teuchos::toString(blockRows) << ", the following "
-                                                 "entries is not valid local row index on the calling process: "
-              << row << ".");
     }
   }
-#endif
 }
 
 template <class MatrixType>
@@ -131,13 +132,13 @@ bool Container<MatrixType>::isComputed() const {
 
 template <class MatrixType>
 void Container<MatrixType>::
-    applyMV(const mv_type& X, mv_type& Y) const {
+    applyMV(const mv_type& /*X*/, mv_type& /*Y*/) const {
   TEUCHOS_TEST_FOR_EXCEPT_MSG(true, "Not implemented.");
 }
 
 template <class MatrixType>
 void Container<MatrixType>::
-    weightedApplyMV(const mv_type& X, mv_type& Y, vector_type& W) const {
+    weightedApplyMV(const mv_type& /*X*/, mv_type& /*Y*/, vector_type& /*W*/) const {
   TEUCHOS_TEST_FOR_EXCEPT_MSG(true, "Not implemented.");
 }
 
@@ -148,8 +149,8 @@ std::string Container<MatrixType>::
 }
 
 template <class MatrixType>
-void Container<MatrixType>::DoGSBlock(ConstHostView X, HostView Y, HostView Y2, HostView Resid,
-                                      SC dampingFactor, LO i) const {
+void Container<MatrixType>::DoGSBlock(ConstHostView /*X*/, HostView /*Y*/, HostView /*Y2*/, HostView /*Resid*/,
+                                      SC /*dampingFactor*/, LO /*i*/) const {
   TEUCHOS_TEST_FOR_EXCEPT_MSG(true, "Not implemented.");
 }
 
@@ -229,7 +230,7 @@ void Container<MatrixType>::DoOverlappingJacobi(ConstHostView X, HostView Y, Con
 // This is used 3 times: once in DoGaussSeidel and twice in DoSGS
 template <class MatrixType, typename LocalScalarType>
 void ContainerImpl<MatrixType, LocalScalarType>::DoGSBlock(
-    ConstHostView X, HostView Y, HostView Y2, HostView Resid,
+    ConstHostView X, HostView /*Y*/, HostView Y2, HostView Resid,
     SC dampingFactor, LO i) const {
   using Teuchos::ArrayView;
   using STS      = Teuchos::ScalarTraits<ISC>;
@@ -445,7 +446,7 @@ void ContainerImpl<MatrixType, LocalScalarType>::
 template <class MatrixType, class LocalScalarType>
 void ContainerImpl<MatrixType, LocalScalarType>::
     applyInverseJacobi(const mv_type& /* X */, mv_type& /* Y */,
-                       SC dampingFactor,
+                       SC /*dampingFactor*/,
                        bool /* zeroStartingSolution = false */,
                        int /* numSweeps = 1 */) const {
   TEUCHOS_TEST_FOR_EXCEPT_MSG(true, "Not implemented.");
@@ -478,12 +479,12 @@ std::string ContainerImpl<MatrixType, LocalScalarType>::
 
 template <class MatrixType, class LocalScalarType>
 void ContainerImpl<MatrixType, LocalScalarType>::
-    solveBlock(ConstHostSubviewLocal X,
-               HostSubviewLocal Y,
-               int blockIndex,
-               Teuchos::ETransp mode,
-               const LSC alpha,
-               const LSC beta) const {
+    solveBlock(ConstHostSubviewLocal /*X*/,
+               HostSubviewLocal /*Y*/,
+               int /*blockIndex*/,
+               Teuchos::ETransp /*mode*/,
+               const LSC /*alpha*/,
+               const LSC /*beta*/) const {
   TEUCHOS_TEST_FOR_EXCEPT_MSG(true, "Not implemented.");
 }
 
@@ -874,10 +875,10 @@ StridedRowView<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 Scalar StridedRowView<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     val(size_t i) const {
-#ifdef HAVE_IFPACK2_DEBUG
-  TEUCHOS_TEST_FOR_EXCEPTION(i >= nnz, std::runtime_error,
-                             "Out-of-bounds access into Ifpack2::Container::StridedRowView");
-#endif
+  if (Ifpack2::Details::Behavior::debug()) {
+    TEUCHOS_TEST_FOR_EXCEPTION(i >= nnz, std::runtime_error,
+                               "Out-of-bounds access into Ifpack2::Container::StridedRowView");
+  }
   if (vals.size() > 0) {
     if (blockSize == 1)
       return vals[i];
@@ -890,10 +891,10 @@ Scalar StridedRowView<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
 template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
 LocalOrdinal StridedRowView<Scalar, LocalOrdinal, GlobalOrdinal, Node>::
     ind(size_t i) const {
-#ifdef HAVE_IFPACK2_DEBUG
-  TEUCHOS_TEST_FOR_EXCEPTION(i >= nnz, std::runtime_error,
-                             "Out-of-bounds access into Ifpack2::Container::StridedRowView");
-#endif
+  if (Ifpack2::Details::Behavior::debug()) {
+    TEUCHOS_TEST_FOR_EXCEPTION(i >= nnz, std::runtime_error,
+                               "Out-of-bounds access into Ifpack2::Container::StridedRowView");
+  }
   // inds is smaller than vals by a factor of the block size (dofs/node)
   if (inds.size() > 0) {
     if (blockSize == 1)
